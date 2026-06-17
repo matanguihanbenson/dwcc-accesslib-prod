@@ -1,0 +1,67 @@
+import { PrismaClient } from '@prisma/client'
+import logger from './logger'
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+}
+
+const prismaConfig = {
+  log: (process.env.NODE_ENV === 'development' 
+    ? ['query', 'info', 'warn', 'error']
+    : ['error']) as any, 
+  datasources: {
+    db: {
+      url: process.env.DATABASE_POSTGRES_URL,
+    },
+  },
+}
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient(prismaConfig)
+
+if (process.env.NODE_ENV === 'development') {
+  try {
+    if (prisma && typeof (prisma as any).$on === 'function') {
+      (prisma as any).$on('query', (e: any) => {
+        if (process.env.DEBUG_QUERIES === 'true') {
+          logger.debug('Database Query', {
+            query: e.query,
+            duration: `${e.duration}ms`,
+            params: e.params,
+          })
+        }
+      })
+
+      (prisma as any).$on('error', (e: any) => {
+        logger.error('Database Error', new Error(e.message), {
+          target: e.target,
+        })
+      })
+    }
+  } catch (error) {
+  }
+}
+
+if (process.env.NODE_ENV === 'production') {
+  try {
+    if (prisma && typeof (prisma as any).$on === 'function') {
+      (prisma as any).$on('error', (e: any) => {
+        console.error('Database Error:', e.message)
+      })
+    }
+  } catch (error) {
+  }
+}
+
+process.on('beforeExit', async () => {
+  await prisma.$disconnect()
+})
+
+if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+  process.env.DATABASE_URL = process.env.DATABASE_URL?.includes('connection_limit=') 
+    ? process.env.DATABASE_URL 
+    : `${process.env.DATABASE_URL}${process.env.DATABASE_URL?.includes('?') ? '&' : '?'}connection_limit=1&pool_timeout=20&connect_timeout=60`
+}
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma
+}

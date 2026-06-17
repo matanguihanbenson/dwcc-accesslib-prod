@@ -1,0 +1,783 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  user_id             Int                 @id @default(autoincrement())
+  account_id          String              @unique @db.VarChar(20)
+  first_name          String              @db.VarChar(50)
+  last_name           String              @db.VarChar(50)
+  middle_name         String?             @db.VarChar(50)
+  suffix              String?             @db.VarChar(10)
+  full_name           String?             @db.VarChar(100)
+  user_type           UserType
+  department_id       Int?
+  program_id          Int?
+  office_id           Int?
+  year_level          String?             @db.VarChar(10)
+  education_level     EducationLevel?
+  grade_level_id      Int?
+  section_id          Int?
+  strand_id           Int?
+  email               String?             @unique @db.VarChar(100)
+  rfid_code           String?             @unique @db.VarChar(50)
+  purpose             String?             @db.VarChar(100)
+  contact_number      String?             @db.VarChar(20)
+  status              UserStatus          @default(ACTIVE)
+  created_at          DateTime            @default(now()) @db.Timestamp(0)
+  updated_at          DateTime            @updatedAt
+  archived_at         DateTime?           @db.Timestamp(0)
+  book_transactions   BookTransaction[]
+  entry_logs          EntryLog[]
+  locker_transactions LockerTransaction[]
+  notification_logs   NotificationLog[]
+  overdue_settlements OverdueSettlement[] @relation("BorrowerSettlements")
+  processed_settlements OverdueSettlement[] @relation("ProcessedSettlements")
+  report_logs         ReportLog[]
+  department_ref      Department?         @relation(fields: [department_id], references: [department_id])
+  program             Program?            @relation(fields: [program_id], references: [program_id])
+  office_ref          Office?             @relation(fields: [office_id], references: [office_id])
+  grade_level         GradeLevel?         @relation(fields: [grade_level_id], references: [grade_level_id])
+  section             Section?            @relation(fields: [section_id], references: [section_id])
+  strand              Strand?             @relation(fields: [strand_id], references: [strand_id])
+  user_account        UserAccount?
+  export_jobs         ExportJob[]
+
+  @@index([department_id])
+  @@index([program_id])
+  @@index([office_id])
+  @@index([grade_level_id])
+  @@index([section_id])
+  @@index([strand_id])
+  @@index([created_at])
+  @@index([last_name])
+  @@index([first_name])
+  @@index([archived_at])
+  @@map("user")
+}
+
+model UserAccount {
+  id             Int        @id @default(autoincrement())
+  username       String     @unique @db.VarChar(50)
+  password_hash  String     @db.Text
+  role           UserRole
+  last_login     DateTime?  @db.Timestamp(0)
+  login_attempts Int        @default(0)
+  locked_until   DateTime?  @db.Timestamp(0)
+  user_id        Int        @unique
+  created_at     DateTime   @default(now()) @db.Timestamp(0)
+  updated_at     DateTime?  @db.Timestamp(0)
+  is_active      Boolean    @default(true)
+  audit_logs     AuditLog[]
+  sessions       Session[]
+  user           User       @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([last_login])
+  @@index([locked_until])
+  @@map("user_account")
+}
+
+model BookCategory {
+  category_id Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  books       Book[]
+
+  @@map("book_category")
+}
+
+model BookSection {
+  section_id  Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  books       Book[]
+
+  @@index([is_active])
+  @@map("book_section")
+}
+
+model Book {
+  book_id           Int               @id @default(autoincrement())
+  title             String            @db.VarChar(300)
+  isbn              String?           @db.VarChar(20)
+  publisher         String?           @db.VarChar(200)
+  year_published    Int?
+  copies_total      Int               @default(1)
+  copies_available  Int               @default(1)
+  category_id       Int
+  section_id        Int?
+  status            BookStatus        @default(AVAILABLE)
+  location          String?           @db.VarChar(100)
+  description       String?           @db.Text
+  language          String?           @db.VarChar(50)
+  pages             Int?
+  edition           String?           @db.VarChar(100)
+  created_at        DateTime          @default(now()) @db.Timestamp(0)
+  updated_at        DateTime          @updatedAt
+  archived_at       DateTime?         @db.Timestamp(0)
+  created_by        Int?
+  extent            String?           @db.VarChar(200)
+  fountas_pinnell   String?           @db.VarChar(10)
+  interest_level    String?           @db.VarChar(50)
+  issn              String?           @db.VarChar(20)
+  lccn              String?           @db.VarChar(50)
+  lexile_code       String?           @db.VarChar(50)
+  material_type     MaterialType      @default(BOOK)
+  notes             String?           @db.Text
+  other_details     String?           @db.Text
+  publication_date  String?           @db.VarChar(50)
+  publication_place String?           @db.VarChar(200)
+  series_title      String?           @db.VarChar(300)
+  size              String?           @db.VarChar(50)
+  subtitle          String?           @db.VarChar(300)
+  subtype           String?           @db.VarChar(50)
+  summary           String?           @db.Text
+  uniform_title     String?           @db.VarChar(300)
+  updated_by        Int?
+  varying_form      String?           @db.VarChar(300)
+  volume_number     String?           @db.VarChar(50)
+  alternate_titles  AlternateTitle[]
+  category          BookCategory      @relation(fields: [category_id], references: [category_id])
+  section           BookSection?      @relation(fields: [section_id], references: [section_id])
+  authors           BookAuthor[]
+  contributors      BookContributor[]
+  links             BookLink[]
+  book_transactions BookTransaction[]
+  digital_content   DigitalContent[]
+  book_copies       BookCopy[]
+
+  @@index([category_id])
+  @@index([section_id])
+  @@index([title])
+  @@index([isbn])
+  @@index([issn])
+  @@index([lccn])
+  @@index([created_at])
+  @@index([archived_at])
+  @@index([category_id], map: "book_category_id_fkey")
+  @@map("book")
+}
+
+model BookCopy {
+  copy_id           Int               @id @default(autoincrement())
+  book_id           Int
+  accession_number  String            @unique @db.VarChar(20)
+  barcode           String?           @db.VarChar(50)
+  condition         BookCondition     @default(GOOD)
+  status            BookCopyStatus    @default(AVAILABLE)
+  location          String?           @db.VarChar(100)
+  notes             String?           @db.Text
+  acquisition_date  DateTime?         @db.Timestamp(0)
+  created_at        DateTime          @default(now()) @db.Timestamp(0)
+  updated_at        DateTime          @updatedAt
+  archived_at       DateTime?         @db.Timestamp(0)
+  book              Book              @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+  book_transactions BookTransaction[]
+
+  @@index([book_id])
+  @@index([accession_number])
+  @@index([barcode])
+  @@index([archived_at])
+  @@map("book_copy")
+}
+
+model AccessionNumberSequence {
+  id          Int      @id @default(autoincrement())
+  last_number Int      @default(0)
+  prefix      String   @default("LIB") @db.VarChar(10)
+  updated_at  DateTime @updatedAt
+
+  @@map("accession_number_sequence")
+}
+
+model BookAuthor {
+  id            Int      @id @default(autoincrement())
+  book_id       Int
+  name          String   @db.VarChar(200)
+  dates         String?  @db.VarChar(100)
+  display_order Int      @default(1)
+  created_at    DateTime @default(now()) @db.Timestamp(0)
+  book          Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+
+  @@index([book_id])
+  @@map("book_author")
+}
+
+model BookContributor {
+  id            Int      @id @default(autoincrement())
+  book_id       Int
+  name          String   @db.VarChar(200)
+  role          String   @db.VarChar(100)
+  dates         String?  @db.VarChar(100)
+  display_order Int      @default(1)
+  created_at    DateTime @default(now()) @db.Timestamp(0)
+  book          Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+
+  @@index([book_id])
+  @@map("book_contributor")
+}
+
+model AlternateTitle {
+  id         Int      @id @default(autoincrement())
+  book_id    Int
+  title      String   @db.VarChar(300)
+  type       String   @db.VarChar(50)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+  book       Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+
+  @@index([book_id])
+  @@map("alternate_title")
+}
+
+model BookLink {
+  id          Int      @id @default(autoincrement())
+  book_id     Int
+  url         String   @db.Text
+  description String?  @db.Text
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  book        Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+
+  @@index([book_id])
+  @@map("book_link")
+}
+
+model DigitalContent {
+  id          Int      @id @default(autoincrement())
+  book_id     Int
+  title       String   @db.VarChar(300)
+  file_path   String?  @db.Text
+  file_type   String?  @db.VarChar(50)
+  file_size   Int?
+  url         String?  @db.Text
+  description String?  @db.Text
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  book        Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+
+  @@index([book_id])
+  @@map("digital_content")
+}
+
+model BookTransaction {
+  transaction_id          Int               @id @default(autoincrement())
+  borrow_date             DateTime?         @db.Date
+  return_date             DateTime?         @db.Date
+  due_date                DateTime?         @db.Date
+  penalty                 Decimal           @default(0.00) @db.Decimal(10, 2)
+  status                  TransactionStatus @default(PENDING_APPROVAL)
+  condition_on_borrow     BookCondition?
+  condition_on_return     BookCondition?
+  book_id                 Int
+  copy_id                 Int?
+  user_id                 Int?
+  department_id           Int?
+  office_id               Int?
+  borrower_representative String?           @db.VarChar(100)
+  requested_by            Int?
+  approved_by             Int?
+  returned_by             Int?
+  notes                   String?           @db.Text
+  created_at              DateTime          @default(now()) @db.Timestamp(0)
+  updated_at              DateTime          @updatedAt @db.Timestamp(0)
+  book                    Book              @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+  copy                    BookCopy?         @relation(fields: [copy_id], references: [copy_id], onDelete: SetNull)
+  user                    User?             @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  department              Department?       @relation(fields: [department_id], references: [department_id])
+  office                  Office?           @relation(fields: [office_id], references: [office_id])
+
+  @@index([book_id])
+  @@index([copy_id])
+  @@index([user_id])
+  @@index([department_id])
+  @@index([office_id])
+  @@index([due_date])
+  @@index([borrow_date])
+  @@index([return_date])
+  @@map("book_transaction")
+}
+
+model Locker {
+  locker_id           Int                 @id @default(autoincrement())
+  locker_number       String              @unique @db.VarChar(20)
+  location            String              @db.VarChar(100)
+  status              LockerStatus        @default(AVAILABLE)
+  created_at          DateTime            @default(now()) @db.Timestamp(0)
+  updated_at          DateTime            @updatedAt @db.Timestamp(0)
+  archived_at         DateTime?           @db.Timestamp(0)
+  rfid_code           String?             @db.VarChar(50)
+  locker_transactions LockerTransaction[]
+
+  @@index([location])
+  @@index([archived_at])
+  @@index([rfid_code])
+  @@map("locker")
+}
+
+model LockerTransaction {
+  transaction_id Int               @id @default(autoincrement())
+  borrow_time    DateTime          @default(now()) @db.Timestamp(0)
+  return_time    DateTime?         @db.Timestamp(0)
+  due_time       DateTime?         @db.Timestamp(0)
+  penalty        Decimal           @default(0.00) @db.Decimal(10, 2)
+  extension_count Int              @default(0)
+  status         TransactionStatus @default(ACTIVE)
+  user_id        Int
+  locker_id      Int
+  assigned_by    Int?
+  returned_by    Int?
+  notes          String?           @db.Text
+  created_at     DateTime          @default(now()) @db.Timestamp(0)
+  updated_at     DateTime          @updatedAt @db.Timestamp(0)
+  locker         Locker            @relation(fields: [locker_id], references: [locker_id], onDelete: Cascade)
+  user           User              @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([locker_id])
+  @@index([user_id])
+  @@index([due_time])
+  @@index([borrow_time])
+  @@index([return_time])
+  @@map("locker_transaction")
+}
+
+model EntryLog {
+  entry_id    Int       @id @default(autoincrement())
+  entry_time  DateTime  @db.DateTime(0)
+  exit_time   DateTime? @db.DateTime(0)
+  user_id     Int
+  rfid_code   String?   @db.VarChar(50)
+  purpose     String?   @db.VarChar(100)
+  verified_by Int?
+  user        User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([entry_time])
+  @@index([exit_time])
+  @@index([rfid_code])
+  @@map("entrylog")
+}
+
+model AuditLog {
+  event_id        Int         @id @default(autoincrement())
+  action          String      @db.VarChar(50)
+  description     String      @db.Text
+  ip_address      String?     @db.VarChar(45)
+  user_agent      String?     @db.Text
+  date_time_log   DateTime    @default(now()) @db.Timestamp(0)
+  role            UserRole
+  user_account_id Int
+  user_account    UserAccount @relation(fields: [user_account_id], references: [id], onDelete: Cascade)
+
+  @@index([user_account_id])
+  @@index([date_time_log])
+  @@index([action])
+  @@map("auditlog")
+}
+
+model Session {
+  session_id      Int         @id @default(autoincrement())
+  session_token   String      @unique
+  user_account_id Int
+  ip_address      String?     @db.VarChar(45)
+  user_agent      String?     @db.Text
+  created_at      DateTime    @default(now()) @db.Timestamp(0)
+  expires_at      DateTime?   @db.Timestamp(0)
+  last_activity   DateTime?   @db.Timestamp(0)
+  is_active       Boolean     @default(true)
+  user_account    UserAccount @relation(fields: [user_account_id], references: [id], onDelete: Cascade)
+
+  @@index([user_account_id])
+  @@index([expires_at, is_active])
+  @@index([last_activity])
+  @@map("session")
+}
+
+model NotificationLog {
+  notification_id Int                @id @default(autoincrement())
+  user_id         Int
+  type            NotificationType
+  title           String             @db.VarChar(200)
+  message         String             @db.Text
+  status          NotificationStatus @default(QUEUED)
+  sent_at         DateTime?          @db.Timestamp(0)
+  read_at         DateTime?          @db.Timestamp(0)
+  metadata        String?            @db.Text
+  created_at      DateTime           @default(now()) @db.Timestamp(0)
+  user            User               @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("notification_log")
+}
+
+model ReportLog {
+  report_id      Int          @id @default(autoincrement())
+  module         ReportModule
+  title          String       @db.VarChar(200)
+  parameters     String?      @db.Text
+  file_path      String?      @db.VarChar(500)
+  date_generated DateTime     @default(now()) @db.Timestamp(0)
+  generated_by   Int
+  download_count Int          @default(0)
+  user           User         @relation(fields: [generated_by], references: [user_id], onDelete: Cascade)
+
+  @@index([generated_by])
+  @@index([date_generated])
+  @@map("report_log")
+}
+
+model PenaltyConfig {
+  config_id          Int         @id @default(autoincrement())
+  type               PenaltyType
+  penalty_per_day    Decimal     @db.Decimal(10, 2)
+  penalty_per_hour   Decimal?    @db.Decimal(10, 2)
+  grace_period_days  Int         @default(0)
+  grace_period_hours Int?        @default(0)
+  max_penalty        Decimal?    @db.Decimal(10, 2)
+  is_active          Boolean     @default(true)
+  created_at         DateTime    @default(now()) @db.Timestamp(0)
+  updated_at         DateTime    @updatedAt
+
+  @@map("penalty_config")
+}
+
+model SystemConfig {
+  config_id    Int            @id @default(autoincrement())
+  key          String         @unique @db.VarChar(100)
+  value        String         @db.Text
+  description  String?        @db.Text
+  data_type    ConfigDataType @default(STRING)
+  is_encrypted Boolean        @default(false)
+  created_at   DateTime       @default(now()) @db.Timestamp(0)
+  updated_at   DateTime       @updatedAt
+
+  @@index([key])
+  @@map("system_config")
+}
+
+model Holiday {
+  holiday_id   Int       @id @default(autoincrement())
+  name         String    @db.VarChar(200)
+  date         DateTime  @db.Date
+  end_date     DateTime? @db.Date
+  description  String?   @db.Text
+  is_recurring Boolean   @default(false)
+  start_time   String?   @db.VarChar(5)
+  end_time     String?   @db.VarChar(5)
+  is_active    Boolean   @default(true)
+  created_at   DateTime  @default(now()) @db.Timestamp(0)
+  updated_at   DateTime  @updatedAt
+
+  @@index([date])
+  @@index([end_date])
+  @@index([is_active])
+  @@index([is_recurring])
+  @@map("holiday")
+}
+
+model Department {
+  department_id     Int               @id @default(autoincrement())
+  name              String            @unique @db.VarChar(100)
+  code              String            @unique @db.VarChar(10)
+  description       String?           @db.Text
+  is_active         Boolean           @default(true)
+  created_at        DateTime          @default(now()) @db.Timestamp(0)
+  updated_at        DateTime          @default(now()) @db.Timestamp(0)
+  archived_at       DateTime?         @db.Timestamp(0)
+  programs          Program[]
+  users             User[]
+  book_transactions BookTransaction[]
+
+  @@index([code])
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("department")
+}
+
+model Program {
+  program_id    Int        @id @default(autoincrement())
+  name          String     @unique @db.VarChar(100)
+  code          String     @unique @db.VarChar(10)
+  description   String?    @db.Text
+  department_id Int
+  is_active     Boolean    @default(true)
+  created_at    DateTime   @default(now()) @db.Timestamp(0)
+  updated_at    DateTime   @default(now()) @db.Timestamp(0)
+  archived_at   DateTime?  @db.Timestamp(0)
+  department    Department @relation(fields: [department_id], references: [department_id])
+  users         User[]
+
+  @@index([code])
+  @@index([department_id])
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("program")
+}
+
+model Office {
+  office_id         Int               @id @default(autoincrement())
+  name              String            @unique @db.VarChar(100)
+  code              String            @unique @db.VarChar(10)
+  description       String?           @db.Text
+  is_active         Boolean           @default(true)
+  created_at        DateTime          @default(now()) @db.Timestamp(0)
+  updated_at        DateTime          @default(now()) @db.Timestamp(0)
+  archived_at       DateTime?         @db.Timestamp(0)
+  users             User[]
+  book_transactions BookTransaction[]
+
+  @@index([code])
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("office")
+}
+
+model OverdueSettlement {
+  settlement_id     Int                     @id @default(autoincrement())
+  user_id           Int
+  transaction_type  OverdueTransactionType
+  transaction_id    Int
+  penalty_amount    Decimal                 @db.Decimal(10, 2)
+  amount_paid       Decimal                 @default(0.00) @db.Decimal(10, 2)
+  remaining_balance Decimal                 @db.Decimal(10, 2)
+  status            OverdueSettlementStatus @default(PENDING)
+  settled_at        DateTime?               @db.Timestamp(0)
+  processed_by      Int?
+  notes             String?                 @db.Text
+  created_at        DateTime                @default(now()) @db.Timestamp(0)
+  updated_at        DateTime                @updatedAt
+  user              User                    @relation("BorrowerSettlements", fields: [user_id], references: [user_id], onDelete: Cascade)
+  processedByUser   User?                   @relation("ProcessedSettlements", fields: [processed_by], references: [user_id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([transaction_id])
+  @@index([created_at])
+  @@map("overdue_settlement")
+}
+
+model Strand {
+  strand_id      Int          @id @default(autoincrement())
+  name           String       @db.VarChar(100)
+  code           String       @unique @db.VarChar(20)
+  abbreviation   String       @db.VarChar(10)
+  is_active      Boolean      @default(true)
+  created_at     DateTime     @default(now()) @db.Timestamp(0)
+  updated_at     DateTime     @updatedAt
+  archived_at    DateTime?    @db.Timestamp(0)
+  sections       Section[]
+  users          User[]
+
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("strand")
+}
+
+model GradeLevel {
+  grade_level_id  Int             @id @default(autoincrement())
+  name            String          @db.VarChar(50)
+  code            String          @unique @db.VarChar(20)
+  level_number    Int
+  education_level EducationLevel
+  is_active       Boolean         @default(true)
+  created_at      DateTime        @default(now()) @db.Timestamp(0)
+  updated_at      DateTime        @updatedAt
+  archived_at     DateTime?       @db.Timestamp(0)
+  sections        Section[]
+  users           User[]
+
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("grade_level")
+}
+
+model Section {
+  section_id      Int          @id @default(autoincrement())
+  grade_level_id  Int
+  strand_id       Int?
+  name            String       @db.VarChar(100)
+  is_active       Boolean      @default(true)
+  created_at      DateTime     @default(now()) @db.Timestamp(0)
+  updated_at      DateTime     @updatedAt
+  archived_at     DateTime?    @db.Timestamp(0)
+  grade_level     GradeLevel   @relation(fields: [grade_level_id], references: [grade_level_id])
+  strand          Strand?      @relation(fields: [strand_id], references: [strand_id])
+  users           User[]
+
+  @@index([grade_level_id])
+  @@index([strand_id])
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("section")
+}
+
+model ExportJob {
+  job_id        Int              @id @default(autoincrement())
+  user_id       Int
+  filters       String           @db.Text
+  columns       String           @db.Text
+  format        String           @db.VarChar(10)
+  status        ExportJobStatus  @default(PENDING)
+  file_url      String?          @db.VarChar(500)
+  error_message String?          @db.Text
+  created_at    DateTime         @default(now()) @db.Timestamp(0)
+  completed_at  DateTime?        @db.Timestamp(0)
+  user          User             @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("export_job")
+}
+
+// ===== enums (add at end of file) =====
+
+enum MaterialType {
+  BOOK
+  EBOOK
+  AUDIOBOOK
+  DVD
+  CD
+  PERIODICAL
+  MAGAZINE
+  JOURNAL
+  REFERENCE
+  THESIS
+  OTHER
+}
+
+enum BookStatus {
+  AVAILABLE
+  BORROWED
+  MISSING
+  DAMAGED
+  ARCHIVED
+  UNAVAILABLE
+}
+
+enum BookCondition {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+  DAMAGED
+  MISSING
+}
+
+enum UserType {
+  STUDENT
+  EMPLOYEE
+  ALUMNI
+  GUEST
+}
+
+enum UserStatus {
+  ACTIVE
+  ARCHIVED
+  INACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+  USER
+}
+
+enum LockerStatus {
+  AVAILABLE
+  OCCUPIED
+  DAMAGED
+  MAINTENANCE
+  ARCHIVED
+}
+
+enum TransactionStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  COMPLETED
+  OVERDUE
+  REJECTED
+  CANCELLED
+}
+
+enum NotificationType {
+  LOCKER_OVERDUE
+  BOOK_OVERDUE
+  LOCKER_ASSIGNED
+  BOOK_APPROVED
+  BOOK_REJECTED
+  PENDING_APPROVAL
+  SYSTEM_ALERT
+  ACCOUNT_UPDATE
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
+}
+
+enum ReportModule {
+  ENTRY
+  BOOK
+  LOCKER
+  USER
+  AUDIT
+  SYSTEM
+}
+
+enum PenaltyType {
+  BOOK
+  LOCKER
+}
+
+enum ConfigDataType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+enum OverdueTransactionType {
+  BOOK
+  LOCKER
+}
+
+enum OverdueSettlementStatus {
+  PENDING
+  PARTIAL
+  SETTLED
+}
+
+enum EducationLevel {
+  KINDERGARTEN
+  ELEMENTARY
+  JUNIOR_HIGH
+  SENIOR_HIGH
+  COLLEGE
+  GRADUATE_SCHOOL
+}
+
+enum ExportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum BookCopyStatus {
+  AVAILABLE
+  BORROWED
+  RESERVED
+  MAINTENANCE
+  LOST
+  DAMAGED
+  ARCHIVED
+}
