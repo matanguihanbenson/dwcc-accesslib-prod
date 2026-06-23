@@ -43,7 +43,14 @@ export default function StudentCategoriesPage() {
 
   const userRole = (session?.user as any)?.role
 
-  if (userRole !== 'SUPER_ADMIN' && userRole !== 'ADMIN') {
+  // Categories management is available to SUPER_ADMIN,
+  // ADMIN, and STAFF — same access level as the rest of
+  // the library-user management surface.
+  if (
+    userRole !== 'SUPER_ADMIN' &&
+    userRole !== 'ADMIN' &&
+    userRole !== 'STAFF'
+  ) {
     return (
       <div className="px-6 py-4">
         <div className="bg-red-50 border border-red-200 rounded-md p-4">

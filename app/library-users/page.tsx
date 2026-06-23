@@ -297,7 +297,15 @@ export default function LibraryUsersPage() {
         matchesYearLevel
       )
     })
-  }, [users, searchQuery, userTypeFilter])
+  }, [
+    users,
+    searchQuery,
+    userTypeFilter,
+    statusFilter,
+    departmentFilter,
+    programFilter,
+    yearLevelFilter
+  ])
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredUsers.length / itemsPerPage)
@@ -423,11 +431,12 @@ export default function LibraryUsersPage() {
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          {userRole === UserRole.SUPER_ADMIN && (
+          {canManageUsers && (
             <Button
               variant="outline"
               className='bg-gray-100 h-[50px] px-4 hover:bg-gray-200'
               onClick={() => router.push('/library-users/categories')}
+              title="Browse users by section, program, department, grade level, or strand"
             >
               <i className="fas fa-th-large mr-2" />
               View Categories

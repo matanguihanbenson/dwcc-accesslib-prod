@@ -439,7 +439,7 @@ export default function HolidaysPage() {
                               >
                                 <i className="fas fa-trash"></i>
                               </button>
-                              {/*  on the library users page, on the archive modal, it is stuck on loading  */}
+                              {/*  , */}
                             </div>
                           )}
                         </td>
