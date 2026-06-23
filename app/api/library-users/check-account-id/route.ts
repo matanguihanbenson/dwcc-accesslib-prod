@@ -33,5 +33,5 @@ export const GET = withAuth(
       )
     }
   },
-  [UserRole.SUPER_ADMIN, UserRole.ADMIN]
+  [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF]
 )

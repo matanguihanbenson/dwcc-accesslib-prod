@@ -18,6 +18,8 @@ interface EntryLog {
   rfid_code?: string | null;
   purpose?: string | null;
   verified_by?: number | null;
+  /** Stamped at write time from the verifying staff's campus. */
+  campus?: 'COLLEGE' | 'BASIC_EDUCATION' | null;
   user?: {
     full_name: string;
     account_id: string;
@@ -45,6 +47,13 @@ export default function StaffView({ className }: StaffViewProps) {
   const [recentEntriesSearch, setRecentEntriesSearch] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lastSuccessfulEntry, setLastSuccessfulEntry] = useState<string | null>(null);
+
+  // The staff's CURRENT campus designation. The /api/entry-logs GET is
+  // already auto-scoped server-side, so this is purely a UI affordance:
+  // it drives the banner, the SSE filter, and the recent-entries list
+  // (so we never show toasts for events from the other campus).
+  const [myCampus, setMyCampus] = useState<'COLLEGE' | 'BASIC_EDUCATION' | null>(null);
+  const [myCampusLoaded, setMyCampusLoaded] = useState(false);
   
   // Refs for input fields to manage focus
   const userIdInputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +87,7 @@ export default function StaffView({ className }: StaffViewProps) {
       }
     } catch (err) {
       console.error('Fullscreen toggle failed:', err);
-      notify.error(
+      await NotificationService.error(
         'Fullscreen Unavailable',
         'Your browser blocked the fullscreen request. Please try again or check browser permissions.'
       );
@@ -121,6 +130,72 @@ export default function StaffView({ className }: StaffViewProps) {
     purpose: ''
   });
 
+  // Scan priority: which identification field is the
+  // primary input the staff member uses day-to-day.
+  // 'rfid' = RFID scanner (default), 'userId' = manual
+  // User ID entry. Stored in localStorage so the
+  // preference sticks across sessions.
+  const SCAN_PRIORITY_KEY = 'entry-monitoring.scan-priority'
+  const [scanPriority, setScanPriorityState] = useState<'rfid' | 'userId'>(
+    () => {
+      if (typeof window === 'undefined') return 'rfid'
+      try {
+        const stored = window.localStorage.getItem(SCAN_PRIORITY_KEY)
+        if (stored === 'userId' || stored === 'rfid') return stored
+      } catch {
+        /* localStorage may be blocked */
+      }
+      return 'rfid'
+    }
+  )
+
+  const setScanPriority = useCallback(
+    (next: 'rfid' | 'userId') => {
+      setScanPriorityState(next)
+      try {
+        window.localStorage.setItem(SCAN_PRIORITY_KEY, next)
+      } catch {
+        /* ignore storage errors */
+      }
+      // Move focus to the new priority field so the
+      // user can keep typing without clicking.
+      requestAnimationFrame(() => {
+        if (next === 'rfid') {
+          rfidInputRef.current?.focus()
+        } else {
+          userIdInputRef.current?.focus()
+        }
+      })
+    },
+    []
+  )
+
+  // Settings menu: toggled by the gear button next to
+  // the fullscreen control. Closed automatically when
+  // the user clicks anywhere outside of it.
+  const [showPriorityMenu, setShowPriorityMenu] = useState(false)
+  const priorityMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!showPriorityMenu) return
+    const onDocClick = (e: MouseEvent) => {
+      if (
+        priorityMenuRef.current &&
+        !priorityMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowPriorityMenu(false)
+      }
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowPriorityMenu(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [showPriorityMenu])
+
   // Fetch recent entries
   const fetchRecentEntries = useCallback(async () => {
     try {
@@ -157,8 +232,13 @@ export default function StaffView({ className }: StaffViewProps) {
       if (e.key === 'Escape' || (e.ctrlKey && e.key === 'r')) {
         e.preventDefault();
         clearForm();
-        // Focus RFID input for scanner workflow
-        rfidInputRef.current?.focus();
+        // Re-focus the priority field so the user can
+        // immediately start the next scan.
+        if (scanPriority === 'userId') {
+          userIdInputRef.current?.focus();
+        } else {
+          rfidInputRef.current?.focus();
+        }
       }
     };
     
@@ -168,17 +248,49 @@ export default function StaffView({ className }: StaffViewProps) {
       clearInterval(interval);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [fetchRecentEntries]);
+  }, [fetchRecentEntries, scanPriority]);
 
-  // Auto-focus RFID field on component mount for scanner-first workflow
+  // Auto-focus the priority field on component mount so
+  // the first input lands on whichever field the staff
+  // member is most likely to use.
   useEffect(() => {
     // Delay focus slightly to ensure component is fully mounted
     const timer = setTimeout(() => {
-      rfidInputRef.current?.focus();
+      if (scanPriority === 'userId') {
+        userIdInputRef.current?.focus();
+      } else {
+        rfidInputRef.current?.focus();
+      }
     }, 100);
-    
+
     return () => clearTimeout(timer);
-  }, []);
+  }, [scanPriority]);
+
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/staff/me/campus', {
+          credentials: 'include',
+          headers: { 'Cache-Control': 'no-store' }
+        })
+        if (!res.ok) {
+          setMyCampusLoaded(true)
+          return
+        }
+        const body = await res.json()
+        if (cancelled) return
+        if (body?.campus === 'COLLEGE' || body?.campus === 'BASIC_EDUCATION') {
+          setMyCampus(body.campus)
+        }
+        setMyCampusLoaded(true)
+      } catch {
+        if (!cancelled) setMyCampusLoaded(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const recentEntriesArray: EntryLog[] = Array.isArray(recentEntries) ? recentEntries : [];
   const normalizedRecentEntriesSearch = recentEntriesSearch.trim().toLowerCase();
@@ -215,8 +327,16 @@ export default function StaffView({ className }: StaffViewProps) {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'entry-log' && data.payload) {
+          const payload = data.payload;
+          // Drop events from the other campus so a STAFF only ever sees
+          // their own campus in the live stream. The server already
+          // scopes /api/entry-logs reads the same way; this is the
+          // toast / recent-list counterpart.
+          if (myCampus && payload.campus && payload.campus !== myCampus) {
+            return
+          }
           setRecentEntries(prev => {
-            const next = [data.payload, ...prev];
+            const next = [payload, ...prev];
             return next.slice(0, 10);
           });
           setLastUpdated(new Date());
@@ -232,7 +352,7 @@ export default function StaffView({ className }: StaffViewProps) {
       fetchRecentEntries();
     };
     return () => source.close();
-  }, [fetchRecentEntries]);
+  }, [fetchRecentEntries, myCampus]);
 
   // Handle form input changes
   const handleInputChange = (field: string, value: string) => {
@@ -359,9 +479,15 @@ export default function StaffView({ className }: StaffViewProps) {
         
         // Refresh recent entries without delay for immediate feedback
         fetchRecentEntries();
-        
-        // Focus back to RFID input for fast scanner workflow
-        setTimeout(() => rfidInputRef.current?.focus(), 100);
+
+        // Focus the priority field for the next scan.
+        setTimeout(() => {
+          if (scanPriority === 'userId') {
+            userIdInputRef.current?.focus()
+          } else {
+            rfidInputRef.current?.focus()
+          }
+        }, 100);
       } else {
         // Robust error handling: try JSON first, then plain text
         let message = '';
@@ -402,8 +528,14 @@ export default function StaffView({ className }: StaffViewProps) {
       department: '',
       purpose: ''
     });
-    // Return focus to RFID field after clearing
-    setTimeout(() => rfidInputRef.current?.focus(), 50);
+    // Return focus to the priority field after clearing.
+    setTimeout(() => {
+      if (scanPriority === 'userId') {
+        userIdInputRef.current?.focus()
+      } else {
+        rfidInputRef.current?.focus()
+      }
+    }, 50);
   };
 
   // Auto-fill user info based on ID
@@ -537,6 +669,9 @@ export default function StaffView({ className }: StaffViewProps) {
             <div className="h-1 bg-blue-700 shrink-0" />
 
             <div className="p-5 flex-1 min-h-0 flex flex-col">
+
+
+
               <div className="flex items-center justify-between mb-4 gap-3 flex-wrap shrink-0">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-md bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100">
@@ -547,7 +682,9 @@ export default function StaffView({ className }: StaffViewProps) {
                       Log New Entry
                     </h2>
                     <p className="text-[11px] text-gray-500 leading-tight">
-                      Scan RFID or enter User ID to begin
+                      {scanPriority === 'userId'
+                        ? 'Enter User ID to begin (priority: User ID)'
+                        : 'Scan RFID to begin (priority: RFID)'}
                     </p>
                   </div>
                 </div>
@@ -558,6 +695,113 @@ export default function StaffView({ className }: StaffViewProps) {
                       <span className="truncate max-w-[220px]">{lastSuccessfulEntry}</span>
                     </div>
                   )}
+                  {/*
+                    Scan-priority switcher — a small icon
+                    button that toggles between RFID-first
+                    and User-ID-first workflows. The choice
+                    is persisted in localStorage so the user
+                    only has to set it once per device.
+                  */}
+                  <div className="relative" ref={priorityMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowPriorityMenu((v) => !v)}
+                      className={`inline-flex items-center justify-center w-9 h-9 rounded-md border transition-colors ${
+                        showPriorityMenu
+                          ? 'bg-blue-50 text-blue-700 border-blue-300'
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 hover:text-gray-800'
+                      }`}
+                      title="Scan priority settings"
+                      aria-label="Scan priority settings"
+                      aria-expanded={showPriorityMenu}
+                      aria-haspopup="true"
+                    >
+                      <i className="fas fa-sliders text-sm"></i>
+                    </button>
+                    {showPriorityMenu && (
+                      <div
+                        role="menu"
+                        className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-md shadow-lg z-30 overflow-hidden"
+                      >
+                        <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+                          <p className="text-[11px] font-semibold text-gray-700 uppercase tracking-wider">
+                            Scan priority
+                          </p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            Which field gets focus & the required marker
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={scanPriority === 'rfid'}
+                          onClick={() => {
+                            setScanPriority('rfid')
+                            setShowPriorityMenu(false)
+                          }}
+                          className={`w-full flex items-start gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors ${
+                            scanPriority === 'rfid' ? 'bg-blue-50' : ''
+                          }`}
+                        >
+                          <i
+                            className={`mt-0.5 w-4 h-4 flex items-center justify-center rounded-full border ${
+                              scanPriority === 'rfid'
+                                ? 'border-blue-600 bg-blue-600 text-white'
+                                : 'border-gray-300 bg-white text-transparent'
+                            }`}
+                          >
+                            <i className="fas fa-check text-[9px]"></i>
+                          </i>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-gray-800 flex items-center gap-1.5">
+                              <i className="fas fa-id-card text-blue-600 text-xs"></i>
+                              RFID Code
+                            </div>
+                            <p className="text-[11px] text-gray-500 leading-tight">
+                              Use the RFID scanner as the primary input
+                            </p>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={scanPriority === 'userId'}
+                          onClick={() => {
+                            setScanPriority('userId')
+                            setShowPriorityMenu(false)
+                          }}
+                          className={`w-full flex items-start gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors ${
+                            scanPriority === 'userId' ? 'bg-blue-50' : ''
+                          }`}
+                        >
+                          <i
+                            className={`mt-0.5 w-4 h-4 flex items-center justify-center rounded-full border ${
+                              scanPriority === 'userId'
+                                ? 'border-blue-600 bg-blue-600 text-white'
+                                : 'border-gray-300 bg-white text-transparent'
+                            }`}
+                          >
+                            <i className="fas fa-check text-[9px]"></i>
+                          </i>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-gray-800 flex items-center gap-1.5">
+                              <i className="fas fa-user text-blue-600 text-xs"></i>
+                              User ID
+                            </div>
+                            <p className="text-[11px] text-gray-500 leading-tight">
+                              Type the user ID by hand as the primary input
+                            </p>
+                          </div>
+                        </button>
+                        <div className="px-3 py-1.5 border-t border-gray-100 bg-gray-50">
+                          <p className="text-[10px] text-gray-500 leading-tight">
+                            <i className="fas fa-circle-info mr-1"></i>
+                            Saved to this device. Clear your browser data to reset.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={toggleFullscreen}
@@ -591,7 +835,10 @@ export default function StaffView({ className }: StaffViewProps) {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          User ID
+                          User ID{' '}
+                          {scanPriority === 'userId' && (
+                            <span className="text-red-500">*</span>
+                          )}
                         </label>
                         <Input
                           ref={userIdInputRef}
@@ -600,7 +847,11 @@ export default function StaffView({ className }: StaffViewProps) {
                           onChange={(e) => handleInputChange('user_id', e.target.value)}
                           onBlur={handleUserIdBlur}
                           onKeyPress={(e) => handleKeyPress(e, 'user_id')}
-                          placeholder="Enter User ID"
+                          placeholder={
+                            scanPriority === 'userId'
+                              ? 'Enter User ID (primary)'
+                              : 'Enter User ID'
+                          }
                           disabled={!!formData.rfid_code}
                           autoComplete="off"
                         />
@@ -608,7 +859,10 @@ export default function StaffView({ className }: StaffViewProps) {
 
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          RFID Code <span className="text-red-500">*</span>
+                          RFID Code{' '}
+                          {scanPriority === 'rfid' && (
+                            <span className="text-red-500">*</span>
+                          )}
                         </label>
                         <Input
                           ref={rfidInputRef}
@@ -617,7 +871,11 @@ export default function StaffView({ className }: StaffViewProps) {
                           onChange={(e) => handleInputChange('rfid_code', e.target.value)}
                           onBlur={handleRfidBlur}
                           onKeyPress={(e) => handleKeyPress(e, 'rfid_code')}
-                          placeholder="Scan or enter RFID"
+                          placeholder={
+                            scanPriority === 'rfid'
+                              ? 'Scan or enter RFID (primary)'
+                              : 'Scan or enter RFID'
+                          }
                           disabled={!!formData.user_id}
                           autoComplete="off"
                         />
@@ -746,7 +1004,7 @@ export default function StaffView({ className }: StaffViewProps) {
                   <Button
                     type="submit"
                     disabled={submitting || (!formData.user_id && !formData.rfid_code)}
-                    className="bg-blue-700 hover:bg-blue-800 min-w-[140px]"
+                    className="bg-blue-700 hover:bg-blue-800 min-w-[140px] text-white"
                   >
                     {submitting ? (
                       <>
@@ -777,6 +1035,23 @@ export default function StaffView({ className }: StaffViewProps) {
                 <h3 className="text-base font-semibold text-gray-800 flex-1">
                   Recent Entries
                 </h3>
+                {myCampusLoaded && myCampus && (
+                  <span
+                    className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                      myCampus === 'COLLEGE'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                    title="Only entries from this campus are shown"
+                  >
+                    <i
+                      className={`fas ${
+                        myCampus === 'COLLEGE' ? 'fa-graduation-cap' : 'fa-school'
+                      } text-[9px]`}
+                    />
+                    {myCampus === 'COLLEGE' ? 'College' : 'Basic Ed'}
+                  </span>
+                )}
                 {lastUpdated && (
                   <span className="text-[11px] text-gray-500 font-mono">
                     {lastUpdated.toLocaleTimeString()}
@@ -815,7 +1090,7 @@ export default function StaffView({ className }: StaffViewProps) {
                       <div
                         key={entry.entry_id}
                         className={`relative bg-white border border-gray-200 border-l-4 ${
-                          inside ? 'border-l-green-500' : 'border-l-gray-300'
+                          inside ? 'border-l-blue-500' : 'border-l-gray-300'
                         } rounded-md pl-3 pr-2.5 py-2 hover:border-gray-300 transition-colors`}
                       >
                         <div className="flex items-center justify-between gap-2 mb-1">

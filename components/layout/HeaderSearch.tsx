@@ -14,6 +14,7 @@ interface SearchResult {
   url: string
 }
 
+//
 export function HeaderSearch() {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')

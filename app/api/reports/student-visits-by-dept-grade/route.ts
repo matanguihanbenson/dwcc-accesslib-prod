@@ -1,14 +1,39 @@
 import { NextRequest } from 'next/server'
-import { UserRole } from '@/types'
+import { UserRole, Campus } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
 
+/**
+ * Auto-scope STAFF to their own campus. ADMIN / SUPER_ADMIN
+ * can pass an explicit `campus` query param.
+ */
+async function resolveReportCampus(
+  session: any,
+  queryCampus: string | null
+): Promise<Campus | null> {
+  if (session?.user?.role === UserRole.STAFF) {
+    const accountId = parseInt(session.user.id || '0')
+    if (!isNaN(accountId) && accountId > 0) {
+      const account = await prisma.userAccount.findUnique({
+        where: { id: accountId },
+        select: { campus: true }
+      })
+      if (account?.campus) return account.campus
+    }
+  }
+  if (queryCampus === Campus.COLLEGE || queryCampus === Campus.BASIC_EDUCATION) {
+    return queryCampus
+  }
+  return null
+}
+
 export const GET = withAuth(
-  async (req: NextRequest) => {
+  async (req: NextRequest, session) => {
     try {
       const params = req.nextUrl.searchParams
       const dateFrom = params.get('date_from')
       const dateTo = params.get('date_to')
+      const queryCampus = params.get('campus')
 
       if (!dateFrom || !dateTo) {
         return createErrorResponse('date_from and date_to are required', 400)
@@ -19,8 +44,13 @@ export const GET = withAuth(
       const startDate = new Date(fromParts[0], fromParts[1] - 1, fromParts[2], 0, 0, 0, 0)
       const endDate = new Date(toParts[0], toParts[1] - 1, toParts[2], 23, 59, 59, 999)
 
+      // Auto-scope by campus
+      const effectiveCampus = await resolveReportCampus(session, queryCampus)
+      const campusWhere = effectiveCampus ? { campus: effectiveCampus } : {}
+
       const logs = await prisma.entryLog.findMany({
         where: {
+          ...campusWhere,
           entry_time: {
             gte: startDate,
             lte: endDate,

@@ -18,7 +18,7 @@ function LineChart({ data, lines, height = 300, className }: LineChartProps): Re
   return (
     <div className={`w-full ${className || ''}`}>
       <ResponsiveContainer width="100%" height={height}>
-        <RechartsLineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+        <RechartsLineChart data={data} margin={{ top: 30, right: 20, left: -25, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis 
             dataKey="name" 

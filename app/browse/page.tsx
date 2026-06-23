@@ -74,6 +74,21 @@ function BrowseContent() {
     fetchBooks()
   }, [searchTerm, selectedCategory, selectedSection, selectedMaterialType, selectedLanguage, yearFrom, yearTo, availableOnly, sortBy, currentPage])
 
+  // Refetch when the tab regains focus so newly added books
+  // show up without a manual reload (e.g. after the user
+  // adds a book and then comes back to /browse).
+  useEffect(() => {
+    const onFocus = () => {
+      // Bump the page to 1 to make sure the user sees the
+      // freshest list, including books that were just added.
+      setCurrentPage(1)
+      fetchBooks()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, selectedCategory, selectedSection, selectedMaterialType, selectedLanguage, yearFrom, yearTo, availableOnly, sortBy])
+
   const fetchBooks = async () => {
     try {
       setLoading(true)
@@ -439,21 +454,36 @@ function BrowseContent() {
                 )}
               </p>
               
-              {/* Active Filters Badge */}
-              {activeFiltersCount > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">
-                    <i className="fas fa-filter text-green-600 mr-1"></i>
-                    {activeFiltersCount} filter{activeFiltersCount > 1 ? 's' : ''} active
-                  </span>
-                  <button
-                    onClick={clearAllFilters}
-                    className="text-sm text-red-600 hover:text-red-800 transition-colors"
-                  >
-                    Clear
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage(1)
+                    fetchBooks()
+                  }}
+                  className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-blue-700 transition-colors"
+                  title="Refresh catalogue"
+                >
+                  <i className={`fas fa-rotate-right ${loading ? 'fa-spin' : ''}`}></i>
+                  Refresh
+                </button>
+
+                {/* Active Filters Badge */}
+                {activeFiltersCount > 0 && (
+                  <>
+                    <span className="text-sm text-gray-600">
+                      <i className="fas fa-filter text-green-600 mr-1"></i>
+                      {activeFiltersCount} filter{activeFiltersCount > 1 ? 's' : ''} active
+                    </span>
+                    <button
+                      onClick={clearAllFilters}
+                      className="text-sm text-red-600 hover:text-red-800 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -485,12 +515,24 @@ function BrowseContent() {
             <>
               {/* Books List */}
               <div className="space-y-3">
-                {books.map((book) => (
+                {books.map((book) => {
+                  const summaryText = book.summary || book.description || ''
+                  const hasSummary = summaryText.trim().length > 0
+                  return (
                   <div
                     key={book.book_id}
                     onClick={() => handleBookClick(book.book_id)}
                     className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer p-4 border border-gray-100"
                   >
+                    {/* Location badge — sits above the title so
+                        it's the first thing the eye lands on. */}
+                    {book.location && (
+                      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">
+                        <i className="fas fa-map-marker-alt text-emerald-600"></i>
+                        <span className="truncate">{book.location}</span>
+                      </div>
+                    )}
+
                     {/* Title and Subtitle */}
                     <h3 className="text-lg font-medium text-blue-600 hover:text-blue-800 hover:underline mb-1 line-clamp-1">
                       {book.title}
@@ -503,12 +545,36 @@ function BrowseContent() {
                       {book.section && <span> › {book.section}</span>}
                     </div>
                     
-                    {/* Summary/Description */}
-                    {(book.summary || book.description) && (
-                      <p className="text-sm text-gray-700 mb-2 line-clamp-2">
-                        {book.summary || book.description}
-                      </p>
-                    )}
+                    {/* Summary / Description — always visible so
+                        the layout is consistent across cards.
+                        Clamped to 2 lines with a trailing
+                        ellipsis. Books without a description
+                        get a muted placeholder. */}
+                    <div
+                      className={`mb-3 rounded-md border px-3 py-2 ${
+                        hasSummary
+                          ? 'border-amber-200 bg-amber-50/60'
+                          : 'border-dashed border-gray-200 bg-gray-50'
+                      }`}
+                    >
+                      <div
+                        className={`flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider mb-1 ${
+                          hasSummary ? 'text-amber-800' : 'text-gray-400'
+                        }`}
+                      >
+                        <i className="fas fa-book-open"></i>
+                        Summary
+                      </div>
+                      {hasSummary ? (
+                        <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-line line-clamp-2">
+                          {summaryText}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-gray-400 italic">
+                          No description available for this book yet.
+                        </p>
+                      )}
+                    </div>
                     
                     {/* Author and Publication Info */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 mb-2">
@@ -550,7 +616,8 @@ function BrowseContent() {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
 
               {/* Pagination - Google Style */}

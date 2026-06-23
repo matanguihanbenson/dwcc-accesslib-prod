@@ -1,8 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
-import { UserRole } from '@/types'
+import { UserRole, Campus } from '@/types'
 import { AuditService } from '@/lib/services/audit.service'
+
+// Resolve the campus scope for the caller.
+//  - STAFF: always auto-scoped to the staff's own current campus
+//    (a STAFF in COLLEGE can never read COLLEGE lockers; re-designation
+//    takes effect on the next request).
+//  - ADMIN / SUPER_ADMIN: may pass an explicit `campus` query param or
+//    leave it empty to see all campuses.
+async function resolveLockerCampus(
+  session: any,
+  queryCampus: string | null
+): Promise<Campus | null> {
+  if (session?.user?.role === UserRole.STAFF) {
+    const accountId = parseInt(session.user.id || '0')
+    if (!isNaN(accountId) && accountId > 0) {
+      const account = await prisma.userAccount.findUnique({
+        where: { id: accountId },
+        select: { campus: true }
+      })
+      if (account?.campus) {
+        return account.campus
+      }
+    }
+    // No campus set on the staff account -- fall back to the
+    // query param (or no scope) so the request still succeeds.
+  }
+  if (queryCampus === Campus.COLLEGE || queryCampus === Campus.BASIC_EDUCATION) {
+    return queryCampus
+  }
+  return null
+}
 
 // GET /api/lockers - Get all lockers with their current status
 export const GET = withAuth(
@@ -11,6 +41,7 @@ export const GET = withAuth(
       const { searchParams } = new URL(req.url)
       const status = searchParams.get('status') // 'AVAILABLE', 'OCCUPIED', 'DAMAGED', 'MAINTENANCE', 'ARCHIVED'
       const includeTransactions = searchParams.get('include_transactions') === 'true'
+      const queryCampus = searchParams.get('campus')
 
       const whereClause: any = {}
 
@@ -21,10 +52,17 @@ export const GET = withAuth(
       } else {
         // Otherwise, exclude archived lockers
         whereClause.archived_at = null
-        
+
         if (status) {
           whereClause.status = status
         }
+      }
+
+      // Auto-scope STAFF users to their own campus. ADMIN / SUPER_ADMIN
+      // can filter by campus (or leave it empty for everything).
+      const effectiveCampus = await resolveLockerCampus(session, queryCampus)
+      if (effectiveCampus) {
+        whereClause.campus = effectiveCampus
       }
 
       const lockers = await prisma.locker.findMany({
@@ -52,23 +90,24 @@ export const GET = withAuth(
             take: 1
           }
         } : undefined,
-        orderBy: {
-          locker_number: 'asc'
-        }
+        orderBy: [
+          { campus: 'asc' },
+          { locker_number: 'asc' }
+        ]
       })
 
       // Transform data to include computed fields
       const lockersWithStatus = lockers.map((locker: any) => {
         const activeTransaction = locker.locker_transactions?.[0]
         const now = new Date()
-        
+
         let timeInfo = null
         if (activeTransaction) {
           const borrowTime = new Date(activeTransaction.borrow_time)
           const dueTime = activeTransaction.due_time ? new Date(activeTransaction.due_time) : null
           const hoursUsed = (now.getTime() - borrowTime.getTime()) / (1000 * 60 * 60)
           const isOvertime = dueTime ? now > dueTime : false
-          
+
           timeInfo = {
             hoursUsed: hoursUsed.toFixed(1),
             borrowTime: activeTransaction.borrow_time,
@@ -99,11 +138,17 @@ export const POST = withAuth(
   async (req: NextRequest, session: any) => {
     try {
       const body = await req.json()
-      const { locker_number, location, rfid_code } = body
+      const { locker_number, location, rfid_code, campus } = body
 
       if (!locker_number || !location) {
         return createErrorResponse('Locker number and location are required', 400)
       }
+
+      // Validate campus. Defaults to COLLEGE so existing clients that
+      // don't send a campus still work.
+      const allowedCampuses = [Campus.COLLEGE, Campus.BASIC_EDUCATION]
+      const finalCampus =
+        campus && allowedCampuses.includes(campus) ? campus : Campus.COLLEGE
 
       // Check if locker number already exists (non-archived)
       const existing = await prisma.locker.findFirst({
@@ -142,6 +187,7 @@ export const POST = withAuth(
         data: {
           locker_number,
           location,
+          campus: finalCampus,
           status: 'AVAILABLE'
         }
       })
@@ -151,7 +197,7 @@ export const POST = withAuth(
         parseInt(session.user.id),
         session.user.role as UserRole,
         'CREATE_LOCKER',
-        `Created locker ${locker_number} at ${location}`
+        `Created locker ${locker_number} at ${location} (campus: ${finalCampus})`
       )
 
       return createSuccessResponse(locker, 'Locker created successfully')
@@ -161,4 +207,3 @@ export const POST = withAuth(
   },
   [UserRole.ADMIN, UserRole.SUPER_ADMIN]
 )
-

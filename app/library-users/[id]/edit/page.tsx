@@ -97,7 +97,11 @@ export default function EditLibraryUserPage() {
       }
 
       const userRole = session.user.role as UserRole
-      if (userRole !== UserRole.SUPER_ADMIN && userRole !== UserRole.ADMIN) {
+      if (
+        userRole !== UserRole.SUPER_ADMIN &&
+        userRole !== UserRole.ADMIN &&
+        userRole !== UserRole.STAFF
+      ) {
         router.push('/dashboard')
         return
       }
@@ -368,7 +372,7 @@ export default function EditLibraryUserPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         <Card>
           <CardHeader>
             <CardTitle>Edit User Information</CardTitle>
@@ -625,12 +629,13 @@ export default function EditLibraryUserPage() {
                 <Button 
                   type="button"
                   variant="outline" 
+                  className='py-5 px-4 bg-gray-200 hover:bg-gray-300'
                   onClick={() => router.back()}
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className='py-5 px-4 bg-primary-600 text-white hover:bg-primary-700'>
                   {submitting ? 'Updating...' : 'Update User'}
                 </Button>
               </div>

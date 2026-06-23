@@ -1,7 +1,31 @@
 import { NextRequest } from 'next/server'
-import { UserRole } from '@/types'
+import { UserRole, Campus } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
+
+/**
+ * Auto-scope STAFF to their own campus, mirror entry-logs resolver.
+ * ADMIN / SUPER_ADMIN can pass an explicit `campus` query param.
+ */
+async function resolveReportCampus(
+  session: any,
+  queryCampus: string | null
+): Promise<Campus | null> {
+  if (session?.user?.role === UserRole.STAFF) {
+    const accountId = parseInt(session.user.id || '0')
+    if (!isNaN(accountId) && accountId > 0) {
+      const account = await prisma.userAccount.findUnique({
+        where: { id: accountId },
+        select: { campus: true }
+      })
+      if (account?.campus) return account.campus
+    }
+  }
+  if (queryCampus === Campus.COLLEGE || queryCampus === Campus.BASIC_EDUCATION) {
+    return queryCampus
+  }
+  return null
+}
 
 export const GET = withAuth(
   async (req: NextRequest, session) => {
@@ -11,6 +35,7 @@ export const GET = withAuth(
       const yearParam = searchParams.get('year')
       const dateFrom = searchParams.get('date_from')
       const dateTo = searchParams.get('date_to')
+      const queryCampus = searchParams.get('campus')
 
       // Determine date range
       let startDate: Date
@@ -47,6 +72,10 @@ export const GET = withAuth(
         endDate = today
       }
 
+      // Auto-scope by campus
+      const effectiveCampus = await resolveReportCampus(session, queryCampus)
+      const campusWhere = effectiveCampus ? { campus: effectiveCampus } : {}
+
       // Fetch holidays for the period
       const holidays = await prisma.holiday.findMany({
         where: {
@@ -74,6 +103,7 @@ export const GET = withAuth(
       // Fetch all entry logs for the period with user details
       const entryLogs = await prisma.entryLog.findMany({
         where: {
+          ...campusWhere,
           entry_time: {
             gte: startDate,
             lte: endDate

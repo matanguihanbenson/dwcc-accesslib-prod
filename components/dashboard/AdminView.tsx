@@ -204,38 +204,38 @@ function AdminView({ className, userEmail }: AdminViewProps): React.ReactElement
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
         <h3 className="text-sm font-semibold text-gray-800 mb-2">Quick Actions</h3>
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           <Link
             href="/reports"
-            className="aspect-square flex flex-col items-center justify-center p-2 border border-gray-200 rounded-md hover:bg-gray-50"
+            className="flex flex-col items-center justify-center p-4 h-[100px] border border-gray-200 rounded-md hover:bg-gray-50"
           >
             <i className="fas fa-chart-bar text-blue-600 text-xl mb-1"></i>
             <p className="text-xs font-medium text-gray-700 text-center leading-tight">View Reports</p>
           </Link>
           <Link
             href="/users/register"
-            className="aspect-square flex flex-col items-center justify-center p-2 border border-gray-200 rounded-md hover:bg-gray-50"
+            className="flex flex-col items-center justify-center p-4 h-[100px] border border-gray-200 rounded-md hover:bg-gray-50"
           >
             <i className="fas fa-user-tie text-teal-600 text-xl mb-1"></i>
             <p className="text-xs font-medium text-gray-700 text-center leading-tight">Manage Staff</p>
           </Link>
           <Link
             href="/lockers"
-            className="aspect-square flex flex-col items-center justify-center p-2 border border-gray-200 rounded-md hover:bg-gray-50"
+            className="flex flex-col items-center justify-center p-4 h-[100px] border border-gray-200 rounded-md hover:bg-gray-50"
           >
             <i className="fas fa-lock text-orange-600 text-xl mb-1"></i>
             <p className="text-xs font-medium text-gray-700 text-center leading-tight">Manage Lockers</p>
           </Link>
           <Link
             href="/books"
-            className="aspect-square flex flex-col items-center justify-center p-2 border border-gray-200 rounded-md hover:bg-gray-50"
+            className="flex flex-col items-center justify-center p-4 h-[100px] border border-gray-200 rounded-md hover:bg-gray-50"
           >
             <i className="fas fa-book text-green-600 text-xl mb-1"></i>
             <p className="text-xs font-medium text-gray-700 text-center leading-tight">Book Management</p>
           </Link>
           <Link
             href="/overdue"
-            className="aspect-square flex flex-col items-center justify-center p-2 border border-gray-200 rounded-md hover:bg-gray-50"
+            className="flex flex-col items-center justify-center p-4 h-[100px] border border-gray-200 rounded-md hover:bg-gray-50"
           >
             <i className="fas fa-exclamation-triangle text-red-600 text-xl mb-1"></i>
             <p className="text-xs font-medium text-gray-700 text-center leading-tight">Handle Overdues</p>

@@ -77,6 +77,31 @@ export default function BorrowBooksPage() {
   const [bookLoading, setBookLoading] = useState(false)
   const [userLoading, setUserLoading] = useState(false)
 
+
+  // Book-lookup modal state. Lets the staff find a book by
+  // title / author / ISBN instead of having to type the
+  // accession number. Optimized for realtime: the modal
+  // NEVER auto-loads on open. A request is only fired when:
+  //   - the user has typed 2+ characters and the debounce
+  //     timer fires, OR
+  //   - the user explicitly clicks "Show recent" (which
+  //     passes `?recent=1` to the endpoint).
+  // The min-length is enforced on the client and on the
+  // server (defence in depth).
+  const MIN_BOOK_LOOKUP_LENGTH = 2
+  const [showBookLookupModal, setShowBookLookupModal] = useState(false)
+  const [bookLookupQuery, setBookLookupQuery] = useState('')
+  const [bookLookupResults, setBookLookupResults] = useState<any[]>([])
+  const [bookLookupLoading, setBookLookupLoading] = useState(false)
+  const [bookLookupHasSearched, setBookLookupHasSearched] = useState(false)
+  const [bookLookupMode, setBookLookupMode] = useState<'search' | 'recent'>(
+    'search'
+  )
+  const bookLookupDebounceRef = React.useRef<NodeJS.Timeout | null>(null)
+  // Used to ignore late responses from earlier queries so an
+  // in-flight older request can't overwrite a newer result.
+  const bookLookupReqIdRef = React.useRef(0)
+
   // Fetch departments and offices
   const { data: departmentsResponse } = useApiSWR<any>(activeTab === 'department' ? '/api/departments?status=true' : null)
   const { data: officesResponse } = useApiSWR<any>(activeTab === 'office' ? '/api/offices?status=true' : null)
@@ -228,6 +253,163 @@ export default function BorrowBooksPage() {
     } finally {
       setBookLoading(false)
     }
+  }
+
+  // ---------- Book lookup modal (search by title/author/ISBN) ----------
+  // Debounced realtime search against /api/books/copies/search.
+  // Performance contract:
+  //   - The modal NEVER auto-loads on open.
+  //   - A query shorter than `MIN_BOOK_LOOKUP_LENGTH` is treated
+  //     as "no search" and clears the result list locally
+  //     instead of hitting the server.
+  //   - Each request is tagged with an incrementing id; if a
+  //     newer query is fired before the older one finishes, the
+  //     late response is ignored so the UI never shows stale
+  //     results for a previous keystroke.
+  //   - "Show recent" is opt-in (toggles `bookLookupMode`) and
+  //     sends `?recent=1` to the server, which returns the most
+  //     recently catalogued copies.
+  useEffect(() => {
+    if (!showBookLookupModal) return
+
+    // While in "recent" mode, the search box is disabled -- the
+    // server already returned the recent set when the toggle
+    // was clicked, so we don't re-fire on every keystroke.
+    if (bookLookupMode === 'recent') return
+
+    // Clear any pending debounce.
+    if (bookLookupDebounceRef.current) clearTimeout(bookLookupDebounceRef.current)
+
+    const q = bookLookupQuery.trim()
+
+    // No query (or shorter than the min) → reset results without
+    // hitting the server.
+    if (q.length < MIN_BOOK_LOOKUP_LENGTH) {
+      setBookLookupResults([])
+      setBookLookupHasSearched(false)
+      setBookLookupLoading(false)
+      return
+    }
+
+    // Tag the request so a late response from an older query
+    // can't overwrite a newer one.
+    const reqId = ++bookLookupReqIdRef.current
+    bookLookupDebounceRef.current = setTimeout(async () => {
+      setBookLookupLoading(true)
+      try {
+        const response = await fetch(
+          `/api/books/copies/search?q=${encodeURIComponent(q)}&limit=20`
+        )
+        if (reqId !== bookLookupReqIdRef.current) return // a newer query superseded us
+        if (response.ok) {
+          const data = await response.json()
+          setBookLookupResults(Array.isArray(data?.results) ? data.results : [])
+          setBookLookupHasSearched(true)
+        } else {
+          setBookLookupResults([])
+        }
+      } catch {
+        if (reqId !== bookLookupReqIdRef.current) return
+        setBookLookupResults([])
+      } finally {
+        if (reqId === bookLookupReqIdRef.current) {
+          setBookLookupLoading(false)
+        }
+      }
+    }, 250)
+    return () => {
+      if (bookLookupDebounceRef.current) clearTimeout(bookLookupDebounceRef.current)
+    }
+  }, [bookLookupQuery, showBookLookupModal, bookLookupMode])
+
+  // Helper to fetch the most recently catalogued copies
+  // (opt-in via the "Show recent" toggle).
+  const fetchRecentBookCopies = async () => {
+    setBookLookupMode('recent')
+    setBookLookupQuery('')
+    setBookLookupLoading(true)
+    const reqId = ++bookLookupReqIdRef.current
+    try {
+      const response = await fetch(
+        `/api/books/copies/search?recent=1&limit=20`
+      )
+      if (reqId !== bookLookupReqIdRef.current) return
+      if (response.ok) {
+        const data = await response.json()
+        setBookLookupResults(Array.isArray(data?.results) ? data.results : [])
+        setBookLookupHasSearched(true)
+      } else {
+        setBookLookupResults([])
+      }
+    } catch {
+      if (reqId !== bookLookupReqIdRef.current) return
+      setBookLookupResults([])
+    } finally {
+      if (reqId === bookLookupReqIdRef.current) {
+        setBookLookupLoading(false)
+      }
+    }
+  }
+
+  // Helper to switch back to the live-search mode (clears the
+  // recent list so the modal goes back to its "type to search"
+  // empty state).
+  const switchToSearchMode = () => {
+    setBookLookupMode('search')
+    setBookLookupResults([])
+    setBookLookupHasSearched(false)
+  }
+
+  const openBookLookupModal = () => {
+    setBookLookupQuery('')
+    setBookLookupResults([])
+    setBookLookupMode('search')
+    setBookLookupHasSearched(false)
+    setShowBookLookupModal(true)
+  }
+
+  const closeBookLookupModal = () => {
+    setShowBookLookupModal(false)
+    setBookLookupQuery('')
+    setBookLookupResults([])
+  }
+
+  // When the user picks a result, close the modal, put the
+  // accession number into the form, and reuse the existing
+  // lookupBook flow so the green "Selected Book Copy" panel
+  // (and all validation / availability checks) populate the
+  // same way they would for a manually-typed accession.
+  const selectBookFromLookup = async (accession: string) => {
+    closeBookLookupModal()
+    setAccessionNumber(accession)
+    // `true` so the user gets a toast if the copy is no
+    // longer available between search and selection.
+    await lookupBook(accession, true)
+  }
+
+  // Render `text` with every case-insensitive occurrence of
+  // `query` wrapped in a yellow background. Splits the text
+  // into an array of strings + React nodes so we can pass it
+  // straight into JSX. Returns the original text when the
+  // query is empty.
+  const highlight = (text: string | null | undefined, query: string) => {
+    if (!text) return ''
+    if (!query.trim()) return text
+    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(`(${escaped})`, 'ig')
+    const parts = text.split(re)
+    return parts.map((part, i) =>
+      re.test(part) ? (
+        <mark
+          key={i}
+          className="bg-yellow-200 text-gray-900 rounded px-0.5"
+        >
+          {part}
+        </mark>
+      ) : (
+        <React.Fragment key={i}>{part}</React.Fragment>
+      )
+    )
   }
 
   // User lookup function
@@ -558,12 +740,13 @@ export default function BorrowBooksPage() {
               <p className="mt-1 text-gray-600">Create a new book borrowing request</p>
             </div>
             <Link href="/books">
-              <Button variant="outline">
+              <Button variant="outline" className='bg-gray-200 px-5 h-[50px]'>
                 Back to Books
               </Button>
             </Link>
           </div>
         </div>
+        {/* on the creation of admin accounts,  */}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -584,20 +767,30 @@ export default function BorrowBooksPage() {
                     <Input
                       value={accessionNumber}
                       onChange={handleAccessionNumberChange}
-                      onBlur={() => accessionNumber.trim() && lookupBook(accessionNumber, true)}
                       placeholder="Enter accession number (e.g., LIB-000001)"
                       disabled={loading}
                       required
-                      className="flex-1"
+                      className="flex-1 h-[50px] w-full"
                     />
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => lookupBook(accessionNumber, true)}
                       disabled={loading || bookLoading || !accessionNumber.trim()}
-                      className="px-3"
+                      className="px-3 bg-primary-600 hover:bg-primary-700 h-[50px] text-white"
                     >
                       {bookLoading ? '...' : 'Search'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={openBookLookupModal}
+                      disabled={loading}
+                      className="px-3 h-[50px] hover:bg-primary-700 bg-primary-600 flex text-white gap-1.5"
+                      title="Browse and search all books by title, author, or ISBN"
+                    >
+                      <i className="fas fa-search-plus"></i>
+                      <span>Lookup</span>
                     </Button>
                   </div>
                 </div>
@@ -682,18 +875,17 @@ export default function BorrowBooksPage() {
                         <Input
                           value={accountId}
                           onChange={handleAccountIdChange}
-                          onBlur={() => accountId.trim() && lookupUser(accountId, true)}
                           placeholder="Enter user ID number"
                           disabled={loading}
                           required
-                          className="flex-1"
+                          className="flex-1 h-[50px]"
                         />
                         <Button
                           type="button"
                           variant="outline"
                           onClick={() => lookupUser(accountId, true)}
                           disabled={loading || userLoading || !accountId.trim()}
-                          className="px-3"
+                          className="px-3 bg-primary-600 h-[50px] text-white"
                         >
                           {userLoading ? '...' : 'Search'}
                         </Button>
@@ -910,6 +1102,7 @@ export default function BorrowBooksPage() {
               variant="outline"
               onClick={clearForm}
               disabled={loading}
+              className='h-[50px] bg-gray-200 w-[150px]'
             >
               Clear Form
             </Button>
@@ -920,7 +1113,7 @@ export default function BorrowBooksPage() {
                 (activeTab === 'department' && !departmentId) ||
                 (activeTab === 'office' && !officeId)
               }
-              className="min-w-[120px]"
+              className="min-w-[120px] bg-primary-600 h-[50px] text-white"
             >
               {loading ? (
                 <div className="flex items-center gap-2">
@@ -934,6 +1127,262 @@ export default function BorrowBooksPage() {
           </div>
         </form>
       </div>
+
+      {/* ---------- Book Lookup Modal ---------- */}
+      {/* Lets the staff find a book by title / author / ISBN /
+          publisher / accession when they don't know the exact
+          accession number. Realtime search (250ms debounce)
+          against /api/books/copies/search. The searched text
+          is highlighted in each result. Picking a result
+          closes the modal, fills in the accession number, and
+          triggers the same lookupBook flow used by the manual
+          Search button so the green "Selected Book Copy"
+          panel populates identically. */}
+      {showBookLookupModal && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={closeBookLookupModal}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <div className="flex items-center gap-2">
+                <i className="fas fa-search-plus text-blue-600"></i>
+                <h2 className="text-lg font-semibold text-gray-900">Book Lookup</h2>
+                <span className="text-xs text-gray-500">
+                  Search by title, author, ISBN, or accession
+                </span>
+              </div>
+              <button
+                onClick={closeBookLookupModal}
+                className="text-gray-400 hover:text-gray-600 p-1"
+                aria-label="Close"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="px-5 py-3 border-b bg-gray-50">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={bookLookupQuery}
+                    onChange={(e) => setBookLookupQuery(e.target.value)}
+                    onFocus={() => {
+                      // If the user clicks the search box while in
+                      // "recent" mode, switch back to live search so
+                      // typing actually filters.
+                      if (bookLookupMode === 'recent') switchToSearchMode()
+                    }}
+                    placeholder={
+                      bookLookupMode === 'recent'
+                        ? 'Click "Search by title / ISBN" to start a new search…'
+                        : 'Start typing a title, author, ISBN, or accession (min. 2 chars)…'
+                    }
+                    disabled={bookLookupMode === 'recent'}
+                    className="w-full pl-9 pr-9 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  />
+                  {bookLookupQuery && bookLookupMode === 'search' && (
+                    <button
+                      onClick={() => setBookLookupQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                      aria-label="Clear"
+                    >
+                      <i className="fas fa-times"></i>
+                    </button>
+                  )}
+                </div>
+                {/* "Show recent" / "Back to search" toggle. Opt-in
+                    so the modal never auto-loads data on open. */}
+                {bookLookupMode === 'search' ? (
+                  <button
+                    type="button"
+                    onClick={fetchRecentBookCopies}
+                    disabled={bookLookupLoading}
+                    className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                    title="Show the most recently catalogued book copies"
+                  >
+                    <i className="fas fa-clock-rotate-left"></i>
+                    Show recent
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={switchToSearchMode}
+                    className="px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <i className="fas fa-search"></i>
+                    Search by title / ISBN
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1.5">
+                {bookLookupLoading
+                  ? 'Searching…'
+                  : bookLookupMode === 'recent'
+                    ? `Showing the ${bookLookupResults.length} most recently catalogued copies.`
+                    : bookLookupQuery.trim()
+                      ? `${bookLookupResults.length} result${bookLookupResults.length !== 1 ? 's' : ''} for "${bookLookupQuery.trim()}"`
+                      : 'Start typing to search. Or click "Show recent" to browse the newest copies.'}
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {bookLookupLoading ? (
+                <div className="flex items-center justify-center py-12 text-sm text-gray-500">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-2"></div>
+                  {bookLookupMode === 'recent' ? 'Loading recent copies…' : 'Searching…'}
+                </div>
+              ) : bookLookupResults.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                  {bookLookupMode === 'search' && !bookLookupHasSearched ? (
+                    <>
+                      <i className="fas fa-keyboard text-3xl mb-2 text-gray-300"></i>
+                      <p className="text-sm font-medium text-gray-700">
+                        Type to search
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1 text-center max-w-xs">
+                        Start typing a title, author, ISBN, or accession
+                        number (at least 2 characters) to see matching copies.
+                      </p>
+                    </>
+                  ) : bookLookupQuery.trim() ? (
+                    <>
+                      <i className="fas fa-inbox text-3xl mb-2 text-gray-300"></i>
+                      <p className="text-sm font-medium text-gray-700">
+                        No books found
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Nothing matches "{bookLookupQuery.trim()}". Try a
+                        shorter or different keyword.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-inbox text-3xl mb-2 text-gray-300"></i>
+                      <p className="text-sm font-medium text-gray-700">
+                        No books available
+                      </p>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {bookLookupResults.map((r) => {
+                    const isAvailable = r.status === 'AVAILABLE'
+                    return (
+                      <li
+                        key={r.copy_id}
+                        onClick={() => isAvailable && selectBookFromLookup(r.accession_number)}
+                        className={`flex items-start gap-3 px-5 py-3 transition-colors ${
+                          isAvailable
+                            ? 'hover:bg-blue-50 cursor-pointer'
+                            : 'opacity-60 cursor-not-allowed bg-gray-50'
+                        }`}
+                      >
+                        <div
+                          className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${
+                            isAvailable
+                              ? 'bg-blue-100 text-blue-600'
+                              : 'bg-gray-200 text-gray-500'
+                          }`}
+                        >
+                          <i className="fas fa-book"></i>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                            <p className="text-sm font-semibold text-gray-900">
+                              {highlight(r.book?.title, bookLookupQuery)}
+                            </p>
+                            {!isAvailable && (
+                              <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full bg-red-100 text-red-700">
+                                {r.status}
+                              </span>
+                            )}
+                            {isAvailable && (
+                              <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full bg-green-100 text-green-700">
+                                Available
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-600">
+                            by{' '}
+                            <span className="font-medium text-gray-800">
+                              {highlight(r.book?.book_author, bookLookupQuery)}
+                            </span>
+                            {r.book?.publisher ? (
+                              <>
+                                <span className="mx-1.5 text-gray-300">·</span>
+                                {highlight(r.book.publisher, bookLookupQuery)}
+                              </>
+                            ) : null}
+                            {r.book?.year_published ? (
+                              <>
+                                <span className="mx-1.5 text-gray-300">·</span>
+                                {r.book.year_published}
+                              </>
+                            ) : null}
+                          </p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500 mt-1">
+                            <span>
+                              <span className="text-gray-400">Accession:</span>{' '}
+                              <span className="font-mono font-medium text-gray-700">
+                                {highlight(r.accession_number, bookLookupQuery)}
+                              </span>
+                            </span>
+                            {r.book?.isbn ? (
+                              <span>
+                                <span className="text-gray-400">ISBN:</span>{' '}
+                                <span className="font-mono">
+                                  {highlight(r.book.isbn, bookLookupQuery)}
+                                </span>
+                              </span>
+                            ) : null}
+                            {r.book?.category?.name ? (
+                              <span>
+                                <span className="text-gray-400">Category:</span>{' '}
+                                {r.book.category.name}
+                              </span>
+                            ) : null}
+                            {r.location ? (
+                              <span>
+                                <span className="text-gray-400">Location:</span>{' '}
+                                {r.location}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        {isAvailable && (
+                          <i className="fas fa-chevron-right text-gray-400 mt-1.5"></i>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t bg-gray-50 text-xs text-gray-500 flex items-center justify-between">
+              <span>
+                Tip: clicking an available copy auto-fills the accession
+                number on the form and runs the same validation as
+                manual search.
+              </span>
+              <button
+                onClick={closeBookLookupModal}
+                className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

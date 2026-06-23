@@ -3,7 +3,10 @@ import { UserRole } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
 
-// POST - Bulk update copy status
+// POST - Bulk update copy fields. Accepts either { copyIds, status }
+// for a status change, { copyIds, location } for a location
+// change, or { copyIds, archive: true } to archive them.
+// Exactly one of `status` / `location` / `archive` must be set.
 export const POST = withAuth(
   async (req: NextRequest, session, context) => {
     try {
@@ -15,14 +18,20 @@ export const POST = withAuth(
       }
 
       const body = await req.json()
-      const { copyIds, status } = body
+      const { copyIds, status, location, archive } = body
 
       if (!copyIds || !Array.isArray(copyIds) || copyIds.length === 0) {
         return createErrorResponse('Copy IDs are required', 400)
       }
 
-      if (!status || !['AVAILABLE', 'BORROWED', 'LOST', 'DAMAGED', 'MAINTENANCE'].includes(status)) {
-        return createErrorResponse('Invalid status', 400)
+      // Enforce exactly one operation per call so callers
+      // can't accidentally mix-and-match fields.
+      const ops = [status !== undefined, location !== undefined, archive === true].filter(Boolean).length
+      if (ops === 0) {
+        return createErrorResponse('Specify one of: status, location, or archive', 400)
+      }
+      if (ops > 1) {
+        return createErrorResponse('Specify only one of: status, location, or archive', 400)
       }
 
       // Fetch all copies to validate
@@ -38,57 +47,107 @@ export const POST = withAuth(
         return createErrorResponse('Some copies not found or already archived', 404)
       }
 
-      // Check if any copy is currently borrowed and trying to change status
-      const borrowedCopies = copies.filter(c => c.status === 'BORROWED')
-      if (borrowedCopies.length > 0 && status !== 'BORROWED') {
-        return createErrorResponse(
-          `Cannot change status of ${borrowedCopies.length} borrowed cop${borrowedCopies.length > 1 ? 'ies' : 'y'}`,
-          400
-        )
-      }
-
-      // Calculate availability changes
-      let availabilityChange = 0
-      for (const copy of copies) {
-        const wasAvailable = copy.status === 'AVAILABLE'
-        const willBeAvailable = status === 'AVAILABLE'
-
-        if (wasAvailable && !willBeAvailable) {
-          availabilityChange -= 1
-        } else if (!wasAvailable && willBeAvailable) {
-          availabilityChange += 1
+      // -------- status change --------
+      if (status !== undefined) {
+        if (!['AVAILABLE', 'BORROWED', 'LOST', 'DAMAGED', 'MAINTENANCE'].includes(status)) {
+          return createErrorResponse('Invalid status', 400)
         }
-      }
+        const borrowedCopies = copies.filter(c => c.status === 'BORROWED')
+        if (borrowedCopies.length > 0 && status !== 'BORROWED') {
+          return createErrorResponse(
+            `Cannot change status of ${borrowedCopies.length} borrowed cop${borrowedCopies.length > 1 ? 'ies' : 'y'}`,
+            400
+          )
+        }
 
-      // Update all copies in a transaction
-      await prisma.$transaction(async (tx) => {
-        // Update copies
-        await tx.bookCopy.updateMany({
-          where: {
-            copy_id: { in: copyIds }
-          },
-          data: {
-            status
+        let availabilityChange = 0
+        for (const copy of copies) {
+          const wasAvailable = copy.status === 'AVAILABLE'
+          const willBeAvailable = status === 'AVAILABLE'
+          if (wasAvailable && !willBeAvailable) availabilityChange -= 1
+          else if (!wasAvailable && willBeAvailable) availabilityChange += 1
+        }
+
+        await prisma.$transaction(async (tx) => {
+          await tx.bookCopy.updateMany({
+            where: { copy_id: { in: copyIds } },
+            data: { status }
+          })
+          if (availabilityChange !== 0) {
+            await tx.book.update({
+              where: { book_id: bookId },
+              data: {
+                copies_available: { increment: availabilityChange }
+              }
+            })
           }
         })
 
-        // Update book availability if needed
-        if (availabilityChange !== 0) {
+        return createSuccessResponse(
+          { updatedCount: copies.length, operation: 'status' },
+          `Successfully updated status of ${copies.length} cop${copies.length > 1 ? 'ies' : 'y'}`
+        )
+      }
+
+      // -------- location change --------
+      if (location !== undefined) {
+        if (typeof location !== 'string') {
+          return createErrorResponse('Invalid location', 400)
+        }
+        const cleaned = location.trim()
+        if (cleaned.length > 120) {
+          return createErrorResponse('Location is too long (max 120 characters)', 400)
+        }
+
+        await prisma.bookCopy.updateMany({
+          where: { copy_id: { in: copyIds } },
+          data: { location: cleaned || null }
+        })
+
+        return createSuccessResponse(
+          { updatedCount: copies.length, operation: 'location', location: cleaned },
+          `Successfully updated location of ${copies.length} cop${copies.length > 1 ? 'ies' : 'y'}`
+        )
+      }
+
+      // -------- archive --------
+      if (archive === true) {
+        const borrowedCopies = copies.filter(c => c.status === 'BORROWED')
+        if (borrowedCopies.length > 0) {
+          return createErrorResponse(
+            `Cannot archive ${borrowedCopies.length} borrowed cop${borrowedCopies.length > 1 ? 'ies' : 'y'}`,
+            400
+          )
+        }
+
+        const affected = await prisma.$transaction(async (tx) => {
+          await tx.bookCopy.updateMany({
+            where: { copy_id: { in: copyIds } },
+            data: { archived_at: new Date(), status: 'DAMAGED' }
+          })
+          // Decrement `copies_total` for every archived row
+          // and `copies_available` for any that were available
+          // at the time of archive.
+          const wasAvailable = copies.filter(c => c.status === 'AVAILABLE').length
           await tx.book.update({
             where: { book_id: bookId },
             data: {
-              copies_available: {
-                increment: availabilityChange
-              }
+              copies_total: { decrement: copies.length },
+              ...(wasAvailable > 0 && {
+                copies_available: { decrement: wasAvailable }
+              })
             }
           })
-        }
-      })
+          return copies.length
+        })
 
-      return createSuccessResponse(
-        { updatedCount: copies.length },
-        `Successfully updated ${copies.length} cop${copies.length > 1 ? 'ies' : 'y'}`
-      )
+        return createSuccessResponse(
+          { updatedCount: affected, operation: 'archive' },
+          `Successfully archived ${affected} cop${affected > 1 ? 'ies' : 'y'}`
+        )
+      }
+
+      return createErrorResponse('No operation performed', 400)
     } catch (error) {
       console.error('Error bulk updating copies:', error)
       return createErrorResponse('Failed to update copies', 500)

@@ -401,7 +401,7 @@ function AdminAccounts() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         {/* Search and Filters */}
         <div className="mb-6 space-y-4">
           <div className="flex flex-col lg:flex-row gap-4">

@@ -3,6 +3,7 @@ import {
   UserType, 
   UserStatus, 
   BookStatus,
+  Campus,
   LockerStatus,
   ReportModule,
   PenaltyType,
@@ -72,6 +73,9 @@ export interface AuthUser {
   accountId: string
   name: string
   email?: string
+  /** Current campus designation for STAFF accounts. NULL for
+   *  ADMIN / SUPER_ADMIN and for non-staff roles. */
+  campus?: Campus | null
 }
 
 export interface AuthSession {
@@ -111,26 +115,37 @@ export interface LibraryUser {
   account_id: string
   first_name: string
   last_name: string
-  middle_name?: string
-  suffix?: string
-  full_name?: string
+  // Optional string/number fields use `string | null` (or
+  // `number | null`) to match the underlying Prisma schema
+  // where the column is `String?` / `Int?`. Prisma returns
+  // `null` for missing values, not `undefined`, so the type
+  // has to allow `null` or strict callers (like
+  // EntryService.recordEntry which returns EntryLog with an
+  // included user) fail to compile.
+  middle_name?: string | null
+  suffix?: string | null
+  full_name?: string | null
   user_type: UserType
   education_level?: EducationLevel
-  grade_level_id?: number
-  section_id?: number
-  strand_id?: number
-  course?: string
-  department?: string
-  office_id?: number
-  year_level?: string
-  email?: string
-  rfid_code?: string
-  purpose?: string
-  contact_number?: string
+  grade_level_id?: number | null
+  section_id?: number | null
+  strand_id?: number | null
+  // Compact codes for the table view. The full
+  // department_ref / program relations are still
+  // available on the user object if a page needs the
+  // long name.
+  course?: string | null
+  department?: string | null
+  office_id?: number | null
+  year_level?: string | null
+  email?: string | null
+  rfid_code?: string | null
+  purpose?: string | null
+  contact_number?: string | null
   status: UserStatus
   created_at: Date
   updated_at: Date
-  archived_at?: Date
+  archived_at?: Date | null
 }
 
 export interface UserAccount {
@@ -356,11 +371,12 @@ export interface LockerTransaction {
 export interface EntryLog {
   entry_id: number
   entry_time: Date
-  exit_time?: Date
+  exit_time: Date  | null
   user_id: number
-  rfid_code?: string
-  purpose?: string
-  verified_by?: number
+  rfid_code: string | null
+  purpose: string | null
+  verified_by: number | null
+  campus: Campus
   user?: LibraryUser
 }
 
@@ -767,6 +783,7 @@ export {
   UserType,
   UserStatus,
   BookStatus,
+  Campus,
   LockerStatus,
   ReportModule,
   PenaltyType,

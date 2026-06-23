@@ -67,6 +67,20 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // Public catalogue endpoints must always return the
+        // freshest data so newly added books / summaries show
+        // up immediately on the public /browse page.
+        source: '/api/public/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, no-cache, must-revalidate, max-age=0',
+          },
+          { key: 'Pragma', value: 'no-cache' },
+          { key: 'Expires', value: '0' },
+        ],
+      },
     ];
   },
   

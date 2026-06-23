@@ -1,5 +1,5 @@
 import { type ClassValue, clsx } from 'clsx'
-import { UserRole, UserType, PaginatedResponse, SearchFilters } from '@/types'
+import { UserRole, UserType, PaginatedResponse, SearchFilters, Campus } from '@/types'
 import { PAGINATION, VALIDATION } from './constants'
 
 export function cn(...inputs: ClassValue[]) {
@@ -50,9 +50,17 @@ export function hasPenalty(penalty: any): boolean {
   return penalty != null && Number(penalty) > 0
 }
 
+/**
+ * Calendar-day difference between two dates. Both sides are
+ * normalized to midnight so the time-of-day doesn't bump the
+ * result up. Example: start = Jun 21 14:00, end = Jun 22 10:00
+ * -> 1 day (not 2, which Math.ceil of the millisecond diff
+ * would return because the gap is ~20h ≈ 0.83 days).
+ */
 export function calculateDaysDifference(start: Date, end: Date): number {
-  const diffTime = Math.abs(end.getTime() - start.getTime())
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  const a = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+  const b = new Date(end.getFullYear(), end.getMonth(), end.getDate())
+  return Math.floor(Math.abs(b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24))
 }
 
 export function calculateHoursDifference(start: Date, end: Date): number {
@@ -61,7 +69,13 @@ export function calculateHoursDifference(start: Date, end: Date): number {
 }
 
 export function isOverdue(dueDate: Date): boolean {
-  return new Date() > dueDate
+  // Compare on calendar days, not on the raw timestamp, so a
+  // book due "today" isn't reported as overdue until the next
+  // day. We treat the due date as end-of-day so a book due
+  // today at any time-of-day is still considered on-time.
+  const due = new Date(dueDate)
+  const dueEnd = new Date(due.getFullYear(), due.getMonth(), due.getDate(), 23, 59, 59, 999)
+  return Date.now() > dueEnd.getTime()
 }
 
 export function getDaysOverdue(dueDate: Date): number {
@@ -83,6 +97,31 @@ export function generateAccountId(userType: UserType, year?: string): string {
 
 export function generateRFIDCode(): string {
   return Math.random().toString(36).substring(2, 15).toUpperCase()
+}
+
+/**
+ * Human-friendly, sortable, unique-looking transaction ID.
+ *
+ * Format: `BT-YYMM-NNNNNN`
+ *   - BT     = Book Transaction prefix (consistent with the
+ *             library's BT-* / LIB-* naming scheme)
+ *   - YYMM   = two-digit year + month of the transaction
+ *   - NNNNNN = six-digit zero-padded numeric id
+ *
+ * The numeric id is whatever the caller passes in (usually the
+ * DB `transaction_id`). Since the underlying id is already
+ * unique, the rendered string is unique by construction.
+ *
+ * Examples:
+ *   generateTransactionId(1, new Date('2024-06-21'))  -> 'BT-2406-000001'
+ *   generateTransactionId(42)                          -> 'BT-YYMM-000042'
+ */
+export function generateTransactionId(id: number | string, when?: Date): string {
+  const d = when || new Date()
+  const yy = d.getFullYear().toString().slice(-2)
+  const mm = (d.getMonth() + 1).toString().padStart(2, '0')
+  const n = String(id).padStart(6, '0')
+  return `BT-${yy}${mm}-${n}`
 }
 
 // Email validation moved to validations.ts to avoid conflicts
@@ -489,4 +528,20 @@ export function formatDateRangeForFilename(
   } else {
     return `${startDate.toLocaleDateString('en-US', { month: 'short' })}_${startDate.getDate()}_${startDate.getFullYear()}-${endDate.toLocaleDateString('en-US', { month: 'short' })}_${endDate.getDate()}_${endDate.getFullYear()}`
   }
+}
+
+/**
+ * Map a Campus enum value to the human-readable library label used
+ * in report headers (PDF / Excel / CSV) and the page UI.
+ *
+ *   COLLEGE          -> "College Library"
+ *   BASIC_EDUCATION  -> "Basic Education Library"
+ *   null / undefined -> "" (caller decides what to show for "all")
+ */
+export function campusLibraryLabel(
+  campus: Campus | null | undefined
+): string {
+  if (campus === Campus.COLLEGE) return 'College Library'
+  if (campus === Campus.BASIC_EDUCATION) return 'Basic Education Library'
+  return ''
 }

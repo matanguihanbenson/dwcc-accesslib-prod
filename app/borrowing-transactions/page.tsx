@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { useApiSWR, useApi } from '@/lib/hooks/useApi'
 import { useCacheManager } from '@/lib/hooks/useCacheManager'
 import { notify } from '@/lib/notification'
+import { generateTransactionId } from '@/lib/utils'
 
 interface BookTransaction {
   transaction_id: number
@@ -257,6 +258,10 @@ export default function BorrowingTransactionsPage() {
     }
   }
 
+  /*
+  
+  */
+
   // Handler functions
   const handleRefresh = () => {
     refreshTransactions()
@@ -482,8 +487,15 @@ export default function BorrowingTransactionsPage() {
                       <tr key={transaction.transaction_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm">
-                            <div className="font-medium text-gray-900">
-                              #{transaction.transaction_id}
+                            <div className="font-medium text-gray-900 font-mono">
+                              {generateTransactionId(
+                                transaction.transaction_id,
+                                transaction.borrow_date
+                                  ? new Date(transaction.borrow_date)
+                                  : transaction.created_at
+                                    ? new Date(transaction.created_at)
+                                    : undefined
+                              )}
                             </div>
                             <div className="text-gray-500">
                               {formatDate(transaction.created_at)}

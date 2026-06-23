@@ -445,7 +445,7 @@ export default function AdminView({ className }: AdminViewProps) {
                   <SelectContent>
                     <SelectItem value="">All Offices</SelectItem>
                     {offices.map((office: any) => (
-                      <SelectItem key={office.office_id} value={String(office.office_id)}>
+                      <SelectItem key={office.office_id} value={String(office.name)}>
                         {office.name}
                       </SelectItem>
                     ))}
@@ -459,12 +459,13 @@ export default function AdminView({ className }: AdminViewProps) {
                 </label>
                 <Select
                   value={filters.gradeLevelId}
-                  onValueChange={(value) => handleFilterChange('gradeLevelId', value)}
+                  onValueChange={(value) => handleFilterChange('gradeLevelName', value)}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All Grades" />
                   </SelectTrigger>
                   <SelectContent>
+                    {/*  */}
                     <SelectItem value="">All Grades</SelectItem>
                     <SelectItem value="1">Kindergarten</SelectItem>
                     <SelectItem value="2">Grade 1</SelectItem>
@@ -917,6 +918,9 @@ export default function AdminView({ className }: AdminViewProps) {
           )}
         </div>
       )}
+      {/*
+       
+      */}
     </div>
   );
 }

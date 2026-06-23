@@ -197,13 +197,17 @@ export class UserService extends BaseService {
         }
       )
 
-      // Transform the data to include department and course names
+      // Transform the data to include department and program codes
+      // (the compact form used in table cells). The full
+      // `department_ref` and `program` objects are still
+      // attached so pages that need the long name can read
+      // them off the relation.
       const transformedData = {
         ...result,
         data: result.data ? result.data.map((user: any) => ({
           ...user,
-          department: user.department_ref ? user.department_ref.name : null,
-          course: user.program ? user.program.name : null
+          department: user.department_ref ? user.department_ref.code : null,
+          course: user.program ? user.program.code : null
         })) : []
       }
 

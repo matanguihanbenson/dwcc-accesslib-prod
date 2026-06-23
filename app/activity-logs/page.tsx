@@ -741,7 +741,7 @@ export default function ActivityLogsPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           <button
                             onClick={() => openLogModal(log)}
-                            className="text-indigo-600 hover:text-indigo-900 transition-colors"
+                            className="text-indigo-600 border-2 px-2 py-2 rounded-md !border-indigo-600 hover:text-indigo-900 transition-colors"
                             title="View Details"
                           >
                             <i className="fas fa-eye"></i>
@@ -891,103 +891,115 @@ export default function ActivityLogsPage() {
       {/* Log Details Modal */}
       {showModal && selectedLog && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
+          <div className="relative top-10 mx-auto p-3 border w-11/12 md:w-3/4 lg:w-2/3 shadow-lg rounded-md bg-white">
+            <div className="mt-1">
               {/* Modal Header */}
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-base font-medium text-gray-900">
                   Activity Log Details
                 </h3>
                 <button
                   onClick={closeLogModal}
                   className="text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  <i className="fas fa-times text-xl"></i>
+                  <i className="fas fa-times"></i>
                 </button>
               </div>
 
               {/* Modal Content */}
-              <div className="space-y-4">
-                {/* User Information */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">User Information</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <span className="text-xs text-gray-500">Full Name:</span>
-                      <p className="text-sm font-medium">{selectedLog.user?.full_name || 'Unknown'}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">ID Number:</span>
-                      <p className="text-sm font-medium">{selectedLog.user?.account_id || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">Role:</span>
-                      <p className="text-sm font-medium">{selectedLog.user?.role || 'Unknown'}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">User Type:</span>
-                      <p className="text-sm font-medium">{selectedLog.user?.user_type || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">Email:</span>
-                      <p className="text-sm font-medium">{selectedLog.user?.email || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">Status:</span>
-                      <p className="text-sm font-medium">{selectedLog.user?.status || 'N/A'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Activity Information */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Activity Information</h4>
-                  <div className="space-y-3">
-                    <div>
-                      <span className="text-xs text-gray-500">Action:</span>
-                      <div className="flex items-center mt-1">
-                        <div className="mr-2">
-                          {getActionIcon(selectedLog.action)}
-                        </div>
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getActionBadgeColor(selectedLog.action)}`}>
-                          {selectedLog.action.replace(/_/g, ' ')}
-                        </span>
+              <div className="space-y-2">
+                {/* Two-column row: User Information (left) | Activity Information (right) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {/* User Information */}
+                  <div className="bg-gray-50 p-2.5 rounded">
+                    <h4 className="text-xs font-semibold text-gray-700 mb-1.5 flex items-center">
+                      <i className="fas fa-user mr-1.5 text-gray-500 text-[10px]"></i>
+                      User Information
+                    </h4>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Full Name</span>
+                        <p className="text-xs font-medium break-words leading-tight">{selectedLog.user?.full_name || 'Unknown'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">ID Number</span>
+                        <p className="text-xs font-medium leading-tight">{selectedLog.user?.account_id || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Role</span>
+                        <p className="text-xs font-medium leading-tight">{selectedLog.user?.role || 'Unknown'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">User Type</span>
+                        <p className="text-xs font-medium leading-tight">{selectedLog.user?.user_type || 'N/A'}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Email</span>
+                        <p className="text-xs font-medium break-all leading-tight">{selectedLog.user?.email || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Status</span>
+                        <p className="text-xs font-medium leading-tight">{selectedLog.user?.status || 'N/A'}</p>
                       </div>
                     </div>
-                    <div>
-                      <span className="text-xs text-gray-500">Details:</span>
-                      <p className="text-sm mt-1 bg-white p-3 rounded border">
-                        {selectedLog.details || 'No additional details available'}
-                      </p>
+                  </div>
+
+                  {/* Activity Information */}
+                  <div className="bg-gray-50 p-2.5 rounded">
+                    <h4 className="text-xs font-semibold text-gray-700 mb-1.5 flex items-center">
+                      <i className="fas fa-bolt mr-1.5 text-gray-500 text-[10px]"></i>
+                      Activity Information
+                    </h4>
+                    <div className="space-y-1.5">
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Action</span>
+                        <div className="flex items-center mt-0.5">
+                          <div className="mr-1.5 text-xs">
+                            {getActionIcon(selectedLog.action)}
+                          </div>
+                          <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${getActionBadgeColor(selectedLog.action)}`}>
+                            {selectedLog.action.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Details</span>
+                        <p className="text-xs mt-0.5 bg-white px-2 py-1.5 rounded border break-words max-h-40 overflow-y-auto leading-snug">
+                          {selectedLog.details || 'No additional details available'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">Date & Time</span>
+                        <p className="text-xs font-medium leading-tight">{formatDateTime(selectedLog.created_at)}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Technical Information */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Technical Information</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Technical Information (full width, below the two-column row) */}
+                <div className="bg-gray-50 p-2.5 rounded">
+                  <h4 className="text-xs font-semibold text-gray-700 mb-1.5 flex items-center">
+                    <i className="fas fa-server mr-1.5 text-gray-500 text-[10px]"></i>
+                    Technical Information
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1.5">
                     <div>
-                      <span className="text-xs text-gray-500">Date & Time:</span>
-                      <p className="text-sm font-medium">{formatDateTime(selectedLog.created_at)}</p>
+                      <span className="text-[10px] uppercase tracking-wide text-gray-500">IP Address</span>
+                      <p className="text-xs font-medium leading-tight">{selectedLog.ip_address || 'N/A'}</p>
                     </div>
                     <div>
-                      <span className="text-xs text-gray-500">IP Address:</span>
-                      <p className="text-sm font-medium">{selectedLog.ip_address || 'N/A'}</p>
-                    </div>
-                    <div className="md:col-span-2">
-                      <span className="text-xs text-gray-500">User Agent:</span>
-                      <p className="text-sm font-medium break-all">{selectedLog.user_agent || 'N/A'}</p>
+                      <span className="text-[10px] uppercase tracking-wide text-gray-500">User Agent</span>
+                      <p className="text-xs font-medium break-all leading-tight">{selectedLog.user_agent || 'N/A'}</p>
                     </div>
                   </div>
                 </div>
               </div>
 
               {/* Modal Footer */}
-              <div className="flex justify-end mt-6">
+              <div className="flex justify-end mt-3">
                 <button
                   onClick={closeLogModal}
-                  className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                  className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
                 >
                   Close
                 </button>

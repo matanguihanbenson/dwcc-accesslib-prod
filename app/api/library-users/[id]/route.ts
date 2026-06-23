@@ -13,8 +13,16 @@ export async function GET(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    
-    if (!session || (session.user.role !== UserRole.SUPER_ADMIN && session.user.role !== UserRole.ADMIN)) {
+
+    // GET is available to SUPER_ADMIN, ADMIN, and STAFF
+    // (STAFF needs to view user details + bind RFID).
+    // PUT/DELETE below remain admin-only.
+    if (
+      !session ||
+      (session.user.role !== UserRole.SUPER_ADMIN &&
+        session.user.role !== UserRole.ADMIN &&
+        session.user.role !== UserRole.STAFF)
+    ) {
       return createErrorResponse('Unauthorized', 401)
     }
 
@@ -101,8 +109,18 @@ export async function PUT(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    
-    if (!session || (session.user.role !== UserRole.SUPER_ADMIN && session.user.role !== UserRole.ADMIN)) {
+
+    // PUT is available to SUPER_ADMIN, ADMIN, and STAFF
+    // (STAFF has the same library-user management
+    // permissions as ADMIN on the UI side). DELETE
+    // remains SUPER_ADMIN-only — see the DELETE handler
+    // below.
+    if (
+      !session ||
+      (session.user.role !== UserRole.SUPER_ADMIN &&
+        session.user.role !== UserRole.ADMIN &&
+        session.user.role !== UserRole.STAFF)
+    ) {
       return createErrorResponse('Unauthorized', 401)
     }
 

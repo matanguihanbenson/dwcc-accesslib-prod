@@ -604,6 +604,7 @@ export default function AdminView({ className }: AdminViewProps) {
             <tbody className="bg-white divide-y divide-gray-200">
               {currentLogs.length === 0 ? (
                 <tr>
+                
                   <td colSpan={6} className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center">
                       <svg className="w-12 h-12 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

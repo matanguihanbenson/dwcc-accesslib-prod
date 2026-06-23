@@ -104,12 +104,19 @@ export async function PATCH(
 
     // Update the transaction and locker status
     const updatedTransaction = await prisma.$transaction(async (tx) => {
-      // Update the locker transaction
+      // Update the locker transaction. We must explicitly set status to
+      // 'COMPLETED' here — without this, the stored status stays 'ACTIVE'
+      // forever after return, which makes every list/report that reads the
+      // raw column think the rental is still ongoing. (Some list endpoints
+      // re-compute status from `return_time`, but any direct query of the
+      // column — like the user-statistics report — would report a wrong
+      // status until the next schema migration or manual cleanup.)
       const updated = await tx.lockerTransaction.update({
         where: { transaction_id: transactionId },
         data: {
           return_time: returnTime,
-          penalty: penalty
+          penalty: penalty,
+          status: 'COMPLETED'
         },
         include: {
           locker: true,

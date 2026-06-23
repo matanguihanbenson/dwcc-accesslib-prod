@@ -191,7 +191,7 @@ export default function LoginPage() {
               type="submit"
               variant="default"
               size="lg"
-              className="w-full"
+              className="w-full bg-primary-600 text-white" 
               disabled={loading}
             >
               {loading ? "Signing in..." : "Sign In"}

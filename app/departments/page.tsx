@@ -167,7 +167,7 @@ export default function DepartmentsPage() {
             Manage academic departments and divisions
           </p>
         </div>
-        <Button onClick={() => router.push('/departments/add')}>
+        <Button onClick={() => router.push('/departments/add')} className="bg-primary-600 h-[50px] px-5 text-white hover:bg-primary-800">
           <i className="fas fa-plus mr-2" />
           Add Department
         </Button>
@@ -249,6 +249,7 @@ export default function DepartmentsPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className='bg-primary-600 hover:bg-primary-700 px-2 py-4 text-white'
                             onClick={() => router.push(`/departments/${department.department_id}`)}
                             title="See Details"
                           >
@@ -258,6 +259,7 @@ export default function DepartmentsPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className='bg-orange-500 hover:bg-orange-600 px-2 py-4 text-white'
                             onClick={() => router.push(`/departments/${department.department_id}/edit`)}
                             title="Edit Department"
                           >
@@ -269,8 +271,8 @@ export default function DepartmentsPage() {
                             onClick={() => handleToggleStatus(department.department_id, department.is_active, department.name)}
                             title={department.is_active ? 'Deactivate Department' : 'Activate Department'}
                             className={department.is_active 
-                              ? 'text-red-600 hover:text-red-700 hover:bg-red-50 border-red-600' 
-                              : 'text-green-600 hover:text-green-700 hover:bg-green-50 border-green-600'}
+                              ? 'text-red-600 hover:text-red-700 hover:bg-red-50 !border-red-600 py-4 px-2' 
+                              : 'text-green-600 hover:text-green-700 hover:bg-green-50 px-2 py-4 !border-green-600'}
                           >
                             <i className={`fas ${department.is_active ? 'fa-times-circle' : 'fa-check-circle'}`} />
                           </Button>

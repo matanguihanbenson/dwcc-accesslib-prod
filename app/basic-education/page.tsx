@@ -265,7 +265,7 @@ export default function BasicEducationPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="strands">
@@ -288,7 +288,7 @@ export default function BasicEducationPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Senior High School Strands</CardTitle>
-                  <Button onClick={handleAddStrand}>
+                  <Button onClick={handleAddStrand} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
                     <i className="fas fa-plus mr-2"></i>
                     Add Strand
                   </Button>
@@ -404,7 +404,7 @@ export default function BasicEducationPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Grade Levels</CardTitle>
-                  <Button onClick={handleAddGradeLevel}>
+                  <Button onClick={handleAddGradeLevel} className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2'>
                     <i className="fas fa-plus mr-2"></i>
                     Add Grade Level
                   </Button>
@@ -537,7 +537,7 @@ export default function BasicEducationPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Student Sections</CardTitle>
-                  <Button onClick={handleAddSection}>
+                  <Button onClick={handleAddSection} className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2'>
                     <i className="fas fa-plus mr-2"></i>
                     Add Section
                   </Button>

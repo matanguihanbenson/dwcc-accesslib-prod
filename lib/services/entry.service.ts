@@ -6,11 +6,35 @@ import {
   EntryLog,
   SearchFilters,
   UserRole,
-  UserStatus
+  UserStatus,
+  Campus
 } from '@/types'
 import { AppError } from '@/lib/errors'
 
 export class EntryService extends BaseService {
+  /**
+   * Resolve the campus of the staff account that is performing the
+   * verification. Returns the staff's CURRENT designation so each
+   * entry is stamped with the campus the staff was assigned to at
+   * the moment of the entry. Falls back to COLLEGE for super admins
+   * (who have no campus) or when the staff row is missing.
+   */
+  private async resolveVerifierCampus(verifiedBy: number | undefined): Promise<Campus> {
+    if (!verifiedBy) return Campus.COLLEGE
+    try {
+      const account = await prisma.userAccount.findUnique({
+        where: { id: verifiedBy },
+        select: { campus: true, role: true }
+      })
+      // ADMIN / SUPER_ADMIN have no campus; default to COLLEGE so a
+      // super-admin override still produces a sensible value.
+      if (!account || !account.campus) return Campus.COLLEGE
+      return account.campus
+    } catch {
+      return Campus.COLLEGE
+    }
+  }
+
   async recordEntry(userId: number, rfidCode?: string, purpose?: string, verifiedBy?: number): Promise<ServiceResult<EntryLog>> {
     try {
       const validatedUserId = this.validateId(userId, 'User ID')
@@ -38,16 +62,25 @@ export class EntryService extends BaseService {
       // same nested user data (department_ref, program) the REST list endpoint
       // returns. Without this the admin view's optimistic prepend rendered
       // "N/A" for the department, and exit events had no user info at all.
+      //
+      // Every field of `LibraryUser` that is required (not optional)
+      // must be selected here -- otherwise the inferred Prisma return
+      // type won't match `EntryLog.user` and `handleSuccess<EntryLog>`
+      // will fail to compile.
       const userInclude = {
         user: {
           select: {
             user_id: true,
-            full_name: true,
+            first_name: true,
+            last_name: true,
             account_id: true,
+            full_name: true,
             user_type: true,
             year_level: true,
             status: true,
             department_id: true,
+            created_at: true,
+            updated_at: true,
             department_ref: { select: { name: true } },
             program: { select: { name: true } },
           },
@@ -63,9 +96,6 @@ export class EntryService extends BaseService {
           { exit_time: exitTime }
         )
 
-        // Re-fetch the row with the user relation so the broadcast carries
-        // the name/department, allowing the admin realtime toast to show
-        // "Cedrick Dimayuga, Jr exited" instead of "User #4".
         const updatedEntry = await prisma.entryLog.findUnique({
           where: { entry_id: existingActiveEntry.entry_id },
           include: userInclude,
@@ -80,23 +110,27 @@ export class EntryService extends BaseService {
           )
         }
 
-        return this.handleSuccess(
-          updatedEntry ?? {
-            ...existingActiveEntry,
-            exit_time: exitTime,
-            rfid_code: existingActiveEntry.rfid_code || undefined,
-            purpose: existingActiveEntry.purpose || undefined,
-            verified_by: existingActiveEntry.verified_by || undefined,
-          },
-          'Exit recorded successfully'
-        )
+        // Build the value we want to return. We cast the
+        // Prisma-inferred row to `EntryLog` so optional/nullable
+        // field differences (e.g. Prisma returns `string | null`
+        // for `String?` columns while the service contract uses
+        // the same shape) don't break the call to
+        // `handleSuccess<EntryLog>`.
+        const result: EntryLog = updatedEntry
+          ? (updatedEntry as unknown as EntryLog)
+          : ({ ...(existingActiveEntry as unknown as EntryLog), exit_time: exitTime })
+
+        return this.handleSuccess<EntryLog>(result, 'Exit recorded successfully')
       } else {
+        const verifierCampus = await this.resolveVerifierCampus(verifiedBy)
+
         const entryLog = await this.create<EntryLog>(prisma.entryLog, {
           user_id: validatedUserId,
           entry_time: new Date(),
           rfid_code: rfidCode,
           purpose: purpose,
           verified_by: verifiedBy,
+          campus: verifierCampus,
         }, userInclude)
 
         if (verifiedBy) {
@@ -104,7 +138,7 @@ export class EntryService extends BaseService {
             verifiedBy,
             UserRole.STAFF,
             'RECORD_ENTRY',
-            `Recorded entry for user: ${user.full_name} (${user.account_id})`
+            `Recorded entry for user: ${user.full_name} (${user.account_id}) on campus ${verifierCampus}`
           )
         }
 
@@ -142,12 +176,16 @@ export class EntryService extends BaseService {
         user: {
           select: {
             user_id: true,
-            full_name: true,
+            first_name: true,
+            last_name: true,
             account_id: true,
+            full_name: true,
             user_type: true,
             year_level: true,
             status: true,
             department_id: true,
+            created_at: true,
+            updated_at: true,
             department_ref: {
               select: {
                 name: true
@@ -161,6 +199,8 @@ export class EntryService extends BaseService {
           }
         }
       } : {}
+      // `campus` is a top-level column on entrylog so it is always
+      // available regardless of the include above.
 
       console.log('includeClause:', JSON.stringify(includeClause, null, 2)) // Debug log
 
@@ -454,6 +494,17 @@ export class EntryService extends BaseService {
         }
       }
     }
+
+    // Filter by grade level name (preferred when the UI shows names instead of
+    // ids). Mirrors the department filter pattern.
+    if (filters.grade_level_name) {
+      where.user = {
+        ...where.user,
+        grade_level: {
+          name: { contains: filters.grade_level_name }
+        }
+      }
+    }
     
     // Year level filter
     if (filters.year_level || filters.yearLevel) {
@@ -462,6 +513,11 @@ export class EntryService extends BaseService {
         ...where.user,
         year_level: { contains: yearLevel }
       }
+    }
+    
+    // Campus filter — column directly on entrylog, no relation join needed.
+    if (filters.campus) {
+      where.campus = filters.campus
     }
     
     // Date range filters

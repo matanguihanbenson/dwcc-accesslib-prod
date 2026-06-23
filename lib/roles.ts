@@ -17,7 +17,12 @@ export function isStaff(role: UserRole): boolean {
 }
 
 export function canManageUsers(role: UserRole): boolean {
-  return isAdmin(role)
+  // STAFF now has the same library-user management
+  // permissions as ADMIN (add / edit / archive / bind
+  // RFID / view / activate-deactivate). SUPER_ADMIN-only
+  // operations (delete, manage categories) are gated
+  // separately via `canManageSystem`.
+  return isAdmin(role) || isStaff(role)
 }
 
 export function canManageBooks(role: UserRole): boolean {

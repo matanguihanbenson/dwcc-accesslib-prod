@@ -25,12 +25,19 @@ function AddStaffPage() {
   
   const [loading, setLoading] = useState(false)
   const [authReady, setAuthReady] = useState(false)
-  // Helper function to capitalize first letter of each word
+  // Helper function to capitalize first letter of each word,
+  // while preserving all-caps abbreviations like "III", "II",
+  // "IV", "JR", "SR" so they don't get rendered as "Iii" etc.
   const capitalizeWords = (str: string): string => {
     if (!str) return ''
     return str
       .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .map(word => {
+        // If the user typed a fully uppercase word (Roman
+        // numeral or abbreviation) keep it as-is.
+        if (/^[A-Z]{2,}$/.test(word)) return word
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+      })
       .join(' ')
   }
 
@@ -38,8 +45,14 @@ function AddStaffPage() {
   const [lastName, setLastName] = useState('')
   const [middleName, setMiddleName] = useState('')
   const [suffix, setSuffix] = useState('')
+  // Manual ID Number / Username. Previously the server
+  // auto-generated this as `STAFF-${timestamp}`, but admins
+  // need to enter it manually so it matches the staff's actual
+  // school-issued ID.
+  const [accountId, setAccountId] = useState('')
   const [email, setEmail] = useState('')
   const [userType, setUserType] = useState('EMPLOYEE')
+  const [campus, setCampus] = useState('COLLEGE')
   const [departmentId, setDepartmentId] = useState('')
   const [programId, setProgramId] = useState('')
   const [officeId, setOfficeId] = useState('')
@@ -157,6 +170,11 @@ function AddStaffPage() {
       return
     }
 
+    if (!accountId.trim()) {
+      await notify.error('Error', 'ID Number / Username is required')
+      return
+    }
+
     if (!password || password.length < 4) {
       await notify.error('Error', 'Password must be at least 4 characters long')
       return
@@ -185,6 +203,10 @@ function AddStaffPage() {
         credentials: 'include',
         body: JSON.stringify({
           full_name,
+          // Send the manually-entered ID Number / Username. The
+          // server uses this as both `User.account_id` and
+          // `UserAccount.username`.
+          account_id: accountId.trim(),
           email: email || null,
           user_type: userType,
           password: password,
@@ -193,7 +215,10 @@ function AddStaffPage() {
           office_id: officeId ? parseInt(officeId) : null,
           contact_number: contactNumber || null,
           rfid_code: rfidCode || null,
-          purpose: purpose || null
+          purpose: purpose || null,
+          // Library admin picks which campus the new staff is responsible
+          // for. New entries they log will be stamped with this campus.
+          campus
         })
       })
 
@@ -265,10 +290,10 @@ function AddStaffPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         <Card>
           <CardHeader>
-            <CardTitle>Create Library Staff Account</CardTitle>
+            <CardTitle className='pb-4'>Create Library Staff Account</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -345,6 +370,29 @@ function AddStaffPage() {
                 />
               </div>
 
+              {/* ID Number / Username — entered manually by the
+                  library admin. This becomes the staff's login
+                  username and the `User.account_id` shown in
+                  reports / RFID logs. Must be unique. */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  ID Number / Username <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value.replace(/\s+/g, ''))}
+                  placeholder="e.g. 2024-STAFF-001 or staff.m.santos"
+                  maxLength={20}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                  disabled={submitting}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  3-20 characters, letters / numbers / dot / dash / underscore. No spaces.
+                </p>
+              </div>
+
               {/* User Type */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -361,6 +409,29 @@ function AddStaffPage() {
                   <option value="ALUMNI">Alumni</option>
                   <option value="GUEST">Guest</option>
                 </select>
+              </div>
+
+              {/* Campus designation — drives which campus the new staff's
+                  entry-log records get stamped with. Re-designatable later
+                  from /staff-accounts without re-creating the account. */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Campus Assignment <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={campus}
+                  onChange={(e) => setCampus(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={submitting}
+                  required
+                >
+                  <option value="COLLEGE">College Campus</option>
+                  <option value="BASIC_EDUCATION">Basic Education Campus</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  New entries this staff logs will be recorded under this campus.
+                  You can re-designate them later from the Staff Accounts page.
+                </p>
               </div>
 
               {/* Department and Office */}
@@ -569,13 +640,14 @@ function AddStaffPage() {
               <div className="flex justify-end space-x-3 pt-4">
                 <Button 
                   type="button"
+                  className='bg-gray-100 hover:bg-gray-200 h-[50px] px-4'
                   variant="outline" 
                   onClick={() => router.back()}
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting || !!passwordError}>
+                <Button type="submit" className='bg-primary-600 text-white px-4 h-[50px]' disabled={submitting || !!passwordError}>
                   {submitting ? 'Creating...' : 'Create Staff Account'}
                 </Button>
               </div>

@@ -155,6 +155,7 @@ export function getSearchParams(req: NextRequest) {
     user_id: searchParams.get('user_id') || '',
     department: searchParams.get('department') || '',
     year_level: searchParams.get('year_level') || '',
+    campus: searchParams.get('campus') || '',
     date_from: searchParams.get('date_from') || '',
     date_to: searchParams.get('date_to') || '',
     include_user: searchParams.get('include_user') || '',

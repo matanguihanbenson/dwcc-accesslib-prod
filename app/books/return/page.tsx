@@ -1,22 +1,22 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Icon } from '@/components/ui/icon'
+import { Badge } from '@/components/ui/badge'
+import { Pagination } from '@/components/ui/pagination'
 import { notify } from '@/lib/notification'
-import { useApiSWR, apiCache } from '@/lib/hooks/useApi'
+import { useApiSWR } from '@/lib/hooks/useApi'
 
 interface BorrowTransaction {
   transaction_id: number
   borrow_date: string
   due_date: string
   penalty: number
-  copy?: {
-    accession_number: string
-  } | null
+  copy?: { accession_number: string } | null
   book: {
     book_id: number
     title: string
@@ -30,48 +30,58 @@ interface BorrowTransaction {
     full_name: string
     user_type: string
   } | null
-  department?: {
-    department_id: number
-    name: string
-    code: string
-  } | null
-  office?: {
-    office_id: number
-    name: string
-    code: string
-  } | null
+  department?: { department_id: number; name: string; code: string } | null
+  office?: { office_id: number; name: string; code: string } | null
   borrower_representative?: string | null
   status: 'ACTIVE' | 'OVERDUE'
 }
+
+const SEARCH_OPTIONS: { value: string; label: string; placeholder: string }[] = [
+  { value: 'all', label: 'All Fields', placeholder: 'Scan accession or enter any term...' },
+  { value: 'accession', label: 'Accession #', placeholder: 'Scan or enter accession number...' },
+  { value: 'title', label: 'Title', placeholder: 'Enter book title...' },
+  { value: 'author', label: 'Author', placeholder: 'Enter author name...' },
+  { value: 'user', label: 'User Name', placeholder: 'Enter user full name...' },
+  { value: 'account_id', label: 'ID #', placeholder: 'Enter ID number...' }
+]
+
+const CONDITION_OPTIONS: { value: string; label: string; color: string }[] = [
+  { value: 'EXCELLENT', label: 'Excellent', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  { value: 'GOOD', label: 'Good', color: 'bg-green-50 text-green-700 border-green-200' },
+  { value: 'FAIR', label: 'Fair', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  { value: 'POOR', label: 'Poor', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+  { value: 'DAMAGED', label: 'Damaged', color: 'bg-red-50 text-red-700 border-red-200' }
+]
 
 export default function ReturnBooksPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
   const preSelectedTxnId = searchParams.get('transaction_id')
+
   const [searchTerm, setSearchTerm] = useState('')
-  const [searchType, setSearchType] = useState('all') // all, accession, title, user, account_id
+  const [searchType, setSearchType] = useState('all')
   const [condition, setCondition] = useState('GOOD')
   const [notes, setNotes] = useState('')
   const [selectedTransaction, setSelectedTransaction] = useState<BorrowTransaction | null>(null)
-  const [searching, setSearching] = useState(false)
   const [authReady, setAuthReady] = useState(false)
-  
-  // Quick Accession Number lookup
-  const [quickAccession, setQuickAccession] = useState('')
-  const [accessionLookupLoading, setAccessionLookupLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'quick' | 'advanced'>('quick')
-  
-  // Control auto-select behavior with debouncing
-  const MIN_AUTO_SELECT_LENGTH = 3 // minimum chars before auto-select
-  const DEBOUNCE_MS = 500 // wait for user to finish typing
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  // Removed notification tracking for advanced search; keep logic simple
+  const [submitting, setSubmitting] = useState(false)
 
-  // Build API endpoint for active transactions with search
-  const buildApiEndpoint = () => {
+  // Pagination for the Active Transactions list. The full
+  // `activeTransactions` array is kept as-is so the summary
+  // cards (Active / Overdue / Due Today / Penalties) and the
+  // auto-select-on-1-result logic continue to operate on the
+  // unfiltered set. Only the rendered list is sliced.
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(20)
+
+  // Debounce ref for auto-lookup when typing
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Build the API endpoint. SWR refetches automatically when the
+  // search term / type change, so typing alone updates the list.
+  const apiEndpoint = useMemo(() => {
     if (!authReady) return null
-    
     const params = new URLSearchParams()
     params.append('status', 'ACTIVE')
     if (searchTerm.trim()) {
@@ -79,218 +89,185 @@ export default function ReturnBooksPage() {
       params.append('searchType', searchType)
     }
     return `/api/borrowing-transactions?${params.toString()}`
-  }
+  }, [authReady, searchTerm, searchType])
 
-  // SWR for active transactions
-  const { 
-    data: transactionsResponse, 
-    error: transactionsError, 
+  const {
+    data: transactionsResponse,
     isLoading: transactionsLoading,
-    mutate: refreshTransactions 
-  } = useApiSWR<any>(buildApiEndpoint(), {
-    refreshInterval: 5000, // Auto-refresh every 5 seconds
+    mutate: refreshTransactions
+  } = useApiSWR<any>(apiEndpoint, {
+    refreshInterval: 5000,
     revalidateOnFocus: true,
     revalidateOnReconnect: true
   })
 
-  // Handle different response formats and ensure we get an array
-  const activeTransactions = React.useMemo(() => {
+  // Normalize the various response shapes into an array
+  const activeTransactions: BorrowTransaction[] = useMemo(() => {
     if (!transactionsResponse) return []
-    
-    // Handle different response formats
-    if (Array.isArray(transactionsResponse)) {
-      return transactionsResponse
-    }
-    
-    // Check for nested data structures
-    const transactions = transactionsResponse.transactions || 
-                        transactionsResponse.data?.transactions || 
-                        transactionsResponse.data || 
-                        []
-    
-    return Array.isArray(transactions) ? transactions : []
+    if (Array.isArray(transactionsResponse)) return transactionsResponse
+    const txns =
+      transactionsResponse.transactions ||
+      transactionsResponse.data?.transactions ||
+      transactionsResponse.data ||
+      []
+    return Array.isArray(txns) ? txns : []
   }, [transactionsResponse])
 
-  // Auto-select transaction from URL parameter
+  // ---------- Summary stats for the top cards ----------
+  // Counts come from the same `activeTransactions` list. Recomputed
+  // on every refresh so the cards stay in sync with the list below.
+  const stats = useMemo(() => {
+    const total = activeTransactions.length
+    let overdue = 0
+    let dueToday = 0
+    let onTime = 0
+    let totalPenalty = 0
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    for (const t of activeTransactions) {
+      const due = new Date(t.due_date)
+      const overdueDays = Math.ceil((Date.now() - due.getTime()) / (1000 * 60 * 60 * 24))
+      if (overdueDays > 0) overdue++
+      else if (due >= today && due < tomorrow) dueToday++
+      else onTime++
+      if (t.penalty && Number(t.penalty) > 0) totalPenalty += Number(t.penalty)
+    }
+    return { total, overdue, dueToday, onTime, totalPenalty }
+  }, [activeTransactions])
+
+  // ---------- Auth + role check (STAFF only) ----------
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (status === 'loading') return
+      if (status === 'authenticated' && session?.user) {
+        if (session.user.role !== 'STAFF') {
+          await notify.error('Unauthorized', 'Only staff members can access the return books page')
+          router.push('/books')
+          return
+        }
+        setAuthReady(true)
+        return
+      }
+      try {
+        const response = await fetch('/api/users/profile', { credentials: 'include' })
+        if (response.ok) {
+          const userData = await response.json()
+          if (userData.role !== 'STAFF') {
+            await notify.error('Unauthorized', 'Only staff members can access the return books page')
+            router.push('/books')
+            return
+          }
+          setAuthReady(true)
+        } else {
+          router.push('/login')
+        }
+      } catch {
+        router.push('/login')
+      }
+    }
+    checkAuth()
+  }, [session, status, router])
+
+  // ---------- Pre-select from URL ?transaction_id=xxx ----------
   useEffect(() => {
     if (preSelectedTxnId && activeTransactions.length > 0 && !selectedTransaction) {
       const txnId = parseInt(preSelectedTxnId)
-      const txn = activeTransactions.find((t: BorrowTransaction) => t.transaction_id === txnId)
+      const txn = activeTransactions.find((t) => t.transaction_id === txnId)
       if (txn) {
         setSelectedTransaction(txn)
-        setActiveTab('advanced')
-        const borrowerName = txn.user?.full_name || txn.department?.name || txn.office?.name || 'Unknown borrower'
+        const borrowerName =
+          txn.user?.full_name || txn.department?.name || txn.office?.name || 'Unknown borrower'
         notify.info('Transaction Selected', `Book: ${txn.book.title} - Borrower: ${borrowerName}`)
       }
     }
   }, [preSelectedTxnId, activeTransactions, selectedTransaction])
 
+  // ---------- Auto-lookup with debounce ----------
+  // After 500ms of no typing, if the input has 3+ chars and
+  // there's exactly one result, auto-select it (quality of life
+  // for barcode scans and known-IDs).
   useEffect(() => {
-    const checkAuth = async () => {
-      if (status === 'loading') return
-
-      if (status === 'authenticated' && session?.user) {
-        // Only STAFF can access return books page
-        if (session.user.role !== 'STAFF') {
-          notify.error('Unauthorized', 'Only staff members can access the return books page')
-          router.push('/books')
-          return
-        }
-        setAuthReady(true)
-      } else {
-        try {
-          const response = await fetch('/api/users/profile', { credentials: 'include' })
-          if (response.ok) {
-            const userData = await response.json()
-            // Only STAFF can access return books page
-            if (userData.role !== 'STAFF') {
-              notify.error('Unauthorized', 'Only staff members can access the return books page')
-              router.push('/books')
-              return
-            }
-            setAuthReady(true)
-          } else {
-            router.push('/login')
-          }
-        } catch {
-          router.push('/login')
-        }
-      }
-    }
-
-    checkAuth()
-  }, [session, status, router])
-
-  useEffect(() => {
-    if (authReady) {
-      refreshTransactions()
-    }
-  }, [authReady, searchTerm, searchType, refreshTransactions])
-
-  // Handle search with debouncing - removed old manual effect
-  // SWR automatically handles the endpoint changes
-
-  // Clear selection when search type changes
-  useEffect(() => {
-    setSelectedTransaction(null)
-  }, [searchType])
-
-  const clearSearch = () => {
-  setSearchTerm('')
-  setSelectedTransaction(null)
-  }
-
-  // Refresh function for manual updates
-  const handleRefresh = () => {
-  refreshTransactions()
-  }
-
-  // Quick Accession Number lookup
-  const lookupTransactionByAccession = async (accession: string) => {
-    if (!accession.trim()) return
-    
-    setAccessionLookupLoading(true)
-    try {
-      const response = await fetch(`/api/borrowing-transactions?status=ACTIVE&search=${encodeURIComponent(accession.trim())}&searchType=accession`)
-      const result = await response.json()
-      
-      if (response.ok && result.success) {
-        const transactions = Array.isArray(result.data) ? result.data : []
-        
-        if (transactions.length === 1) {
-          setSelectedTransaction(transactions[0])
-          notify.success('Transaction Found', `Found active transaction for Accession: ${accession}`)
-        } else if (transactions.length === 0) {
-          notify.info('No Transaction Found', `No active transaction found for Accession: ${accession}`)
-          setSelectedTransaction(null)
-        } else {
-          notify.warning('Multiple Transactions', `Found ${transactions.length} transactions for this accession. Please select one from the list below.`)
-          setSelectedTransaction(null)
-        }
-      } else {
-        notify.error('Lookup Failed', result.error || 'Failed to lookup transaction')
-        setSelectedTransaction(null)
-      }
-    } catch (error) {
-      console.error('Accession lookup error:', error)
-      notify.error('Error', 'Network error during lookup')
-      setSelectedTransaction(null)
-    } finally {
-      setAccessionLookupLoading(false)
-    }
-  }
-
-  // Auto-lookup effect for quick accession number with debouncing
-  useEffect(() => {
-    if (quickAccession.length >= 3) {
-      const timeoutId = setTimeout(() => {
-        lookupTransactionByAccession(quickAccession)
-      }, 500)
-      
-      return () => clearTimeout(timeoutId)
-    } else if (quickAccession.length === 0) {
-      // Clear selection when accession is cleared
-      setSelectedTransaction(null)
-    }
-  }, [quickAccession])
-
-  // Handle transaction selection when searching
-  // Handle search with debouncing and better auto-select logic
-  useEffect(() => {
-    // Simple debounce just to avoid rapid re-renders; no notifications or auto-select
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     if (!searchTerm.trim()) {
       setSelectedTransaction(null)
       return
     }
     debounceTimerRef.current = setTimeout(() => {
-      // If exactly one result after debounce, select it automatically (quality-of-life)
-      if (activeTransactions.length === 1 && searchTerm.trim().length >= MIN_AUTO_SELECT_LENGTH) {
+      if (activeTransactions.length === 1 && searchTerm.trim().length >= 3) {
         setSelectedTransaction(activeTransactions[0])
       } else if (activeTransactions.length !== 1) {
-        // Leave selection to user
         setSelectedTransaction(null)
       }
-    }, DEBOUNCE_MS)
+    }, 500)
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
   }, [activeTransactions, searchTerm])
 
-  const processReturn = async () => {
-    if (!selectedTransaction) {
-      await notify.warning('Selection Required', 'Please select a transaction to process return')
-      return
-    }
+  // Clear selection when the user changes search type so they
+  // don't carry a stale selection across contexts.
+  useEffect(() => {
+    setSelectedTransaction(null)
+  }, [searchType])
 
+  const clearSearch = () => {
+    setSearchTerm('')
+    setSelectedTransaction(null)
+    setCurrentPage(1)
+  }
+
+  // Reset to page 1 whenever the search term / type / page size
+  // changes, so the user doesn't end up stranded on a page that
+  // no longer exists after the result set shrinks.
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, searchType, itemsPerPage])
+
+  // The list rendered in the table is a page-sized slice of
+  // `activeTransactions`. The full list is still used for the
+  // summary cards, the auto-select-on-1-result logic, and the
+  // "X active" header.
+  const totalTransactions = activeTransactions.length
+  const totalPages = Math.max(1, Math.ceil(totalTransactions / itemsPerPage))
+  // Clamp the current page into a valid range so a stale value
+  // (e.g. after the data shrank) doesn't render an empty table.
+  const safePage = Math.min(currentPage, totalPages)
+  const startIndex = (safePage - 1) * itemsPerPage
+  const endIndex = Math.min(startIndex + itemsPerPage, totalTransactions)
+  const pagedTransactions = activeTransactions.slice(startIndex, endIndex)
+
+  // ---------- Process return ----------
+  const processReturn = async () => {
+    if (!selectedTransaction || submitting) return
     const confirmed = await notify.confirm(
       'Process Return',
       `Are you sure you want to process the return for "${selectedTransaction.book.title}"?`
     )
-
     if (!confirmed) return
 
+    setSubmitting(true)
     try {
-      const response = await fetch(`/api/borrowing-transactions/${selectedTransaction.transaction_id}/return`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ 
-          condition_on_return: condition, 
-          notes: notes.trim() || undefined 
-        })
-      })
-
+      const response = await fetch(
+        `/api/borrowing-transactions/${selectedTransaction.transaction_id}/return`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            condition_on_return: condition,
+            notes: notes.trim() || undefined
+          })
+        }
+      )
       if (response.ok) {
         await notify.success('Success', 'Book return processed successfully')
         setSelectedTransaction(null)
-        setQuickAccession('')
         setSearchTerm('')
         setNotes('')
         setCondition('GOOD')
-        // Refresh the transactions list
         refreshTransactions()
-        apiCache.invalidate('/api/borrowing-transactions')
       } else {
         const errorData = await response.json()
         await notify.error('Error', errorData.error || 'Failed to process return')
@@ -298,17 +275,38 @@ export default function ReturnBooksPage() {
     } catch (error) {
       console.error('Return processing error:', error)
       await notify.error('Error', 'Network error occurred')
+    } finally {
+      setSubmitting(false)
     }
   }
 
+  // Calendar-day difference so a book due on June 21 and
+  // checked on June 22 is "1 day overdue" — not 2 (the previous
+  // Math.ceil-based math counted the fractional day and bumped
+  // it up to 2 whenever the time-of-day put the diff over a
+  // 24-hour window). We normalize both sides to midnight before
+  // subtracting so the time-of-day doesn't matter.
   const calculateDaysOverdue = (dueDate: string) => {
     const due = new Date(dueDate)
+    const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate())
     const now = new Date()
-    const diffTime = now.getTime() - due.getTime()
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    const nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const diffDays = Math.floor(
+      (nowMidnight.getTime() - dueMidnight.getTime()) / (1000 * 60 * 60 * 24)
+    )
     return diffDays > 0 ? diffDays : 0
   }
 
+  // ---------- Borrowed-by display helpers ----------
+  const getBorrowerName = (t: BorrowTransaction) =>
+    t.user?.full_name || t.department?.name || t.office?.name || 'Unknown borrower'
+  const getBorrowerId = (t: BorrowTransaction) =>
+    t.user?.account_id || t.department?.code || t.office?.code || 'N/A'
+
+  const currentSearchOption =
+    SEARCH_OPTIONS.find((o) => o.value === searchType) || SEARCH_OPTIONS[0]
+
+  // ---------- Auth gate ----------
   if (!authReady) {
     return (
       <div className="px-6 py-4">
@@ -323,611 +321,466 @@ export default function ReturnBooksPage() {
   }
 
   return (
-    <>
-      {/* Header */}
+    <div className="min-h-screen bg-gray-50">
+      {/* Header — same pattern as the rest of the app */}
       <div className="bg-white shadow-sm border-b">
         <div className="px-6 py-3">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-semibold text-gray-800">
-                Return Books
-              </h1>
-              <p className="text-sm text-gray-600 mt-1">
-                Process book returns and manage borrowing transactions
-              </p>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => router.back()}
+                className="text-gray-600 hover:text-gray-900 transition-colors p-1.5 -ml-1.5 rounded-md hover:bg-gray-100"
+                aria-label="Back"
+              >
+                <Icon name="fa-arrow-left" size="md" />
+              </button>
+              <div>
+                <h1 className="text-xl font-semibold text-gray-800">Return Books</h1>
+                <p className="text-sm text-gray-600 mt-0.5">Process book returns and update inventory</p>
+              </div>
             </div>
-            <button
-              onClick={() => router.back()}
-              className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-            >
-              <i className="fas fa-arrow-left mr-2"></i>
-              Back
-            </button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => router.push('/books/borrow')}
+                variant="outline"
+                className='bg-primary-600 hover:bg-primary-700 py-5 px-4 text-white'
+                size="sm"
+              >
+                <Icon name="fa-plus" size="xs" className="mr-1.5" />
+                Borrow
+              </Button>
+            {/*  */}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Content */}
       <div className="px-6 py-4">
-        <div className="max-w-6xl mx-auto space-y-6">
-          {/* Tabs Header */}
-          <div className="border-b border-gray-200 mb-4">
-            <nav className="flex gap-4" aria-label="Tabs">
-              <button
-                onClick={() => setActiveTab('quick')}
-                className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'quick'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <i className="fas fa-qrcode mr-2"></i>
-                Quick Accession Lookup
-              </button>
-              <button
-                onClick={() => setActiveTab('advanced')}
-                className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'advanced'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <i className="fas fa-search mr-2"></i>
-                Advanced Search & Filter
-              </button>
-            </nav>
+        <div className="max-w-6xl mx-auto space-y-4">
+
+          {/* Summary stats — same pattern as lockers / overdue pages */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Active</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</p>
+                </div>
+                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+                  <Icon name="fa-book" size="md" className="text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Overdue</p>
+                  <p className={`text-2xl font-bold mt-1 ${stats.overdue > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                    {stats.overdue}
+                  </p>
+                </div>
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  stats.overdue > 0 ? 'bg-red-50' : 'bg-gray-50'
+                }`}>
+                  <Icon
+                    name="fa-exclamation-triangle"
+                    size="md"
+                    className={stats.overdue > 0 ? 'text-red-600' : 'text-gray-400'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Due Today</p>
+                  <p className={`text-2xl font-bold mt-1 ${stats.dueToday > 0 ? 'text-amber-600' : 'text-gray-900'}`}>
+                    {stats.dueToday}
+                  </p>
+                </div>
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  stats.dueToday > 0 ? 'bg-amber-50' : 'bg-gray-50'
+                }`}>
+                  <Icon
+                    name="fa-clock"
+                    size="md"
+                    className={stats.dueToday > 0 ? 'text-amber-600' : 'text-gray-400'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Penalties</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    ₱{stats.totalPenalty.toFixed(2)}
+                  </p>
+                </div>
+                <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
+                  <Icon name="fa-coins" size="md" className="text-purple-600" />
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Tab Panels */}
-          {activeTab === 'quick' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Quick Accession Lookup
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Scan or Enter Accession Number
-                    </label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={quickAccession}
-                        onChange={(e) => setQuickAccession(e.target.value.toUpperCase())}
-                        placeholder="Scan barcode or enter accession number (e.g., LIB-000001)..."
-                        className="font-mono"
-                        disabled={accessionLookupLoading}
-                        onKeyPress={(e) => {
-                          if (e.key === 'Enter' && quickAccession.trim()) {
-                            lookupTransactionByAccession(quickAccession.trim())
-                          }
-                        }}
-                      />
-                      <Button
-                        onClick={() => lookupTransactionByAccession(quickAccession.trim())}
-                        disabled={accessionLookupLoading || !quickAccession.trim()}
-                        className="px-6"
-                      >
-                        {accessionLookupLoading ? (
-                          <>
-                            <i className="fas fa-spinner fa-spin mr-2"></i>
-                            Looking up...
-                          </>
-                        ) : (
-                          <>
-                            <i className="fas fa-search mr-2"></i>
-                            Lookup
-                          </>
-                        )}
-                      </Button>
-                      {quickAccession && (
-                        <Button
-                          onClick={() => {
-                            setQuickAccession('')
-                            setSelectedTransaction(null)
-                          }}
-                          variant="outline"
-                          className="px-3"
-                          title="Clear Accession"
-                        >
-                          <i className="fas fa-times"></i>
-                        </Button>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Start typing or scan a barcode to find the transaction
-                    </p>
-                  </div>
-
-                  {/* Transaction Preview */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Found Transaction
-                    </label>
-                    {selectedTransaction ? (
-                      <div className="border border-green-200 bg-green-50 rounded-lg p-4">
-                        <div className="flex items-start justify-between mb-3">
-                          <h4 className="font-medium text-gray-900">{selectedTransaction.book.title}</h4>
-                          <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
-                            <i className="fas fa-check mr-1"></i>
-                            Ready to Return
-                          </span>
-                        </div>
-                        <div className="space-y-1 text-sm text-gray-600">
-                          <p><strong>Accession:</strong> {selectedTransaction.copy?.accession_number || 'N/A'}</p>
-                          <p><strong>ISBN:</strong> {selectedTransaction.book.isbn || 'N/A'}</p>
-                          <p><strong>Author:</strong> {selectedTransaction.book.book_author}</p>
-                          <p><strong>Borrower:</strong> {
-                            selectedTransaction.user?.full_name ||
-                            selectedTransaction.department?.name ||
-                            selectedTransaction.office?.name ||
-                            'Unknown borrower'
-                          }</p>
-                          <p><strong>ID:</strong> {
-                            selectedTransaction.user?.account_id ||
-                            selectedTransaction.department?.code ||
-                            selectedTransaction.office?.code ||
-                            'N/A'
-                          }</p>
-                          {selectedTransaction.borrower_representative && (
-                            <p><strong>Representative:</strong> {selectedTransaction.borrower_representative}</p>
-                          )}
-                          <p><strong>Borrowed:</strong> {new Date(selectedTransaction.borrow_date).toLocaleDateString()}</p>
-                          <p><strong>Due:</strong> {new Date(selectedTransaction.due_date).toLocaleDateString()}</p>
-                          {calculateDaysOverdue(selectedTransaction.due_date) > 0 && (
-                            <p className="text-red-600 font-medium">
-                              <i className="fas fa-exclamation-triangle mr-1"></i>
-                              Overdue by {calculateDaysOverdue(selectedTransaction.due_date)} days
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="border border-gray-200 bg-gray-50 rounded-lg p-4 text-center text-gray-500">
-                        <i className="fas fa-qrcode text-2xl mb-2 text-gray-300"></i>
-                        <p>No transaction found</p>
-                        <p className="text-sm">Scan or enter an accession number to find the transaction</p>
-                      </div>
-                    )}
-                  </div>
+          {/* Search — single unified field with a filter dropdown */}
+          <Card>
+            <CardContent className="pt-5">
+              <div className="flex flex-col md:flex-row gap-2">
+                <div className="relative w-full md:w-48">
+                  <Icon
+                    name="fa-filter"
+                    size="xs"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                  />
+                  <select
+                    value={searchType}
+                    onChange={(e) => setSearchType(e.target.value)}
+                    disabled={submitting}
+                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none"
+                  >
+                    {SEARCH_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+                <div className="flex-1 relative">
+                  <Icon
+                    name="fa-search"
+                    size="xs"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                  />
+                  <input
+                    value={searchTerm}
+                    onChange={(e) =>
+                      setSearchTerm(
+                        searchType === 'accession' ? e.target.value.toUpperCase() : e.target.value
+                      )
+                    }
+                    placeholder={currentSearchOption.placeholder}
+                    className="w-full pl-9 pr-9 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') refreshTransactions()
+                    }}
+                    disabled={submitting}
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={clearSearch}
+                      disabled={submitting}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                      aria-label="Clear search"
+                    >
+                      <Icon name="fa-times" size="xs" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-                {/* Return Processing Section - shown when transaction is selected */}
-                {selectedTransaction && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-lg font-medium text-gray-900 mb-4">Process Return</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Return Condition
-                        </label>
-                        <select
-                          value={condition}
-                          onChange={(e) => setCondition(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="EXCELLENT">Excellent</option>
-                          <option value="GOOD">Good</option>
-                          <option value="FAIR">Fair</option>
-                          <option value="POOR">Poor</option>
-                          <option value="DAMAGED">Damaged</option>
-                        </select>
+          {/* Process Return — only when a transaction is selected */}
+          {selectedTransaction && (() => {
+            const daysOverdue = calculateDaysOverdue(selectedTransaction.due_date)
+            const hasPenalty = selectedTransaction.penalty && Number(selectedTransaction.penalty) > 0
+            return (
+              <Card className="border-green-200 shadow-md ring-1 ring-green-100">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gradient-to-r from-green-50 to-white rounded-t-lg">
+                  <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-full bg-green-100 flex items-center justify-center">
+                      <Icon name="fa-undo" size="xs" className="text-green-600" />
+                    </span>
+                    Process Return
+                  </h3>
+                  <button
+                    onClick={() => setSelectedTransaction(null)}
+                    disabled={submitting}
+                    className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
+                    aria-label="Close"
+                  >
+                    <Icon name="fa-times" />
+                  </button>
+                </div>
+                <CardContent className="pt-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 pb-5 border-b border-gray-100">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <Icon name="fa-book" size="xs" className="text-blue-600" />
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Book</h4>
                       </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Notes (Optional)
-                        </label>
-                        <textarea
-                          value={notes}
-                          onChange={(e) => setNotes(e.target.value)}
-                          placeholder="Any additional notes about the book condition..."
-                          rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      <Button
-                        onClick={processReturn}
-                        disabled={transactionsLoading}
-                        className="w-full md:w-auto bg-green-600 hover:bg-green-700"
-                        size="lg"
-                      >
-                        {transactionsLoading ? (
-                          <>
-                            <i className="fas fa-spinner fa-spin mr-2"></i>
-                            Processing Return...
-                          </>
-                        ) : (
-                          <>
-                            <i className="fas fa-undo mr-2"></i>
-                            Process Return
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'advanced' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Advanced Search & Filter
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Search Filter
-                      </label>
-                      <select
-                        value={searchType}
-                        onChange={(e) => setSearchType(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="all">All Fields</option>
-                        <option value="accession">Accession Number</option>
-                        <option value="title">Book Title</option>
-                        <option value="author">Book Author</option>
-                        <option value="user">User Name</option>
-                        <option value="account_id">ID Number</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {searchType === 'all' ? 'Search by Accession, Title, Author, User Name, or ID Number' :
-                         searchType === 'accession' ? 'Search by Accession Number' :
-                         searchType === 'title' ? 'Search by Book Title' :
-                         searchType === 'author' ? 'Search by Book Author' :
-                         searchType === 'user' ? 'Search by User Name' :
-                         'Search by ID Number'}
-                      </label>
-                      <div className="flex gap-2">
-                        <Input
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(searchType === 'accession' ? e.target.value.toUpperCase() : e.target.value)}
-                          placeholder={
-                            searchType === 'all' ? 'Scan accession or enter any search term...' :
-                            searchType === 'accession' ? 'Scan or enter accession number...' :
-                            searchType === 'title' ? 'Enter book title...' :
-                            searchType === 'author' ? 'Enter author name...' :
-                            searchType === 'user' ? 'Enter user full name...' :
-                            'Enter ID number...'
-                          }
-                          onKeyPress={(e) => e.key === 'Enter' && setSearchTerm(e.currentTarget.value)}
-                        />
-                        <Button
-                          onClick={() => {
-                            if (searchTerm.trim()) refreshTransactions()
-                          }}
-                          disabled={transactionsLoading || searching || !searchTerm.trim()}
-                          className="px-6"
-                        >
-                          {searching ? (
-                            <>
-                              <i className="fas fa-spinner fa-spin mr-2"></i>
-                              Searching...
-                            </>
-                          ) : (
-                            <>
-                              <i className="fas fa-search mr-2"></i>
-                              Search
-                            </>
-                          )}
-                        </Button>
-                        {searchTerm && (
-                          <Button
-                            onClick={clearSearch}
-                            variant="outline"
-                            className="px-3"
-                            title="Clear search"
-                          >
-                            <i className="fas fa-times"></i>
-                          </Button>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {selectedTransaction.book.title}
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        by {selectedTransaction.book.book_author}
+                      </p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 pt-1">
+                        <span>
+                          <span className="text-gray-400">Accession:</span>{' '}
+                          <span className="font-mono font-medium text-gray-700">
+                            {selectedTransaction.copy?.accession_number || 'N/A'}
+                          </span>
+                        </span>
+                        {selectedTransaction.book.isbn && (
+                          <span>
+                            <span className="text-gray-400">ISBN:</span>{' '}
+                            <span className="font-mono text-gray-700">{selectedTransaction.book.isbn}</span>
+                          </span>
                         )}
                       </div>
-                      {searchType !== 'all' && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Filtering by {searchType === 'accession' ? 'accession number' :
-                                      searchType === 'title' ? 'book title' :
-                                      searchType === 'author' ? 'book author' :
-                                      searchType === 'user' ? 'user name' : 'ID number'} only
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <Icon name="fa-user" size="xs" className="text-purple-600" />
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Borrower</h4>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {getBorrowerName(selectedTransaction)}
+                      </p>
+                      <p className="text-xs text-gray-600 font-mono">
+                        {getBorrowerId(selectedTransaction)}
+                      </p>
+                      {selectedTransaction.borrower_representative && (
+                        <p className="text-xs text-gray-500">
+                          <span className="text-gray-400">Rep:</span>{' '}
+                          {selectedTransaction.borrower_representative}
                         </p>
                       )}
-                    </div>
-                  </div>
-
-                  {/* Selected Transaction Preview */}
-                  <div>
-                    {selectedTransaction ? (
-                      <div className="border border-green-200 bg-green-50 rounded-lg p-4">
-                        <div className="flex items-start justify-between mb-3">
-                          <h4 className="font-medium text-gray-900">{selectedTransaction.book.title}</h4>
-                          <button
-                            onClick={() => setSelectedTransaction(null)}
-                            className="text-gray-400 hover:text-gray-600"
-                          >
-                            <i className="fas fa-times"></i>
-                          </button>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 pt-1">
+                        <span>
+                          <span className="text-gray-400">Borrowed:</span>{' '}
+                          {new Date(selectedTransaction.borrow_date).toLocaleDateString()}
+                        </span>
+                        <span>
+                          <span className="text-gray-400">Due:</span>{' '}
+                          {new Date(selectedTransaction.due_date).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {daysOverdue > 0 && (
+                        <div className="pt-1">
+                          <Badge variant="overdue" className="gap-1">
+                            <Icon name="fa-exclamation-triangle" size="xs" />
+                            Overdue by {daysOverdue} day{daysOverdue !== 1 ? 's' : ''}
+                            {hasPenalty ? ` • ₱${Number(selectedTransaction.penalty).toFixed(2)}` : ''}
+                          </Badge>
                         </div>
-                        <div className="space-y-1 text-sm text-gray-600">
-                          <p><strong>Accession:</strong> {selectedTransaction.copy?.accession_number || 'N/A'}</p>
-                          <p><strong>Author:</strong> {selectedTransaction.book.book_author}</p>
-                          <p><strong>Borrower:</strong> {
-                            selectedTransaction.user?.full_name ||
-                            selectedTransaction.department?.name ||
-                            selectedTransaction.office?.name ||
-                            'Unknown borrower'
-                          }</p>
-                          <p><strong>ID:</strong> {
-                            selectedTransaction.user?.account_id ||
-                            selectedTransaction.department?.code ||
-                            selectedTransaction.office?.code ||
-                            'N/A'
-                          }</p>
-                          {selectedTransaction.borrower_representative && (
-                            <p><strong>Representative:</strong> {selectedTransaction.borrower_representative}</p>
-                          )}
-                          <p><strong>Borrowed:</strong> {new Date(selectedTransaction.borrow_date).toLocaleDateString()}</p>
-                          <p><strong>Due:</strong> {new Date(selectedTransaction.due_date).toLocaleDateString()}</p>
-                          {calculateDaysOverdue(selectedTransaction.due_date) > 0 && (
-                            <p className="text-red-600 font-medium">
-                              <i className="fas fa-exclamation-triangle mr-1"></i>
-                              Overdue by {calculateDaysOverdue(selectedTransaction.due_date)} days
-                            </p>
-                          )}
-                          {selectedTransaction.penalty && Number(selectedTransaction.penalty) > 0 && (
-                            <p className="text-orange-600 font-medium">
-                              <i className="fas fa-dollar-sign mr-1"></i>
-                              Penalty: ₱{Number(selectedTransaction.penalty).toFixed(2)}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="border border-gray-200 bg-gray-50 rounded-lg p-4 text-center text-gray-500">
-                        <i className="fas fa-book text-2xl mb-2 text-gray-300"></i>
-                        <p>No transaction selected</p>
-                        <p className="text-sm">Search and select a transaction to return</p>
-                      </div>
-                    )}
-
-                    {selectedTransaction && (
-                      <div className="mt-4">
-                        <Button
-                          onClick={processReturn}
-                          disabled={transactionsLoading}
-                          className="w-full bg-green-600 hover:bg-green-700"
-                        >
-                          {transactionsLoading ? (
-                            <>
-                              <i className="fas fa-spinner fa-spin mr-2"></i>
-                              Processing Return...
-                            </>
-                          ) : (
-                            <>
-                              <i className="fas fa-undo mr-2"></i>
-                              Process Return
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Process Return Section */}
-                {selectedTransaction && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-lg font-medium text-gray-900 mb-4">Process Return</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Return Condition
-                        </label>
-                        <select
-                          value={condition}
-                          onChange={(e) => setCondition(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="EXCELLENT">Excellent</option>
-                          <option value="GOOD">Good</option>
-                          <option value="FAIR">Fair</option>
-                          <option value="POOR">Poor</option>
-                          <option value="DAMAGED">Damaged</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Notes (Optional)
-                        </label>
-                        <textarea
-                          value={notes}
-                          onChange={(e) => setNotes(e.target.value)}
-                          placeholder="Any additional notes about the book condition..."
-                          rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      <Button
-                        onClick={processReturn}
-                        disabled={transactionsLoading}
-                        className="w-full md:w-auto bg-green-600 hover:bg-green-700"
-                        size="lg"
-                      >
-                        {transactionsLoading ? (
-                          <>
-                            <i className="fas fa-spinner fa-spin mr-2"></i>
-                            Processing Return...
-                          </>
-                        ) : (
-                          <>
-                            <i className="fas fa-undo mr-2"></i>
-                            Process Return
-                          </>
-                        )}
-                      </Button>
+                      )}
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
 
-          {/* Active Transactions */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                        Return Condition
+                      </label>
+                      <div className="grid grid-cols-5 gap-1">
+                        {CONDITION_OPTIONS.map((c) => {
+                          const active = condition === c.value
+                          return (
+                            <button
+                              key={c.value}
+                              type="button"
+                              onClick={() => setCondition(c.value)}
+                              disabled={submitting}
+                              className={`px-2 py-2 text-xs font-medium rounded border transition-all ${
+                                active
+                                  ? `${c.color} ring-2 ring-offset-1 ring-blue-400 border-transparent shadow-sm`
+                                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                              }`}
+                            >
+                              {c.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                        Notes <span className="text-gray-400 font-normal">(Optional)</span>
+                      </label>
+                      <textarea
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="Notes about the book condition..."
+                        rows={2}
+                        disabled={submitting}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 mt-5">
+                    <Button
+                      variant="outline"
+                      className='px-4 py-5 bg-gray-200 hover:bg-gray-300'
+                      onClick={() => setSelectedTransaction(null)}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={processReturn}
+                      disabled={submitting}
+                      className="bg-green-600 hover:bg-green-700 text-white py-5 px-4"
+                    >
+                      {submitting ? (
+                        <>
+                          <Icon name="fa-spinner" size="xs" className="mr-1.5 fa-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="fa-check" size="xs" className="mr-1.5" />
+                          Confirm Return
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })()}
+
+          {/* Active transactions list */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>
-                  {searchTerm ? `Search Results (${activeTransactions.length})` : `Active Borrowing Transactions (${activeTransactions.length})`}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <span className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center">
+                  <Icon name="fa-list" size="xs" className="text-gray-600" />
                 </span>
-                <div className="flex items-center gap-2">
-                  {searchTerm && (
-                    <span className="text-sm text-gray-500 mr-2">
-                      Searching: "{searchTerm}"
-                    </span>
-                  )}
-                  <Button 
-                    onClick={handleRefresh} 
-                    variant="outline" 
-                    size="sm"
-                    disabled={transactionsLoading}
-                  >
-                    <i className="fas fa-sync-alt mr-2"></i>
-                    Refresh
-                  </Button>
-                </div>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  {searchTerm.trim()
+                    ? `Search Results (${activeTransactions.length})`
+                    : `Active Transactions (${activeTransactions.length})`}
+                </h3>
+                {!searchTerm.trim() && stats.overdue > 0 && (
+                  <Badge variant="overdue" className="ml-1">
+                    {stats.overdue} overdue
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <CardContent className="pt-3">
               {transactionsLoading ? (
-                <div className="text-center py-8">
+                <div className="text-center py-12 text-sm text-gray-500">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                  <p className="text-gray-600">Loading transactions...</p>
+                  Loading transactions...
                 </div>
               ) : activeTransactions.length === 0 ? (
-                <div className="text-center py-8">
-                  <i className="fas fa-check-circle text-4xl text-green-300 mb-4"></i>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Active Transactions</h3>
-                  <p className="text-gray-600">All books have been returned</p>
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Icon name="fa-check-circle" size="xl" className="text-green-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {searchTerm.trim() ? 'No transactions match your search.' : 'All books have been returned'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {searchTerm.trim()
+                      ? 'Try a different keyword or filter'
+                      : 'There are no active borrowing transactions at the moment'}
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {activeTransactions.map((transaction) => {
-                    const isOverdue = calculateDaysOverdue(transaction.due_date) > 0
-                    const daysOverdue = calculateDaysOverdue(transaction.due_date)
-                    const isSelected = selectedTransaction?.transaction_id === transaction.transaction_id
-
-                    return (
-                      <div
-                        key={transaction.transaction_id}
-                        onClick={() => setSelectedTransaction(transaction)}
-                        className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                          isSelected 
-                            ? 'border-green-500 bg-green-50' 
-                            : isOverdue 
-                              ? 'border-red-200 bg-red-50 hover:border-red-300' 
-                              : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center mb-2">
-                              <div className="flex-shrink-0 h-10 w-10">
-                                <div className={`h-10 w-10 rounded flex items-center justify-center ${
-                                  isOverdue ? 'bg-red-500' : 'bg-blue-500'
-                                }`}>
-                                  <i className="fas fa-book text-white text-sm"></i>
-                                </div>
-                              </div>
-                              <div className="ml-4 flex-1">
-                                <h4 className="text-sm font-medium text-gray-900">
-                                  {transaction.book.title}
-                                </h4>
-                                <p className="text-sm text-gray-600">
-                                  by {transaction.book.book_author}
-                                </p>
-                              </div>
-                              {isSelected && (
-                                <div className="flex-shrink-0">
-                                  <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
-                                    <i className="fas fa-check mr-1"></i>
-                                    Selected
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            
-                            <div className="ml-14 space-y-1">
-                              <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
-                                <div>
-                                  <strong>Accession:</strong> {transaction.copy?.accession_number || 'N/A'}
-                                </div>
-                                <div>
-                                  <strong>Borrower:</strong> {
-                                    transaction.user?.full_name ||
-                                    transaction.department?.name ||
-                                    transaction.office?.name ||
-                                    'Unknown borrower'
-                                  }
-                                </div>
-                                <div>
-                                  <strong>ID:</strong> {
-                                    transaction.user?.account_id ||
-                                    transaction.department?.code ||
-                                    transaction.office?.code ||
-                                    'N/A'
-                                  }
-                                </div>
-                                {transaction.borrower_representative && (
-                                  <div className="col-span-2">
-                                    <strong>Representative:</strong> {transaction.borrower_representative}
-                                  </div>
-                                )}
-                                <div>
-                                  <strong>Borrowed:</strong> {new Date(transaction.borrow_date).toLocaleDateString()}
-                                </div>
-                                <div>
-                                  <strong>Due:</strong> {new Date(transaction.due_date).toLocaleDateString()}
-                                </div>
-                              </div>
-                              
-                              {isOverdue && (
-                                <div className="text-sm text-red-600 font-medium mt-2">
-                                  <i className="fas fa-exclamation-triangle mr-1"></i>
-                                  Overdue by {daysOverdue} day{daysOverdue !== 1 ? 's' : ''}
-                                  {transaction.penalty && Number(transaction.penalty) > 0 && ` • Penalty: ₱${Number(transaction.penalty).toFixed(2)}`}
-                                </div>
-                              )}
-                            </div>
+                <>
+                  <ul className="divide-y divide-gray-100">
+                    {pagedTransactions.map((t) => {
+                      const daysOverdue = calculateDaysOverdue(t.due_date)
+                      const isSelected = selectedTransaction?.transaction_id === t.transaction_id
+                      return (
+                        <li
+                          key={t.transaction_id}
+                          onClick={() => setSelectedTransaction(t)}
+                          className={`flex items-center gap-3 px-3 py-3 cursor-pointer rounded-md transition-all ${
+                            isSelected
+                              ? 'bg-blue-50 border border-blue-200 shadow-sm'
+                              : 'hover:bg-gray-50 border border-transparent'
+                          }`}
+                        >
+                          <div
+                            className={`flex-shrink-0 h-10 w-10 rounded-lg flex items-center justify-center ${
+                              daysOverdue > 0
+                                ? 'bg-red-100 text-red-600'
+                                : 'bg-blue-100 text-blue-600'
+                            }`}
+                          >
+                            <Icon name="fa-book" size="md" />
                           </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <p className="text-sm font-semibold text-gray-900 truncate">
+                                {t.book.title}
+                              </p>
+                              {daysOverdue > 0 && (
+                                <Badge variant="overdue" size="sm" className="flex-shrink-0">
+                                  Overdue {daysOverdue}d
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 truncate">
+                              <span className="font-medium text-gray-700">{getBorrowerName(t)}</span>
+                              <span className="mx-1.5 text-gray-300">·</span>
+                              <span className="font-mono">{getBorrowerId(t)}</span>
+                              <span className="mx-1.5 text-gray-300">·</span>
+                              <span className="font-mono">{t.copy?.accession_number || 'N/A'}</span>
+                              <span className="mx-1.5 text-gray-300">·</span>
+                              Due {new Date(t.due_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex-shrink-0">
+                            {isSelected ? (
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 text-white">
+                                <Icon name="fa-check" size="xs" />
+                              </span>
+                            ) : (
+                              <Icon name="fa-chevron-right" size="xs" className="text-gray-400" />
+                            )}
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+
+                  {/* Pagination for the active transactions list. */}
+                  <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <label htmlFor="rb-items-per-page" className="text-sm text-gray-600">
+                        Per page
+                      </label>
+                      <select
+                        id="rb-items-per-page"
+                        value={itemsPerPage}
+                        onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                        className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {[10, 20, 50, 100].map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Pagination
+                      currentPage={safePage}
+                      totalPages={totalPages}
+                      totalItems={totalTransactions}
+                      itemsPerPage={itemsPerPage}
+                      onPageChange={setCurrentPage}
+                      className="flex-1 justify-end"
+                    />
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
         </div>
       </div>
-    </>
+    </div>
   )
 }
-
-

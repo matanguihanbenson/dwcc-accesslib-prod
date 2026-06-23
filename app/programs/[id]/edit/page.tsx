@@ -363,13 +363,14 @@ export default function EditProgramPage() {
               <div className="flex justify-end space-x-3 pt-4">
                 <Button 
                   type="button"
+                  className='bg-gray-200 px-4 py-5 hover:bg-gray-300'
                   variant="outline" 
                   onClick={() => router.back()}
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700'>
                   {submitting ? 'Updating...' : 'Update Program'}
                 </Button>
               </div>

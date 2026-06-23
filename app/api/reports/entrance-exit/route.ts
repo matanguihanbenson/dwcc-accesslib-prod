@@ -1,22 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
-import { EntranceExitReportData, EntranceExitTimeRangeData } from '@/types'
+import { EntranceExitReportData, EntranceExitTimeRangeData, UserRole, Campus } from '@/types'
 import { categorizeUserForEntranceExit } from '@/lib/utils'
-import { UserRole } from '@prisma/client'
+
+/**
+ * Auto-scope STAFF users to their own campus, mirror the entry-logs
+ * resolver. ADMIN / SUPER_ADMIN can pass an explicit `campus`
+ * query param; absent means all campuses.
+ */
+async function resolveReportCampus(
+  session: any,
+  queryCampus: string | null
+): Promise<Campus | null> {
+  if (session?.user?.role === UserRole.STAFF) {
+    const accountId = parseInt(session.user.id || '0')
+    if (!isNaN(accountId) && accountId > 0) {
+      const account = await prisma.userAccount.findUnique({
+        where: { id: accountId },
+        select: { campus: true }
+      })
+      if (account?.campus) return account.campus
+    }
+  }
+  if (queryCampus === Campus.COLLEGE || queryCampus === Campus.BASIC_EDUCATION) {
+    return queryCampus
+  }
+  return null
+}
 
 /**
  * GET /api/reports/entrance-exit
  * Generate entrance/exit control statistics report
- * Query params: month (1-12), year (YYYY)
+ * Query params: month (1-12), year (YYYY), campus (COLLEGE | BASIC_EDUCATION)
  */
-export const GET = withAuth(async (req: NextRequest) => {
+export const GET = withAuth(async (req: NextRequest, session) => {
   try {
     const { searchParams } = new URL(req.url)
     const monthParam = searchParams.get('month')
     const yearParam = searchParams.get('year')
     const dateFrom = searchParams.get('date_from')
     const dateTo = searchParams.get('date_to')
+    const queryCampus = searchParams.get('campus')
 
     // Determine date range
     let startDate: Date
@@ -51,9 +76,14 @@ export const GET = withAuth(async (req: NextRequest) => {
       return createErrorResponse('Month and year, or date range is required', 400)
     }
 
+    // Auto-scope by campus
+    const effectiveCampus = await resolveReportCampus(session, queryCampus)
+    const campusWhere = effectiveCampus ? { campus: effectiveCampus } : {}
+
     // Fetch all entry logs for the month with user details
     const entryLogs = await prisma.entryLog.findMany({
       where: {
+        ...campusWhere,
         entry_time: {
           gte: startDate,
           lte: endDate,

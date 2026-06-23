@@ -28,12 +28,19 @@ function RegisterAdminPage() {
   const [loading, setLoading] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   
-  // Helper function to capitalize first letter of each word
+  // Helper function to capitalize first letter of each word,
+  // while preserving all-caps abbreviations like "III", "II",
+  // "IV", "JR", "SR" so they don't get rendered as "Iii" etc.
   const capitalizeWords = (str: string): string => {
     if (!str) return ''
     return str
       .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .map(word => {
+        // If the user typed a fully uppercase word (Roman
+        // numeral or abbreviation) keep it as-is.
+        if (/^[A-Z]{2,}$/.test(word)) return word
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+      })
       .join(' ')
   }
 
@@ -41,6 +48,11 @@ function RegisterAdminPage() {
   const [lastName, setLastName] = useState('')
   const [middleName, setMiddleName] = useState('')
   const [suffix, setSuffix] = useState('')
+  // Manual ID Number / Username. Previously the server
+  // auto-generated this as `ADMIN-${timestamp}`, but the super
+  // admin needs to enter it manually so it matches the admin's
+  // actual school-issued ID.
+  const [accountId, setAccountId] = useState('')
   const [email, setEmail] = useState('')
   const [userType, setUserType] = useState('EMPLOYEE')
   const [departmentId, setDepartmentId] = useState('')
@@ -178,6 +190,11 @@ function RegisterAdminPage() {
       return
     }
 
+    if (!accountId.trim()) {
+      await notify.error('Error', 'ID Number / Username is required')
+      return
+    }
+
     if (password !== confirmPassword) {
       await notify.error('Error', 'Passwords do not match')
       return
@@ -216,6 +233,10 @@ function RegisterAdminPage() {
         credentials: 'include',
         body: JSON.stringify({
           full_name,
+          // Send the manually-entered ID Number / Username. The
+          // server uses this as both `User.account_id` and
+          // `UserAccount.username`.
+          account_id: accountId.trim(),
           email: email || null,
           user_type: userType,
           password: password,
@@ -290,7 +311,7 @@ function RegisterAdminPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         <Card>
           <CardHeader>
             <CardTitle>Create Admin Account</CardTitle>
@@ -368,6 +389,29 @@ function RegisterAdminPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   disabled={submitting}
                 />
+              </div>
+
+              {/* ID Number / Username — entered manually by the
+                  super admin. This becomes the admin's login
+                  username and the `User.account_id` shown in
+                  reports / activity logs. Must be unique. */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  ID Number / Username <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value.replace(/\s+/g, ''))}
+                  placeholder="e.g. libadmin.2024 or ADMIN-001"
+                  maxLength={20}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                  disabled={submitting}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  3-20 characters, letters / numbers / dot / dash / underscore. No spaces.
+                </p>
               </div>
 
               {/* User Type */}
@@ -596,10 +640,11 @@ function RegisterAdminPage() {
               variant="outline" 
               onClick={() => router.back()}
               disabled={submitting}
+              className='py-5 px-4 bg-gray-200 hover:bg-gray-300'
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !!passwordError}>
+            <Button type="submit" disabled={submitting || !!passwordError} className='py-5 px-4 bg-primary-600 text-white hover:bg-primary-700'>
               {submitting ? 'Creating...' : 'Create Admin Account'}
             </Button>
           </div>

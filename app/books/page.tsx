@@ -673,11 +673,7 @@ export default function BooksPage() {
               Book Management System
             </h1>
             <div className="flex gap-2">
-              {effectivePendingTransactions.length > 0 && (
-                <div className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">
-                  {effectivePendingTransactions.length} Pending Transaction{effectivePendingTransactions.length !== 1 ? 's' : ''}
-                </div>
-              )}
+              
               <Link 
                 href="/books/archived-copies"
                 className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center"
@@ -688,7 +684,7 @@ export default function BooksPage() {
               {session?.user?.role === 'STAFF' && (
                 <Link 
                   href="/books/return"
-                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center"
+                  className="!bg-primary-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center"
                 >
                   <i className="fas fa-undo mr-2"></i>
                   Return Books
@@ -754,7 +750,7 @@ export default function BooksPage() {
             {session?.user?.role === 'STAFF' && (
               <button
                 onClick={() => window.location.href = '/books/return'}
-                className="py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm"
+                className="py-4 text-white border-b-2 bg-primary-600 px-4 border-transparent hover:bg-primary-700 font-medium text-sm"
               >
                 <i className="fas fa-undo mr-2"></i>
                 Return Books
@@ -765,7 +761,7 @@ export default function BooksPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         {activeTab === 'books' ? (
           <>
             {/* Search and Filters */}
@@ -925,6 +921,13 @@ export default function BooksPage() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex gap-1">
+                                <Link
+                                  href={`/books/${book.book_id}/view`}
+                                  className="text-slate-600 hover:text-slate-900 px-2 py-1 text-sm border border-slate-600 hover:bg-slate-50 rounded transition-colors"
+                                  title="View Book Details"
+                                >
+                                  <i className="fas fa-eye"></i>
+                                </Link>
                                 <Link
                                   href={`/books/${book.book_id}/edit`}
                                   className="text-blue-600 hover:text-blue-900 px-2 py-1 text-sm border border-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -1276,7 +1279,7 @@ export default function BooksPage() {
                         </div>
                         
                         <div className="flex flex-col gap-2">
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          <span className={`px-2 py-2 text-xs font-medium rounded-md ${
                             transaction.due_date && new Date(transaction.due_date) < new Date() 
                               ? 'bg-red-100 text-red-800' 
                               : 'bg-green-100 text-green-800'

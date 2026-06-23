@@ -171,6 +171,7 @@ export default function DepartmentViewPage() {
             <div className="flex items-center space-x-3">
               <Button
                 variant="outline"
+                className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700'
                 onClick={() => router.push(`/departments/${departmentId}/edit`)}
               >
                 <i className="fas fa-edit mr-2" />
@@ -252,6 +253,7 @@ export default function DepartmentViewPage() {
               <Button
                 size="sm"
                 variant="outline"
+                className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700'
                 onClick={() => router.push(`/programs?department=${departmentId}`)}
               >
                 <i className="fas fa-external-link-alt mr-2" />
@@ -312,6 +314,7 @@ export default function DepartmentViewPage() {
               <Button
                 size="sm"
                 variant="outline"
+                className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700'
                 onClick={() => router.push(`/library-users?department=${departmentId}`)}
               >
                 <i className="fas fa-external-link-alt mr-2" />

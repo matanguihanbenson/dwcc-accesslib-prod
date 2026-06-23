@@ -161,7 +161,7 @@ export default function OfficesPage() {
             Manage administrative offices
           </p>
         </div>
-        <Button onClick={() => router.push('/offices/add')}>
+        <Button onClick={() => router.push('/offices/add')} className=' bg-primary-600 px-4 py-5 text-white hover:bg-primary-700'>
           <i className="fas fa-plus mr-2" />
           Add Office
         </Button>
@@ -237,6 +237,7 @@ export default function OfficesPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className='bg-orange-500 hover:bg-orange-600 text-white px-2 py-4'
                             onClick={() => router.push(`/offices/${office.office_id}/edit`)}
                             title="Edit Office"
                           >
@@ -245,6 +246,7 @@ export default function OfficesPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className='bg-primary-600 hover:bg-primary-700 text-white px-2 py-4'
                             onClick={() => router.push(`/offices/${office.office_id}`)}
                             title="View Office"
                           >
@@ -256,8 +258,8 @@ export default function OfficesPage() {
                             onClick={() => handleToggleStatus(office.office_id, office.is_active, office.name)}
                             title={office.is_active ? 'Deactivate Office' : 'Activate Office'}
                             className={office.is_active 
-                              ? 'text-red-600 hover:text-red-700 hover:bg-red-50 border-red-600' 
-                              : 'text-green-600 hover:text-green-700 hover:bg-green-50 border-green-600'}
+                              ? 'text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-4 !border-red-600' 
+                              : 'text-green-600 hover:text-green-700 hover:bg-green-50 px-2 py-4 !border-green-600'}
                           >
                             <i className={`fas ${office.is_active ? 'fa-times-circle' : 'fa-check-circle'}`} />
                           </Button>

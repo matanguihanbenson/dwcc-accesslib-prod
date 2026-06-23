@@ -81,12 +81,15 @@ export async function PATCH(
 
     // Update the transaction and locker status
     const updatedTransaction = await prisma.$transaction(async (tx) => {
-      // Update the locker transaction
+      // Update the locker transaction. Status must be flipped to 'COMPLETED'
+      // here too — otherwise force-returned rentals remain 'ACTIVE' in the
+      // database and skew every report that reads the status column.
       const updated = await tx.lockerTransaction.update({
         where: { transaction_id: transactionId },
         data: {
           return_time: returnTime,
-          penalty: forcePenalty
+          penalty: forcePenalty,
+          status: 'COMPLETED'
         },
         include: {
           locker: true,

@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation'
 import OverdueBooksTable from '@/components/overdue/OverdueBooksTable'
 import OverdueLockerTable from '@/components/overdue/OverdueLockerTable'
 import SendOverdueNotificationModal from '@/components/modals/SendOverdueNotificationModal'
+import PaymentHistoryModal from '@/components/modals/PaymentHistoryModal'
+import { Pagination } from '@/components/ui/pagination'
+import { generateTransactionId } from '@/lib/utils'
 import { notify } from '@/lib/notification'
 import { UserRole } from '@/types'
 
@@ -92,6 +95,25 @@ export default function OverdueManagementPage() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState('all')
   const [historyTypeFilter, setHistoryTypeFilter] = useState('all')
   const [showNotificationModal, setShowNotificationModal] = useState(false)
+  const [voidedList, setVoidedList] = useState<any[]>([])
+  const [loadingVoided, setLoadingVoided] = useState(false)
+  const [showVoidedModal, setShowVoidedModal] = useState(false)
+  const [voidedSearch, setVoidedSearch] = useState('')
+  // Pagination for the Fine Payment Records table. The summary
+  // cards above the table continue to operate on the full
+  // filtered set so the totals stay accurate; only the rows
+  // actually rendered are sliced for the current page.
+  const [historyCurrentPage, setHistoryCurrentPage] = useState(1)
+  const [historyItemsPerPage, setHistoryItemsPerPage] = useState(20)
+  // Per-row "view detail" modal state for the Payment History
+  // table. Same shape as the one used by OverdueBooksTable /
+  // OverdueLockerTable so the action column on each surface
+  // behaves consistently.
+  const [paymentHistoryModal, setPaymentHistoryModal] = useState<{
+    isOpen: boolean
+    transactionId: number | null
+    transactionType: 'BOOK' | 'LOCKER'
+  }>({ isOpen: false, transactionId: null, transactionType: 'BOOK' })
   const [fineSettings, setFineSettings] = useState({
     book_fine_per_day: 5,
     locker_fine_per_hour: 20,
@@ -201,6 +223,64 @@ export default function OverdueManagementPage() {
     }
   }, [])
 
+  // Fetch the list of voided overdue penalties. The "View Voided"
+  // button on the page header opens a modal that calls this. We
+  // also refresh the count badge after a void so the page header
+  // badge stays accurate without forcing a full reload.
+  const fetchVoided = useCallback(async () => {
+    setLoadingVoided(true)
+    try {
+      const response = await fetch('/api/overdue/voided')
+      if (!response.ok) {
+        throw new Error(`Failed to fetch voided list (${response.status})`)
+      }
+      const data = await response.json()
+      setVoidedList(Array.isArray(data?.voided) ? data.voided : [])
+    } catch (err) {
+      console.error('Error fetching voided list:', err)
+      setVoidedList([])
+    } finally {
+      setLoadingVoided(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (showVoidedModal) {
+      fetchVoided()
+    }
+  }, [showVoidedModal, fetchVoided])
+
+  // Lightweight count poll: keeps the red badge on the "View Voided"
+  // button in sync with voids done from the history tab without
+  // forcing a hard refresh. We rely on the API's `count` field,
+  // which the endpoint already returns, so the polling payload
+  // stays small (server still returns rows up to `limit`, so we
+  // cap it to 1 to keep the wire size tiny).
+  const [voidedCount, setVoidedCount] = useState(0)
+  useEffect(() => {
+    if (!authReady) return
+    let cancelled = false
+    const refreshCount = async () => {
+      try {
+        const response = await fetch('/api/overdue/voided?limit=1')
+        if (!response.ok) return
+        const data = await response.json()
+        if (cancelled) return
+        if (typeof data?.count === 'number') {
+          setVoidedCount(data.count)
+        }
+      } catch {
+        // swallow polling errors
+      }
+    }
+    refreshCount()
+    const interval = setInterval(refreshCount, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [authReady])
+
   useEffect(() => {
     if (authReady && activeTab === 'history') {
       fetchPaymentHistory()
@@ -299,7 +379,7 @@ export default function OverdueManagementPage() {
   }) || []
 
   const filteredPaymentHistory = paymentHistory.filter(record => {
-    const matchesSearch = 
+    const matchesSearch =
       record.user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       record.user.account_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (record.transaction_type === 'BOOK' && record.transaction_details.book_title?.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -310,6 +390,29 @@ export default function OverdueManagementPage() {
 
     return matchesSearch && matchesStatus && matchesType
   })
+
+  // Pagination over the filtered payment history. Reset to
+  // page 1 when any filter or the page size changes so the
+  // user doesn't end up stranded on a page that no longer
+  // exists after the result set shrinks. The summary cards
+  // above the table continue to use the full filtered set so
+  // their totals stay accurate.
+  useEffect(() => {
+    setHistoryCurrentPage(1)
+  }, [searchTerm, historyStatusFilter, historyTypeFilter, historyItemsPerPage, activeTab])
+
+  const historyTotal = filteredPaymentHistory.length
+  const historyTotalPages = Math.max(1, Math.ceil(historyTotal / historyItemsPerPage))
+  const historySafePage = Math.min(historyCurrentPage, historyTotalPages)
+  const historyStartIndex = (historySafePage - 1) * historyItemsPerPage
+  const historyEndIndex = Math.min(
+    historyStartIndex + historyItemsPerPage,
+    historyTotal
+  )
+  const pagedPaymentHistory = filteredPaymentHistory.slice(
+    historyStartIndex,
+    historyEndIndex
+  )
 
   if (!authReady) {
     return (
@@ -353,7 +456,7 @@ export default function OverdueManagementPage() {
               </button>
               <button
                 onClick={() => router.push('/user-penalties')}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
+                className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
               >
                 <i className="fas fa-user-circle"></i>
                 User Penalty Summary
@@ -366,7 +469,7 @@ export default function OverdueManagementPage() {
       {/* Summary Cards */}
       {overdueData && (
         <div className="px-6 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
             <div className="bg-white p-4 rounded-lg shadow-sm border">
               <div className="text-2xl font-bold text-red-600">
                 {overdueData.summary.total_overdue_books}
@@ -392,58 +495,184 @@ export default function OverdueManagementPage() {
               <div className="text-sm text-gray-600">Locker Penalties</div>
             </div>
           </div>
+
+          {/* Second row: financial totals — Total Fines, Paid,
+              Remaining Unpaid. Sourced from the payment history
+              so the numbers stay consistent with the "Payment
+              History" tab. */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {(() => {
+              const totalFines =
+                Number(overdueData.summary.total_book_penalties || 0) +
+                Number(overdueData.summary.total_locker_penalties || 0)
+              const paid = paymentHistory.reduce(
+                (sum, r) => sum + Number(r.amount_paid || 0),
+                0
+              )
+              const remaining = Math.max(0, totalFines - paid)
+              return (
+                <>
+                  <div className="bg-gradient-to-br from-primary-50 to-white p-4 rounded-lg shadow-sm border border-primary-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-primary-600 uppercase tracking-wide">
+                          Total Fines
+                        </div>
+                        <div className="text-2xl font-bold text-primary-700 mt-1">
+                          ₱{totalFines.toFixed(2)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          Book + Locker penalties
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <i className="fas fa-coins text-primary-600"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-green-50 to-white p-4 rounded-lg shadow-sm border border-green-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-green-600 uppercase tracking-wide">
+                          Paid
+                        </div>
+                        <div className="text-2xl font-bold text-green-700 mt-1">
+                          ₱{paid.toFixed(2)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {totalFines > 0
+                            ? `${Math.round((paid / totalFines) * 100)}% of total`
+                            : 'No fines recorded'}
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                        <i className="fas fa-check-circle text-green-600"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`p-4 rounded-lg shadow-sm border bg-gradient-to-br ${
+                      remaining > 0
+                        ? 'from-red-50 to-white border-red-100'
+                        : 'from-gray-50 to-white border-gray-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div
+                          className={`text-xs font-medium uppercase tracking-wide ${
+                            remaining > 0 ? 'text-red-600' : 'text-gray-500'
+                          }`}
+                        >
+                          Remaining Unpaid
+                        </div>
+                        <div
+                          className={`text-2xl font-bold mt-1 ${
+                            remaining > 0 ? 'text-red-700' : 'text-gray-700'
+                          }`}
+                        >
+                          ₱{remaining.toFixed(2)}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {totalFines > 0
+                            ? `${Math.round((remaining / totalFines) * 100)}% still outstanding`
+                            : 'All settled'}
+                        </div>
+                      </div>
+                      <div
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          remaining > 0 ? 'bg-red-100' : 'bg-gray-100'
+                        }`}
+                      >
+                        <i
+                          className={`fas ${
+                            remaining > 0
+                              ? 'fa-exclamation-circle text-red-600'
+                              : 'fa-check text-gray-500'
+                          }`}
+                        ></i>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )
+            })()}
+          </div>
         </div>
       )}
 
       {/* Content */}
       <div className="px-6 py-4">
-        {/* Tabs */}
+        {/* Tabs + "View Voided" action button */}
         <div className="border-b border-gray-200 mb-6">
-          <nav className="-mb-px flex space-x-8">
-            <button
-              onClick={() => setActiveTab('books')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'books'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Overdue Books ({filteredBooks.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('lockers')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'lockers'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Overdue Lockers ({filteredLockers.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'history'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Payment History ({paymentHistory.length})
-            </button>
-            {session?.user?.role === UserRole.ADMIN && (
+          <div className="flex items-end justify-between">
+            <nav className="-mb-px flex space-x-8">
               <button
-                onClick={() => setActiveTab('settings')}
+                onClick={() => setActiveTab('books')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'settings'
+                  activeTab === 'books'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                <i className="fas fa-cog mr-1"></i>
-                Fine Settings
+                Overdue Books ({filteredBooks.length})
               </button>
-            )}
-          </nav>
+              <button
+                onClick={() => setActiveTab('lockers')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'lockers'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Overdue Lockers ({filteredLockers.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'history'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Payment History ({paymentHistory.length})
+              </button>
+              {session?.user?.role === UserRole.ADMIN && (
+                <button
+                  onClick={() => setActiveTab('settings')}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'settings'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <i className="fas fa-cog mr-1"></i>
+                  Fine Settings
+                </button>
+              )}
+            </nav>
+
+            {/* "View Voided" opens a modal listing every penalty
+                that has been voided by an admin. Useful for audit
+                review of who erased which borrower's fine, and
+                why. Available to ADMIN and STAFF since both can
+                trigger the void action on the history page. */}
+            <button
+              onClick={() => setShowVoidedModal(true)}
+              className="mb-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 text-xs font-medium transition-colors"
+              title="View all voided overdue penalties"
+            >
+              <i className="fas fa-ban"></i>
+              View Voided
+              {voidedCount > 0 && (
+                <span className="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white min-w-[18px]">
+                  {voidedCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Filters and Search */}
@@ -539,7 +768,7 @@ export default function OverdueManagementPage() {
                   </span>
                 )}
                 {filterType !== 'all' && (activeTab === 'books' || activeTab === 'lockers') && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">
+                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded text-xs">
                     <i className="fas fa-user"></i>
                     {filterType === 'student' ? 'Students' : filterType === 'employee' ? 'Employees' : 'Critical'}
                   </span>
@@ -655,7 +884,8 @@ export default function OverdueManagementPage() {
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Payment Date
+                              Payment Information
+                              <div className="text-[10px] font-normal text-gray-400 normal-case">Date &amp; Payment ID</div>
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               User / Borrower
@@ -678,16 +908,32 @@ export default function OverdueManagementPage() {
                             <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Payment Status
                             </th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Actions
+                            </th>
                           </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredPaymentHistory.map((record) => (
+                        {pagedPaymentHistory.map((record) => (
                           <tr key={record.settlement_id} className="hover:bg-gray-50">
                               <td className="px-4 py-3 whitespace-nowrap text-sm">
+                                {/* Payment Information: payment date
+                                    on top, generated payment ID
+                                    (BT-YYMM-NNNNNN) below in
+                                    monospace so it stands out as a
+                                    reference code. */}
                                 <div className="text-gray-900 font-medium">
                                   {new Date(record.created_at).toLocaleDateString()}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-[11px] text-gray-500 font-mono">
+                                  {generateTransactionId(
+                                    record.transaction_id,
+                                    record.created_at
+                                      ? new Date(record.created_at)
+                                      : undefined
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-gray-400">
                                   {new Date(record.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </div>
                               </td>
@@ -698,15 +944,15 @@ export default function OverdueManagementPage() {
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                    record.transaction_type === 'BOOK' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                                    record.transaction_type === 'BOOK' ? 'bg-primary-100 text-primary-800' : 'bg-blue-100 text-blue-800'
                                   }`}>
                                     <i className={`fas fa-${record.transaction_type === 'BOOK' ? 'book' : 'key'} mr-1`}></i>
                                     {record.transaction_type}
                                   </span>
                                 </div>
                                 <div className="text-sm text-gray-900 mt-1">
-                                  {record.transaction_type === 'BOOK' 
-                                    ? record.transaction_details.book_title 
+                                  {record.transaction_type === 'BOOK'
+                                    ? record.transaction_details.book_title
                                     : `Locker #${record.transaction_details.locker_number}`}
                                 </div>
                               </td>
@@ -738,10 +984,69 @@ export default function OverdueManagementPage() {
                                   </div>
                                 )}
                               </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-center">
+                                {/* Actions: opens the existing
+                                    PaymentHistoryModal so the user
+                                    can inspect the full timeline,
+                                    progress bar, and processed-by
+                                    info for the row's underlying
+                                    transaction. Mirrors the
+                                    "View Payment History" icon
+                                    button used by the Books and
+                                    Lockers tables. */}
+                                <button
+                                  onClick={() =>
+                                    setPaymentHistoryModal({
+                                      isOpen: true,
+                                      transactionId: record.transaction_id,
+                                      transactionType: record.transaction_type
+                                    })
+                                  }
+                                  className="text-primary-600 hover:text-primary-900 px-2 py-1 text-xs border border-primary-600 hover:bg-primary-50 rounded inline-flex items-center gap-1"
+                                  title="View payment history / detail"
+                                >
+                                <i className="fas fa-history"></i>
+                                <span>View</span>
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+
+                  {/* Pagination for the payment history table. The
+                      summary cards above the table keep using the
+                      full filtered set so their totals stay
+                      accurate; only the rendered rows are sliced. */}
+                  {filteredPaymentHistory.length > 0 && (
+                    <div className="px-4 py-3 border-t bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <label htmlFor="ph-items-per-page" className="text-sm text-gray-600">
+                          Per page
+                        </label>
+                        <select
+                          id="ph-items-per-page"
+                          value={historyItemsPerPage}
+                          onChange={(e) => setHistoryItemsPerPage(Number(e.target.value))}
+                          className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          {[10, 20, 50, 100].map((n) => (
+                            <option key={n} value={n}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <Pagination
+                        currentPage={historySafePage}
+                        totalPages={historyTotalPages}
+                        totalItems={historyTotal}
+                        itemsPerPage={historyItemsPerPage}
+                        onPageChange={setHistoryCurrentPage}
+                        className="flex-1 justify-end"
+                      />
                     </div>
                   )}
                 </div>
@@ -926,6 +1231,198 @@ export default function OverdueManagementPage() {
         overdueLockers={overdueData?.overdue_lockers || []}
         userEmail={session?.user?.email || null}
       />
+
+      {/* Per-row payment detail modal. Triggered by the "View"
+          button in the Payment History table's Actions column.
+          Same component used by the Books / Lockers tables so
+          the experience is identical across surfaces. */}
+      {paymentHistoryModal.isOpen && paymentHistoryModal.transactionId && (
+        <PaymentHistoryModal
+          isOpen={paymentHistoryModal.isOpen}
+          onClose={() =>
+            setPaymentHistoryModal({
+              isOpen: false,
+              transactionId: null,
+              transactionType: 'BOOK'
+            })
+          }
+          transactionId={paymentHistoryModal.transactionId}
+          transactionType={paymentHistoryModal.transactionType}
+        />
+      )}
+
+      {/* View Voided Modal: lists every overdue penalty that has
+          been voided by an admin/staff. Reads from
+          /api/overdue/voided. The "View Voided" button at the top
+          of the page toggles this; we also call `fetchVoided()`
+          whenever the modal is opened. */}
+      {showVoidedModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowVoidedModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="flex items-center gap-2">
+                <i className="fas fa-ban text-red-600"></i>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Voided Overdue Penalties
+                </h2>
+                <span className="text-xs text-gray-500">
+                  ({voidedList.length})
+                </span>
+              </div>
+              <button
+                onClick={() => setShowVoidedModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="p-4 border-b bg-gray-50">
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                  <input
+                    type="text"
+                    placeholder="Search by borrower name, ID, reason, or voided-by..."
+                    value={voidedSearch}
+                    onChange={(e) => setVoidedSearch(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <button
+                  onClick={fetchVoided}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  title="Refresh voided list"
+                >
+                  <i className="fas fa-rotate"></i>
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {loadingVoided ? (
+                <div className="flex items-center justify-center py-16 text-gray-500">
+                  <i className="fas fa-spinner fa-spin mr-2"></i>
+                  Loading voided transactions...
+                </div>
+              ) : voidedList.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+                  <i className="fas fa-inbox text-3xl mb-2"></i>
+                  <p>No voided transactions found.</p>
+                </div>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium text-gray-600">Borrower</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-600">Txn #</th>
+                      <th className="px-4 py-2 text-right font-medium text-gray-600">Original Penalty</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-600">Reason</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-600">Voided By</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-600">Voided At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {voidedList
+                      .filter((v) => {
+                        if (!voidedSearch.trim()) return true
+                        const q = voidedSearch.toLowerCase()
+                        const haystack = [
+                          v.borrower?.full_name,
+                          v.borrower?.account_id,
+                          v.borrower?.email,
+                          v.reason,
+                          v.voided_by?.full_name,
+                          v.voided_by?.account_id,
+                          v.transaction_type,
+                          String(v.transaction_id)
+                        ]
+                          .filter(Boolean)
+                          .join(' ')
+                          .toLowerCase()
+                        return haystack.includes(q)
+                      })
+                      .map((v) => (
+                        <tr key={v.settlement_id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">
+                            {v.borrower ? (
+                              <div>
+                                <div className="font-medium text-gray-900">
+                                  {v.borrower.full_name || '—'}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {v.borrower.account_id}
+                                  {v.borrower.user_type ? ` · ${v.borrower.user_type}` : ''}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">Unknown</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                              v.transaction_type === 'BOOK'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-primary-100 text-primary-700'
+                            }`}>
+                              <i className={`fas ${v.transaction_type === 'BOOK' ? 'fa-book' : 'fa-lock'}`}></i>
+                              {v.transaction_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-gray-600">#{v.transaction_id}</td>
+                          <td className="px-4 py-2 text-right">
+                            {Number(v.penalty_amount) > 0
+                              ? `₱${Number(v.penalty_amount).toFixed(2)}`
+                              : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-4 py-2 max-w-xs">
+                            <div className="truncate" title={v.reason}>
+                              {v.reason || <span className="text-gray-400">(no reason given)</span>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2">
+                            {v.voided_by ? (
+                              <div>
+                                <div className="text-gray-900">{v.voided_by.full_name || '—'}</div>
+                                <div className="text-xs text-gray-500">{v.voided_by.account_id}</div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">Unknown</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-gray-600">
+                            {v.voided_at ? new Date(v.voided_at).toLocaleString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="p-3 border-t bg-gray-50 text-xs text-gray-500 flex items-center justify-between">
+              <span>
+                Showing the most recent voided penalties. The audit log retains the full history.
+              </span>
+              <button
+                onClick={() => setShowVoidedModal(false)}
+                className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

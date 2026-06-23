@@ -163,7 +163,11 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     name: 'Users',
     href: '/users',
     icon: 'fa-users',
-    roles: [USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN],
+    // STAFF is included here so the Library Users child
+    // (which they have view + RFID-binding access to) is
+    // reachable from the sidebar. The other admin-only
+    // children stay restricted via their own `roles`.
+    roles: [USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STAFF],
     children: [
       {
         name: 'Library Users',
@@ -226,12 +230,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     href: '/activity-logs',
     icon: 'fa-history',
     roles: [USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STAFF]
-  },
-  {
-    name: 'Profile',
-    href: '/profile',
-    icon: 'fa-user',
-    roles: [USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STAFF, USER_ROLES.USER]
   }
 ]
 

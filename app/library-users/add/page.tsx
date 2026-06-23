@@ -123,7 +123,11 @@ export default function AddLibraryUserPage() {
 
       if (status === 'authenticated' && session?.user) {
         const userRole = session.user.role as UserRole
-        if (userRole !== UserRole.SUPER_ADMIN && userRole !== UserRole.ADMIN) {
+        if (
+          userRole !== UserRole.SUPER_ADMIN &&
+          userRole !== UserRole.ADMIN &&
+          userRole !== UserRole.STAFF
+        ) {
           router.push('/dashboard')
           return
         }
@@ -759,7 +763,7 @@ export default function AddLibraryUserPage() {
               </div>
             </div>
             {mode === 'edit' && (
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+              <span className="inline-flex items-center px-4 py-4 rounded-md text-xs font-semibold bg-amber-100 text-amber-800">
                 <i className="fas fa-pen-to-square mr-1.5" />
                 Editing existing user
               </span>
@@ -779,6 +783,7 @@ export default function AddLibraryUserPage() {
             <Button
               type="button"
               variant="outline"
+              className='bg-primary-600 py-5 px-5 text-white hover:bg-primary-800'
               onClick={openRetrieveModal}
             >
               <i className="fas fa-magnifying-glass mr-2" />
@@ -789,6 +794,7 @@ export default function AddLibraryUserPage() {
                 type="button"
                 variant="outline"
                 onClick={handleClearLoaded}
+                className='bg-gray-200 hover:bg-gray-300 px-4 py-5'
               >
                 <i className="fas fa-rotate-left mr-2" />
                 New
@@ -1214,13 +1220,15 @@ export default function AddLibraryUserPage() {
                 <Button 
                   type="button"
                   variant="outline" 
+                  className="py-5 px-4 bg-gray-100 hover:bg-gray-200"
                   onClick={() => router.back()}
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
                 <Button 
-                  type="submit" 
+                  type="submit"
+                  className='bg-primary-600 hover:bg-primary-700 py-5 px-4 text-white' 
                   disabled={
                     submitting ||
                     !isFormValid ||
@@ -1329,6 +1337,7 @@ export default function AddLibraryUserPage() {
                       <Button
                         type="button"
                         onClick={handleBindRfid}
+                        className='bg-primary-600 hover:bg-primary-700 py-5 px-4 text-white'
                         disabled={rfidBusy || !rfidInput.trim()}
                       >
                         {rfidBusy ? (

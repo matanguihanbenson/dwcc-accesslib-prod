@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { notify } from '@/lib/notification'
 import { PDFReportGenerator, type PaperSize } from '@/lib/pdf-report-generator'
 import { ExcelReportGenerator } from '@/lib/excel-report-generator'
-import { formatDateRangeForTitle, formatDateRangeForFilename } from '@/lib/utils'
+import { formatDateRangeForTitle, formatDateRangeForFilename, campusLibraryLabel } from '@/lib/utils'
 import { ExportButtonGroup } from './components/common/ExportButtonGroup'
 import { NoDataState } from './components/common/NoDataState'
 import { SummaryCardsGrid, type SummaryCardData } from './components/visualizations/SummaryCardsGrid'
@@ -18,6 +18,8 @@ import { PeakHoursChart } from './components/visualizations/PeakHoursChart'
 import { UserTypeDistributionTable } from './components/visualizations/UserTypeDistributionTable'
 import { DatePresetSelector, type DatePreset } from './components/filters/DatePresetSelector'
 import { UserSearchInput } from './components/filters/UserSearchInput'
+
+type Campus = 'COLLEGE' | 'BASIC_EDUCATION'
 
 interface ReportData {
   period: {
@@ -57,11 +59,40 @@ export default function ReportsPage() {
   
   // Form state
   const currentDate = new Date()
-  const [reportType, setReportType] = useState<'users-concurrent' | 'users-per-transaction' | 'individual' | 'locker-concurrent' | 'locker-per-transaction' | 'entrance-exit' | 'student-visits-dept-grade'>('entrance-exit')
+  const [reportType, setReportType] = useState<'users-concurrent' | 'users-per-transaction' | 'individual' | 'locker-concurrent' | 'locker-per-transaction' | 'entrance-exit' | 'student-visits-dept-grade' | 'fines-summary'>('entrance-exit')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [datePreset, setDatePreset] = useState<DatePreset>('month')
   const [paperSize, setPaperSize] = useState<PaperSize>('short')
+
+  // Fines summary report. Before generating, the user is shown
+  // a modal to pick which fines to include: combined (book +
+  // locker), book only, or locker only. The picked value is
+  // stored in `finesType` and passed to the API as `?type=`.
+  const [finesType, setFinesType] = useState<'combined' | 'book' | 'locker'>('combined')
+  const [showFinesTypeModal, setShowFinesTypeModal] = useState(false)
+
+  // Campus scope. STAFF users are auto-pinned to their own campus
+  // (fetched from /api/staff/me/campus below). ADMIN / SUPER_ADMIN
+  // can pick "All Campuses" / "College" / "Basic Education" via the
+  // select in the filter bar.
+  const [campus, setCampus] = useState<Campus | ''>('')
+  const [myCampus, setMyCampus] = useState<Campus | null>(null)
+  const [myCampusLoaded, setMyCampusLoaded] = useState(false)
+
+  // Effective campus to send to the API / use in titles. For STAFF,
+  // always pin to their own campus. For ADMIN, honor their selection.
+  const effectiveCampus: Campus | null = useMemo(() => {
+    if (myCampus) return myCampus
+    if (campus === 'COLLEGE' || campus === 'BASIC_EDUCATION') return campus
+    return null
+  }, [myCampus, campus])
+
+  // Human label used in CSV / PDF / Excel headers.
+  const libraryName = useMemo(
+    () => campusLibraryLabel(effectiveCampus) || 'Library',
+    [effectiveCampus]
+  )
   
   // User search state for individual statistics
   const [userSearch, setUserSearch] = useState('')
@@ -86,6 +117,7 @@ export default function ReportsPage() {
   const [lockerConcurrentData, setLockerConcurrentData] = useState<any>(null)
   const [lockerPerTransactionData, setLockerPerTransactionData] = useState<any>(null)
   const [studentVisitsDeptGradeData, setStudentVisitsDeptGradeData] = useState<any>(null)
+  const [finesSummaryData, setFinesSummaryData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('monthly')
 
@@ -108,6 +140,40 @@ export default function ReportsPage() {
 
     checkAuth()
   }, [session, status, router])
+
+  // For STAFF, fetch the campus designation so the report is
+  // auto-scoped to that campus. For ADMIN, the campus filter is
+  // user-driven so we leave myCampus = null.
+  useEffect(() => {
+    if (status !== 'authenticated' || !session?.user) return
+    const userRole = (session.user as any).role
+    if (userRole !== 'STAFF') {
+      setMyCampusLoaded(true)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/staff/me/campus', {
+          credentials: 'include',
+          headers: { 'Cache-Control': 'no-store' }
+        })
+        if (!res.ok) {
+          if (!cancelled) setMyCampusLoaded(true)
+          return
+        }
+        const body = await res.json()
+        if (cancelled) return
+        if (body?.campus === 'COLLEGE' || body?.campus === 'BASIC_EDUCATION') {
+          setMyCampus(body.campus)
+        }
+        setMyCampusLoaded(true)
+      } catch {
+        if (!cancelled) setMyCampusLoaded(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [session, status])
 
   // Debounced user search for individual statistics
   useEffect(() => {
@@ -190,6 +256,18 @@ export default function ReportsPage() {
     applyDatePreset()
   }, [datePreset, reportType, entrySpecificDate])
 
+  // Build the common query params every report endpoint expects
+  // (date range + optional campus). The API auto-scopes STAFF to
+  // their own campus regardless of what we send, so this is mostly
+  // the ADMIN "All / College / Basic Ed" selector.
+  const buildReportQuery = (includeCampus = true): URLSearchParams => {
+    const params = new URLSearchParams()
+    if (dateFrom) params.append('date_from', dateFrom)
+    if (dateTo) params.append('date_to', dateTo)
+    if (includeCampus && effectiveCampus) params.append('campus', effectiveCampus)
+    return params
+  }
+
   const fetchReportData = async () => {
     try {
       setLoading(true)
@@ -202,10 +280,7 @@ export default function ReportsPage() {
           return
         }
 
-        const params = new URLSearchParams({
-          date_from: dateFrom,
-          date_to: dateTo
-        })
+        const params = buildReportQuery()
 
         const response = await fetch(`/api/reports/users-per-hour?${params}`, {
           credentials: 'include',
@@ -236,10 +311,7 @@ export default function ReportsPage() {
           return
         }
 
-        const params = new URLSearchParams({
-          date_from: dateFrom,
-          date_to: dateTo
-        })
+        const params = buildReportQuery()
 
         const response = await fetch(`/api/reports/users-per-transaction?${params}`, {
           credentials: 'include',
@@ -266,10 +338,7 @@ export default function ReportsPage() {
           return
         }
 
-        const params = new URLSearchParams({
-          date_from: dateFrom,
-          date_to: dateTo
-        })
+        const params = buildReportQuery()
 
         const response = await fetch(`/api/reports/student-visits-by-dept-grade?${params}`, {
           credentials: 'include',
@@ -289,6 +358,51 @@ export default function ReportsPage() {
         } else {
           await notify.error('Error', 'Failed to fetch student visits statistics')
         }
+      } else if (reportType === 'fines-summary') {
+        // Fines summary is opt-in for combined/book/locker
+        // selection via the modal that the user sees when they
+        // click "Generate". The picked value is read from
+        // `finesType` and appended to the request. The date
+        // range is required so the report lines up with the
+        // "All overdue activity within X days" intent.
+        if (!dateFrom || !dateTo || dateFrom === '' || dateTo === '') {
+          await notify.error('Error', 'Please select a date range')
+          setLoading(false)
+          return
+        }
+
+        const params = new URLSearchParams()
+        params.append('type', finesType)
+        if (dateFrom) params.append('date_from', dateFrom)
+        if (dateTo) params.append('date_to', dateTo)
+
+        const response = await fetch(`/api/reports/fines-summary?${params}`, {
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+          if (result.success) {
+            setFinesSummaryData(result)
+            const typeLabel =
+              finesType === 'combined'
+                ? 'combined (book + locker)'
+                : finesType === 'book'
+                  ? 'book only'
+                  : 'locker only'
+            await notify.success(
+              'Success',
+              `Fines summary (${typeLabel}) loaded — ${result.grand.borrower_count} borrower(s) with ${result.grand.settlement_count} settlement(s).`
+            )
+          } else {
+            await notify.error('Error', result.error || 'Failed to fetch fines summary')
+          }
+        } else {
+          await notify.error('Error', 'Failed to fetch fines summary')
+        }
       } else if (reportType === 'individual') {
         if (!selectedUser) {
           await notify.error('Error', 'Please select a student/user first')
@@ -297,10 +411,10 @@ export default function ReportsPage() {
         }
 
         const params = new URLSearchParams({
-          user_id: selectedUser.user_id.toString(),
-          ...(dateFrom && { date_from: dateFrom }),
-          ...(dateTo && { date_to: dateTo })
+          user_id: selectedUser.user_id.toString()
         })
+        if (dateFrom) params.append('date_from', dateFrom)
+        if (dateTo) params.append('date_to', dateTo)
 
         const response = await fetch(`/api/reports/user-statistics?${params}`, {
           credentials: 'include',
@@ -327,10 +441,7 @@ export default function ReportsPage() {
           return
         }
 
-        const params = new URLSearchParams({
-          date_from: dateFrom,
-          date_to: dateTo
-        })
+        const params = buildReportQuery()
 
         const response = await fetch(`/api/reports/locker-concurrent?${params}`, {
           credentials: 'include',
@@ -357,10 +468,7 @@ export default function ReportsPage() {
           return
         }
 
-        const params = new URLSearchParams({
-          date_from: dateFrom,
-          date_to: dateTo
-        })
+        const params = buildReportQuery()
 
         const response = await fetch(`/api/reports/locker-statistics?${params}`, {
           credentials: 'include',
@@ -387,10 +495,7 @@ export default function ReportsPage() {
           return
         }
 
-        const params = new URLSearchParams({
-          date_from: dateFrom,
-          date_to: dateTo
-        })
+        const params = buildReportQuery()
 
         const response = await fetch(`/api/reports/entrance-exit?${params}`, {
           credentials: 'include',
@@ -420,11 +525,14 @@ export default function ReportsPage() {
 
         const params = new URLSearchParams({
           include_user: 'true',
-          limit: entryRecordLimit.toString(),
-          ...(entryUserFilter === 'specific' && entrySelectedUserId && { user_id: entrySelectedUserId.toString() }),
-          ...(dateFrom && { date_from: dateFrom }),
-          ...(dateTo && { date_to: dateTo })
+          limit: entryRecordLimit.toString()
         })
+        if (entryUserFilter === 'specific' && entrySelectedUserId) {
+          params.append('user_id', entrySelectedUserId.toString())
+        }
+        if (dateFrom) params.append('date_from', dateFrom)
+        if (dateTo) params.append('date_to', dateTo)
+        if (effectiveCampus) params.append('campus', effectiveCampus)
 
         const response = await fetch(`/api/entry-logs?${params}`, {
           credentials: 'include',
@@ -499,7 +607,7 @@ export default function ReportsPage() {
     }
 
     try {
-      const generator = new PDFReportGenerator(paperSize)
+      const generator = new PDFReportGenerator(paperSize, libraryName)
       const preparedBy = (session?.user as any)?.name || 'Library Staff'
       
       const filters = {
@@ -536,7 +644,7 @@ export default function ReportsPage() {
     }
 
     try {
-      const excelGenerator = new ExcelReportGenerator()
+      const excelGenerator = new ExcelReportGenerator(libraryName)
       
       const filters = {
         userFilter: entryUserFilter,
@@ -646,7 +754,7 @@ export default function ReportsPage() {
       }
       
       try {
-        const generator = new PDFReportGenerator(paperSize)
+        const generator = new PDFReportGenerator(paperSize, libraryName)
         const preparedBy = (session?.user as any)?.name || 'Library Staff'
         const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
         
@@ -669,7 +777,7 @@ export default function ReportsPage() {
       }
       
       try {
-        const generator = new PDFReportGenerator(paperSize)
+        const generator = new PDFReportGenerator(paperSize, libraryName)
         const preparedBy = (session?.user as any)?.name || 'Library Staff'
         const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
         
@@ -692,7 +800,7 @@ export default function ReportsPage() {
       }
       
       try {
-        const generator = new PDFReportGenerator(paperSize)
+        const generator = new PDFReportGenerator(paperSize, libraryName)
         const preparedBy = (session?.user as any)?.name || 'Library Staff'
         const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
         
@@ -715,7 +823,7 @@ export default function ReportsPage() {
       }
       
       try {
-        const generator = new PDFReportGenerator(paperSize)
+        const generator = new PDFReportGenerator(paperSize, libraryName)
         const preparedBy = (session?.user as any)?.name || 'Library Staff'
         const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
         
@@ -737,7 +845,7 @@ export default function ReportsPage() {
         return
       }
       try {
-        const generator = new PDFReportGenerator(paperSize)
+        const generator = new PDFReportGenerator(paperSize, libraryName)
         const preparedBy = (session?.user as any)?.name || 'Library Staff'
         const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
 
@@ -752,7 +860,35 @@ export default function ReportsPage() {
       }
       return
     }
-    
+
+    if (reportType === 'fines-summary') {
+      if (!finesSummaryData) {
+        notify.error('Error', 'No data to export. Please generate a report first.')
+        return
+      }
+      try {
+        const generator = new PDFReportGenerator(paperSize, libraryName)
+        const preparedBy = (session?.user as any)?.name || 'Library Staff'
+        const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
+
+        generator.generateFinesSummaryReport(finesSummaryData, preparedBy, dateRangeTitle)
+
+        const typeSlug =
+          finesType === 'book'
+            ? 'BookOnly'
+            : finesType === 'locker'
+              ? 'LockerOnly'
+              : 'Combined'
+        const filename = `Fines_Summary_${typeSlug}_${formatDateRangeForFilename(dateFrom, dateTo, datePreset)}.pdf`
+        generator.save(filename)
+        notify.success('Success', 'PDF exported successfully')
+      } catch (error) {
+        console.error('PDF export error:', error)
+        notify.error('Error', 'Failed to export PDF')
+      }
+      return
+    }
+
     const dataToExport = reportType === 'users-concurrent' ? usersConcurrentData : reportType === 'users-per-transaction' ? usersPerTransactionData : reportData
     
     if (!dataToExport) {
@@ -761,7 +897,7 @@ export default function ReportsPage() {
     }
 
     try {
-      const generator = new PDFReportGenerator(paperSize)
+      const generator = new PDFReportGenerator(paperSize, libraryName)
       const preparedBy = (session?.user as any)?.name || 'Library Staff'
       const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
       
@@ -803,7 +939,7 @@ export default function ReportsPage() {
   }
 
   const exportToExcel = () => {
-    const generator = new ExcelReportGenerator()
+    const generator = new ExcelReportGenerator(libraryName)
     const dateRangeTitle = formatDateRangeForTitle(dateFrom, dateTo, datePreset)
     let workbook: any
     let filename: string
@@ -838,6 +974,19 @@ export default function ReportsPage() {
         }
         workbook = generator.generateStudentVisitsByDeptGrade(studentVisitsDeptGradeData, dateRangeTitle)
         filename = `Student_Visits_Department_Grade_${formatDateRangeForFilename(dateFrom, dateTo, datePreset)}.xlsx`
+      } else if (reportType === 'fines-summary') {
+        if (!finesSummaryData) {
+          notify.error('Error', 'No data to export. Please generate a report first.')
+          return
+        }
+        workbook = generator.generateFinesSummaryReport(finesSummaryData, dateRangeTitle)
+        const typeSlug =
+          finesType === 'book'
+            ? 'BookOnly'
+            : finesType === 'locker'
+              ? 'LockerOnly'
+              : 'Combined'
+        filename = `Fines_Summary_${typeSlug}_${formatDateRangeForFilename(dateFrom, dateTo, datePreset)}.xlsx`
       } else if (reportType === 'users-concurrent') {
         if (!usersConcurrentData) {
           notify.error('Error', 'No data to export. Please generate a report first.')
@@ -917,7 +1066,7 @@ export default function ReportsPage() {
           return
         }
         
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Entrance/Exit Control for ${dateRangeTitle}\n\n`
         csvContent += `Time Range,Admin,Faculty,Employee,Guest,Alumni,Basic Education,College Students,Total\n`
         
@@ -947,7 +1096,7 @@ export default function ReportsPage() {
           return
         }
         
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Locker Concurrent Statistics for ${dateRangeTitle}\n\n`
         csvContent += `Date,Day,7:00 AM,8:00 AM,9:00 AM,10:00 AM,11:00 AM,12:00 NN,1:00 PM,2:00 PM,3:00 PM,4:00 PM,5:00 PM,6:00 PM,7:00 PM,Total\n`
         
@@ -993,7 +1142,7 @@ export default function ReportsPage() {
           return
         }
         
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Locker Usage Statistics for ${dateRangeTitle}\n\n`
         csvContent += `Date,Day,7:00 AM,8:00 AM,9:00 AM,10:00 AM,11:00 AM,12:00 NN,1:00 PM,2:00 PM,3:00 PM,4:00 PM,5:00 PM,6:00 PM,7:00 PM,Total\n`
         
@@ -1038,7 +1187,7 @@ export default function ReportsPage() {
           notify.error('Error', 'No data to export. Please generate a report first.')
           return
         }
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Student Visits by Department/Grade Level for ${dateRangeTitle}\n\n`
         csvContent += `By Department\n`
         csvContent += `Department,Code,Visits,Percentage\n`
@@ -1059,13 +1208,108 @@ export default function ReportsPage() {
         csvContent += `Departments Counted,${studentVisitsDeptGradeData.byDepartment.length}\n`
         csvContent += `Grade Levels Counted,${studentVisitsDeptGradeData.byGradeLevel.length}\n`
         filename = `Student_Visits_Department_Grade_${formatDateRangeForFilename(dateFrom, dateTo, datePreset)}.csv`
+      } else if (reportType === 'fines-summary') {
+        if (!finesSummaryData) {
+          notify.error('Error', 'No data to export. Please generate a report first.')
+          return
+        }
+        const showBook = finesType !== 'locker'
+        const showLocker = finesType !== 'book'
+        const typeLabel =
+          finesType === 'book'
+            ? 'Book Fines Only'
+            : finesType === 'locker'
+              ? 'Locker Fines Only'
+              : 'Combined (Book + Locker)'
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
+        csvContent += `Summary of Fines - ${typeLabel} for ${dateRangeTitle}\n\n`
+
+        const header: string[] = ['#', 'Borrower', 'ID Number', 'User Type']
+        if (showBook)
+          header.push(
+            'Book Penalty',
+            'Book Paid',
+            'Book Remaining',
+            '# Book'
+          )
+        if (showLocker)
+          header.push(
+            'Locker Penalty',
+            'Locker Paid',
+            'Locker Remaining',
+            '# Locker'
+          )
+        if (finesType === 'combined') {
+          header.push('Total Penalty', 'Total Paid', 'Total Remaining')
+        }
+        csvContent += header.join(',') + '\n'
+
+        if (finesSummaryData.rows.length === 0) {
+          csvContent +=
+            '—,"No borrowers with fines in this range",,,,,' +
+            (showBook ? ',,,' : '') +
+            (showLocker ? ',,,' : '') +
+            (finesType === 'combined' ? ',,,' : '') +
+            '\n'
+        } else {
+          finesSummaryData.rows.forEach((r: any, i: number) => {
+            const u = r.user || {}
+            const cells: any[] = [
+              i + 1,
+              `"${(u.full_name || 'Unknown').replace(/"/g, '""')}"`,
+              u.account_id || '—',
+              u.user_type || '—'
+            ]
+            if (showBook) {
+              cells.push(
+                Number(r.book.total).toFixed(2),
+                Number(r.book.paid).toFixed(2),
+                Number(r.book.remaining).toFixed(2),
+                r.book.count
+              )
+            }
+            if (showLocker) {
+              cells.push(
+                Number(r.locker.total).toFixed(2),
+                Number(r.locker.paid).toFixed(2),
+                Number(r.locker.remaining).toFixed(2),
+                r.locker.count
+              )
+            }
+            if (finesType === 'combined') {
+              cells.push(
+                Number(r.combined.total).toFixed(2),
+                Number(r.combined.paid).toFixed(2),
+                Number(r.combined.remaining).toFixed(2)
+              )
+            }
+            csvContent += cells.join(',') + '\n'
+          })
+        }
+
+        // Grand totals footer
+        const g = finesSummaryData.grand
+        csvContent += `\nGrand Totals\n`
+        csvContent += `Total Penalty,${Number(g.total).toFixed(2)}\n`
+        csvContent += `Total Paid,${Number(g.paid).toFixed(2)}\n`
+        csvContent += `Remaining Unpaid,${Number(g.remaining).toFixed(2)}\n`
+        csvContent += `Borrowers with Fines,${g.borrower_count}\n`
+        csvContent += `Total Settlements,${g.settlement_count}\n`
+
+        const typeSlug =
+          finesType === 'book'
+            ? 'BookOnly'
+            : finesType === 'locker'
+              ? 'LockerOnly'
+              : 'Combined'
+        filename = `Fines_Summary_${typeSlug}_${formatDateRangeForFilename(dateFrom, dateTo, datePreset)}.csv`
       } else if (reportType === 'users-concurrent') {
         if (!usersConcurrentData) {
           notify.error('Error', 'No data to export. Please generate a report first.')
           return
         }
         
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `User's Statistics (Concurrent) for ${dateRangeTitle}\n\n`
         csvContent += `Date,Day,7:00 AM,8:00 AM,9:00 AM,10:00 AM,11:00 AM,12:00 NN,1:00 PM,2:00 PM,3:00 PM,4:00 PM,5:00 PM,6:00 PM,7:00 PM,Total\n`
         
@@ -1118,7 +1362,7 @@ export default function ReportsPage() {
           return
         }
         
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Users per Transaction Statistics for ${dateRangeTitle}\n\n`
         csvContent += `Date,Day,7:00 AM,8:00 AM,9:00 AM,10:00 AM,11:00 AM,12:00 NN,1:00 PM,2:00 PM,3:00 PM,4:00 PM,5:00 PM,6:00 PM,7:00 PM,Total\n`
         
@@ -1167,7 +1411,7 @@ export default function ReportsPage() {
           return
         }
         
-        csvContent = `Divine Word College of Calapan - College Library\n`
+        csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Individual User Statistics for ${dateRangeTitle}\n\n`
         csvContent += `User Information\n`
         csvContent += `ID Number,${individualReportData.user.account_id}\n`
@@ -1244,7 +1488,26 @@ export default function ReportsPage() {
         <div className="px-6 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-gray-800">Library Reports</h1>
+              <h1 className="text-xl font-semibold text-gray-800 flex items-center gap-2 flex-wrap">
+                <span>Library Reports</span>
+                {effectiveCampus && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full ${
+                      effectiveCampus === 'COLLEGE'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                    title="All reports on this page are scoped to the campus below."
+                  >
+                    <i
+                      className={`fas ${
+                        effectiveCampus === 'COLLEGE' ? 'fa-graduation-cap' : 'fa-school'
+                      } text-[10px]`}
+                    />
+                    {libraryName}
+                  </span>
+                )}
+              </h1>
               <p className="text-sm text-gray-600 mt-1">
                 Generate and export library statistics and reports
               </p>
@@ -1278,7 +1541,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         {/* Filters Card */}
         <Card className="mb-6">
           <CardHeader>
@@ -1306,6 +1569,9 @@ export default function ReportsPage() {
                     <option value="locker-concurrent">Locker Usage (Concurrent)</option>
                     <option value="locker-per-transaction">Locker Usage (Per Transaction)</option>
                   </optgroup>
+                  <optgroup label="Fines">
+                    <option value="fines-summary">Summary of Fines (per borrower)</option>
+                  </optgroup>
                   <option value="individual">Individual Student Statistics</option>
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
@@ -1315,8 +1581,40 @@ export default function ReportsPage() {
                   {reportType === 'student-visits-dept-grade' && 'View total student visits grouped by department and grade level'}
                   {reportType === 'locker-concurrent' && 'View count of active locker assignments per hour (concurrent usage)'}
                   {reportType === 'locker-per-transaction' && 'View locker assignment transactions per hour'}
+                  {reportType === 'fines-summary' && 'List of borrowers with their book/locker fines (paid and remaining). You will be asked whether to combine fines or show only one type.'}
                   {reportType === 'individual' && 'View detailed statistics for a specific student/user (borrowing, penalties, visits)'}
                 </p>
+              </div>
+
+              {/* Campus Scope. For ADMIN, this is a dropdown (All / College / Basic Ed).
+                  For STAFF, it's an auto-pinned badge showing the campus their account
+                  is assigned to -- the API auto-scopes every request to that campus. */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Campus
+                </label>
+                {myCampus ? (
+                  <div className="w-full px-3 py-2 border border-amber-200 bg-amber-50 rounded-md text-sm flex items-center gap-2 text-amber-800">
+                    <i className="fas fa-school"></i>
+                    <span>
+                      Scoped to <strong>{myCampus === 'COLLEGE' ? 'College Library' : 'Basic Education Library'}</strong>.
+                    
+                    </span>
+                  </div>
+                
+                ) : (
+                  <select
+                    value={campus}
+                    onChange={(e) => setCampus(e.target.value as Campus | '')}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!myCampusLoaded}
+                  >
+                    <option value="">All Campuses</option>
+                    <option value="COLLEGE">College Library</option>
+                    <option value="BASIC_EDUCATION">Basic Education Library</option>
+                  </select>
+                )}
+               
               </div>
 
               {/* Date Range Filters - For Individual Statistics */}
@@ -1372,7 +1670,18 @@ export default function ReportsPage() {
 
               <div className="flex justify-end">
                 <Button
-                  onClick={fetchReportData}
+                  onClick={() => {
+                    // Fines summary needs to know which type to
+                    // include (combined / book / locker) before
+                    // the API call. Pop the modal first; the
+                    // modal's "Generate" button triggers the
+                    // actual fetch.
+                    if (reportType === 'fines-summary') {
+                      setShowFinesTypeModal(true)
+                      return
+                    }
+                    fetchReportData()
+                  }}
                   disabled={loading}
                   className="bg-blue-600 hover:bg-blue-700 text-white"
                 >
@@ -1421,15 +1730,15 @@ export default function ReportsPage() {
                     User's Statistics (Concurrent) for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
                   </CardTitle>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={exportToPDF}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
                       <i className="fas fa-file-pdf mr-2"></i>
                       Export PDF
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToExcel}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
                       <i className="fas fa-file-excel mr-2"></i>
                       Export Excel
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToCSV}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
                       <i className="fas fa-file-csv mr-2"></i>
                       Export CSV
                     </Button>
@@ -1696,15 +2005,15 @@ export default function ReportsPage() {
                     User Entry Transactions Statistics for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
                   </CardTitle>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={exportToPDF}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
                       <i className="fas fa-file-pdf mr-2"></i>
                       Export PDF
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToExcel}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
                       <i className="fas fa-file-excel mr-2"></i>
                       Export Excel
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToCSV}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
                       <i className="fas fa-file-csv mr-2"></i>
                       Export CSV
                     </Button>
@@ -1975,15 +2284,15 @@ export default function ReportsPage() {
                     Locker Concurrent Usage Statistics for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
                   </CardTitle>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={exportToPDF}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
                       <i className="fas fa-file-pdf mr-2"></i>
                       Export PDF
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToExcel}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
                       <i className="fas fa-file-excel mr-2"></i>
                       Export Excel
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToCSV}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
                       <i className="fas fa-file-csv mr-2"></i>
                       Export CSV
                     </Button>
@@ -2256,15 +2565,15 @@ export default function ReportsPage() {
                     Locker Users' Statistics for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
                   </CardTitle>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={exportToPDF}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
                       <i className="fas fa-file-pdf mr-2"></i>
                       Export PDF
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToExcel}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
                       <i className="fas fa-file-excel mr-2"></i>
                       Export Excel
                     </Button>
-                    <Button variant="outline" size="sm" onClick={exportToCSV}>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
                       <i className="fas fa-file-csv mr-2"></i>
                       Export CSV
                     </Button>
@@ -2500,19 +2809,19 @@ export default function ReportsPage() {
                 Entrance/Exit Control Statistics for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
               </CardTitle>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={exportToPDF}>
-                  <i className="fas fa-file-pdf mr-2"></i>
-                  Export PDF
-                </Button>
-                <Button variant="outline" size="sm" onClick={exportToExcel}>
-                  <i className="fas fa-file-excel mr-2"></i>
-                  Export Excel
-                </Button>
-                <Button variant="outline" size="sm" onClick={exportToCSV}>
-                  <i className="fas fa-file-csv mr-2"></i>
-                  Export CSV
-                </Button>
-              </div>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
+                      <i className="fas fa-file-pdf mr-2"></i>
+                      Export PDF
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
+                      <i className="fas fa-file-excel mr-2"></i>
+                      Export Excel
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
+                      <i className="fas fa-file-csv mr-2"></i>
+                      Export CSV
+                    </Button>
+                  </div>
             </CardHeader>
             <CardContent>
               <div className="text-sm text-gray-600 mb-4">
@@ -2612,19 +2921,19 @@ export default function ReportsPage() {
                 Student Visits by Department/Grade Level for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
               </h2>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={exportToPDF}>
-                  <i className="fas fa-file-pdf mr-2"></i>
-                  Export PDF
-                </Button>
-                <Button variant="outline" size="sm" onClick={exportToExcel}>
-                  <i className="fas fa-file-excel mr-2"></i>
-                  Export Excel
-                </Button>
-                <Button variant="outline" size="sm" onClick={exportToCSV}>
-                  <i className="fas fa-file-csv mr-2"></i>
-                  Export CSV
-                </Button>
-              </div>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
+                      <i className="fas fa-file-pdf mr-2"></i>
+                      Export PDF
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
+                      <i className="fas fa-file-excel mr-2"></i>
+                      Export Excel
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
+                      <i className="fas fa-file-csv mr-2"></i>
+                      Export CSV
+                    </Button>
+                  </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2731,25 +3040,256 @@ export default function ReportsPage() {
           />
         )}
 
+        {/* Summary of Fines (per borrower) */}
+        {reportType === 'fines-summary' && finesSummaryData && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold">
+                Summary of Fines —{' '}
+                {finesType === 'book'
+                  ? 'Book Fines Only'
+                  : finesType === 'locker'
+                    ? 'Locker Fines Only'
+                    : 'Combined (Book + Locker)'}{' '}
+                for {formatDateRangeForTitle(dateFrom, dateTo, datePreset)}
+              </h2>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600"
+                  onClick={exportToPDF}
+                >
+                  <i className="fas fa-file-pdf mr-2"></i>
+                  Export PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600"
+                  onClick={exportToExcel}
+                >
+                  <i className="fas fa-file-excel mr-2"></i>
+                  Export Excel
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600"
+                  onClick={exportToCSV}
+                >
+                  <i className="fas fa-file-csv mr-2"></i>
+                  Export CSV
+                </Button>
+              </div>
+            </div>
+
+            {/* Grand totals */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="pt-5">
+                  <div className="text-xs font-medium text-purple-600 uppercase tracking-wide">
+                    Total Penalty
+                  </div>
+                  <div className="text-2xl font-bold text-purple-700 mt-1">
+                    ₱{Number(finesSummaryData.grand.total).toFixed(2)}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-5">
+                  <div className="text-xs font-medium text-green-600 uppercase tracking-wide">
+                    Total Paid
+                  </div>
+                  <div className="text-2xl font-bold text-green-700 mt-1">
+                    ₱{Number(finesSummaryData.grand.paid).toFixed(2)}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-5">
+                  <div className="text-xs font-medium text-red-600 uppercase tracking-wide">
+                    Remaining Unpaid
+                  </div>
+                  <div className="text-2xl font-bold text-red-700 mt-1">
+                    ₱{Number(finesSummaryData.grand.remaining).toFixed(2)}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-5">
+                  <div className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+                    Borrowers
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900 mt-1">
+                    {finesSummaryData.grand.borrower_count}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {finesSummaryData.grand.settlement_count} settlements
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Per-borrower table */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  Per-borrower breakdown
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {finesSummaryData.rows.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-6">
+                    No borrowers with fines in this date range.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead>
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            Borrower
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            ID
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            Type
+                          </th>
+                          {finesType !== 'locker' && (
+                            <>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Book Penalty
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Book Paid
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Book Rem.
+                              </th>
+                            </>
+                          )}
+                          {finesType !== 'book' && (
+                            <>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Locker Penalty
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Locker Paid
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Locker Rem.
+                              </th>
+                            </>
+                          )}
+                          {finesType === 'combined' && (
+                            <>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-purple-600 uppercase tracking-wide">
+                                Total Penalty
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-green-600 uppercase tracking-wide">
+                                Total Paid
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-semibold text-red-600 uppercase tracking-wide">
+                                Total Rem.
+                              </th>
+                            </>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {finesSummaryData.rows.map((r: any, i: number) => {
+                          const u = r.user || {}
+                          return (
+                            <tr key={u.user_id || i} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 font-medium text-gray-900">
+                                {u.full_name || 'Unknown'}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-gray-600">
+                                {u.account_id || '—'}
+                              </td>
+                              <td className="px-3 py-2 text-gray-600">
+                                {u.user_type || '—'}
+                              </td>
+                              {finesType !== 'locker' && (
+                                <>
+                                  <td className="px-3 py-2 text-right">
+                                    ₱{Number(r.book.total).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-green-700">
+                                    ₱{Number(r.book.paid).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-red-700">
+                                    ₱{Number(r.book.remaining).toFixed(2)}
+                                  </td>
+                                </>
+                              )}
+                              {finesType !== 'book' && (
+                                <>
+                                  <td className="px-3 py-2 text-right">
+                                    ₱{Number(r.locker.total).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-green-700">
+                                    ₱{Number(r.locker.paid).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-red-700">
+                                    ₱{Number(r.locker.remaining).toFixed(2)}
+                                  </td>
+                                </>
+                              )}
+                              {finesType === 'combined' && (
+                                <>
+                                  <td className="px-3 py-2 text-right font-semibold">
+                                    ₱{Number(r.combined.total).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-semibold text-green-700">
+                                    ₱{Number(r.combined.paid).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-semibold text-red-700">
+                                    ₱{Number(r.combined.remaining).toFixed(2)}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {reportType === 'fines-summary' && !finesSummaryData && !loading && (
+          <NoDataState
+            icon="fas fa-coins"
+            message='Click "Generate Report" to view fines per borrower. You will be asked whether to combine fines or show only one type.'
+          />
+        )}
+
 
         {/* Individual Student Statistics Report */}
         {reportType === 'individual' && individualReportData && (
           <div className="space-y-6">
             {/* Export Buttons */}
-            <div className="flex justify-end gap-2 mb-4">
-              <Button variant="outline" size="sm" onClick={exportToPDF}>
-                <i className="fas fa-file-pdf mr-2"></i>
-                Export PDF
-              </Button>
-              <Button variant="outline" size="sm" onClick={exportToExcel}>
-                <i className="fas fa-file-excel mr-2"></i>
-                Export Excel
-              </Button>
-              <Button variant="outline" size="sm" onClick={exportToCSV}>
-                <i className="fas fa-file-csv mr-2"></i>
-                Export CSV
-              </Button>
-            </div>
+            <div className="flex gap-2 justify-end mb-2">
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
+                      <i className="fas fa-file-pdf mr-2"></i>
+                      Export PDF
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-green-600" onClick={exportToExcel}>
+                      <i className="fas fa-file-excel mr-2"></i>
+                      Export Excel
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-blue-600" onClick={exportToCSV}>
+                      <i className="fas fa-file-csv mr-2"></i>
+                      Export CSV
+                    </Button>
+                  </div>
+                  
 
             {/* User Info Card */}
             <Card>
@@ -3273,6 +3813,153 @@ export default function ReportsPage() {
           />
         )}
       </div>
+
+      {/* Fines summary type picker. Pops when the user clicks
+          "Generate Report" with the "Summary of Fines" report
+          selected. Lets them pick whether to combine book +
+          locker fines or report on just one. Closing the modal
+          cancels the generation; clicking "Generate" runs the
+          actual fetchReportData with the chosen type. */}
+      {showFinesTypeModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowFinesTypeModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <div className="flex items-center gap-2">
+                <i className="fas fa-coins text-purple-600"></i>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Summary of Fines
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowFinesTypeModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="p-5">
+              <p className="text-sm text-gray-600 mb-4">
+                Which fines should be included in this report?
+              </p>
+
+              <div className="space-y-2">
+                <label
+                  className={`flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors ${
+                    finesType === 'combined'
+                      ? 'border-purple-500 bg-purple-50'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="finesType"
+                    value="combined"
+                    checked={finesType === 'combined'}
+                    onChange={() => setFinesType('combined')}
+                    className="mt-1 accent-purple-600"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                      <i className="fas fa-layer-group text-purple-600 text-xs"></i>
+                      Combined (Book + Locker)
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      One row per borrower with both book and locker
+                      totals, plus per-type breakdowns.
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  className={`flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors ${
+                    finesType === 'book'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="finesType"
+                    value="book"
+                    checked={finesType === 'book'}
+                    onChange={() => setFinesType('book')}
+                    className="mt-1 accent-blue-600"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                      <i className="fas fa-book text-blue-600 text-xs"></i>
+                      Book fines only
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      Only overdue book penalties. Locker rows are
+                      excluded.
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  className={`flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors ${
+                    finesType === 'locker'
+                      ? 'border-orange-500 bg-orange-50'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="finesType"
+                    value="locker"
+                    checked={finesType === 'locker'}
+                    onChange={() => setFinesType('locker')}
+                    className="mt-1 accent-orange-600"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                      <i className="fas fa-lock text-orange-600 text-xs"></i>
+                      Locker fines only
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      Only overdue locker penalties. Book rows are
+                      excluded.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t bg-gray-50 flex items-center justify-between">
+              <span className="text-xs text-gray-500">
+                The report will use the date range selected above.
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowFinesTypeModal(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-purple-600 hover:bg-purple-700"
+                  onClick={() => {
+                    setShowFinesTypeModal(false)
+                    fetchReportData()
+                  }}
+                >
+                  <i className="fas fa-chart-bar mr-1.5"></i>
+                  Generate
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

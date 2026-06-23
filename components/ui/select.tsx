@@ -10,9 +10,7 @@ interface SelectContextValue {
   open: boolean
   onOpenChange: (open: boolean) => void
   triggerRef: React.MutableRefObject<HTMLButtonElement | null>
-  // Where to position the dropdown relative to the trigger.
-  // 'bottom' (default) = opens below the trigger
-  // 'top' = opens above the trigger
+
   side: 'top' | 'bottom'
 }
 
@@ -225,6 +223,7 @@ interface SelectItemProps {
   value: string
   children: React.ReactNode
   className?: string
+  disabled?: boolean
 }
 
 const SelectItem = ({ value, children, className }: SelectItemProps) => {

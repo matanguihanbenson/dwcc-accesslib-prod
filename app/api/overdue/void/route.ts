@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken'
 
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { AuditService } from '@/lib/services/audit.service'
+import { UserRole } from '@/types'
 
 type TransactionType = 'BOOK' | 'LOCKER'
 
@@ -94,6 +96,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid transaction_id' }, { status: 400 })
     }
 
+    // Load the actor's user account. `getAuthContext` returns
+    // `userId` as the `User.user_id` FK (not the `UserAccount.id`
+    // PK), so we look up the account by that FK. We need the
+    // account's `id` to pass into AuditService.logAction, which
+    // connects to userAccount via its PK.
+    const actorAccount = await prisma.userAccount.findFirst({
+      where: { user_id: auth.userId, is_active: true },
+      include: { user: { select: { full_name: true, account_id: true } } }
+    })
+
+    if (!actorAccount) {
+      return NextResponse.json({ error: 'Actor account not found' }, { status: 404 })
+    }
+
     // Load transaction to get user_id
     const transactionData =
       transaction_type === 'BOOK'
@@ -109,6 +125,15 @@ export async function POST(request: NextRequest) {
     if (!transactionData) {
       return NextResponse.json({ error: `${transaction_type === 'BOOK' ? 'Book' : 'Locker'} transaction not found` }, { status: 404 })
     }
+
+    // Pull the borrower's name for the audit message. Defensive
+    // null check in case the FK was ever nulled out.
+    const borrower = transactionData.user_id
+      ? await prisma.user.findUnique({
+          where: { user_id: transactionData.user_id },
+          select: { full_name: true, account_id: true }
+        })
+      : null
 
     const existingSettlement = await prisma.overdueSettlement.findFirst({
       where: {
@@ -134,8 +159,8 @@ export async function POST(request: NextRequest) {
         return tx.overdueSettlement.update({
           where: { settlement_id: existingSettlement.settlement_id },
           data: {
-            penalty_amount: 0,
-            amount_paid: 0,
+            penalty_amount: existingSettlement.penalty_amount,
+            amount_paid: existingSettlement.penalty_amount,
             remaining_balance: 0,
             status: 'SETTLED',
             settled_at: new Date(),
@@ -161,6 +186,32 @@ export async function POST(request: NextRequest) {
         },
       })
     })
+
+    // Audit log: voids are a privileged write that erases a
+    // recorded penalty, so they must show up in the activity log
+    // with enough detail to reconstruct who did what and why.
+    try {
+      const actorName = actorAccount.user?.full_name || actorAccount.username
+      const actorLogin = actorAccount.user?.account_id || actorAccount.username
+      const borrowerLabel = borrower
+        ? `${borrower.full_name} (${borrower.account_id})`
+        : `user_id=${transactionData.user_id ?? 'n/a'}`
+      const reasonPart = reason ? ` Reason: ${reason}` : ''
+      const priorPenaltyPart = existingSettlement
+        ? ` Prior penalty: ₱${Number(existingSettlement.penalty_amount).toFixed(2)}.`
+        : ''
+      await AuditService.logAction(
+        actorAccount.id,
+        actorAccount.role as UserRole,
+        'VOID_OVERDUE_PENALTY',
+        `Voided ${transaction_type} penalty for transaction #${transaction_id} (borrower: ${borrowerLabel}). Voided by ${actorName} (${actorLogin}).${priorPenaltyPart}${reasonPart}`
+      )
+    } catch (auditError) {
+      // Audit log failure must not block the void (the data write
+      // already committed), but we surface it so the dev server
+      // console still records it for follow-up.
+      console.error('Failed to write void audit log:', auditError)
+    }
 
     return NextResponse.json({
       message: 'Penalty voided successfully',

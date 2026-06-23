@@ -11,6 +11,7 @@ import { hasPermission } from '@/lib/roles'
 import { UserRole, NavigationItem } from '@/types'
 import { Icon } from '@/components/ui/icon'
 import { SignOutButton } from '@/components/ui/sign-out-button'
+import { usePendingBorrowCount } from '@/lib/hooks/usePendingBorrowCount'
 
 interface SidebarProps {
   isOpen: boolean
@@ -88,6 +89,11 @@ export function Sidebar({ isOpen, onToggle, isCollapsed, onCollapsedToggle }: Si
 
   const userRole = session.user.role as UserRole
 
+  // Live count of PENDING_APPROVAL book-borrow requests. Only
+  // ADMIN and STAFF can see the underlying endpoint; for other
+  // roles the hook returns 0.
+  const pendingBorrowCount = usePendingBorrowCount()
+
   const filteredNavItems = NAVIGATION_ITEMS.filter(item =>
     hasPermission(userRole, item.roles)
   )
@@ -113,6 +119,10 @@ export function Sidebar({ isOpen, onToggle, isCollapsed, onCollapsedToggle }: Si
     const hasChildren = item.children && item.children.length > 0
     const isActive = pathname === item.href || (hasChildren && item.children?.some(child => pathname === child.href))
     const isOpen = openSubmenu?.name === item.name
+    // The "Books" item shows a live count of pending borrow
+    // requests so the Library Admin can see new requests at a
+    // glance without opening the page.
+    const showPendingBadge = item.name === 'Books' && pendingBorrowCount > 0
 
     return (
       <div key={item.name} className="mb-1">
@@ -120,19 +130,49 @@ export function Sidebar({ isOpen, onToggle, isCollapsed, onCollapsedToggle }: Si
           <button
             onClick={(e) => handleParentClick(item, e)}
             className={cn(
-              'w-full flex items-center rounded-lg transition-colors duration-150',
+              'relative w-full flex items-center rounded-lg transition-colors duration-150',
               'hover:bg-blue-50 hover:text-blue-700',
               isActive || isOpen
                 ? 'bg-blue-100 text-blue-700 font-medium'
                 : 'text-gray-700',
               isCollapsed ? 'justify-center px-3 py-2' : 'justify-between px-3 py-2 text-left'
             )}
-            title={isCollapsed ? item.name : undefined}
+            title={
+              isCollapsed && showPendingBadge
+                ? `${item.name} (${pendingBorrowCount} pending)`
+                : isCollapsed
+                ? item.name
+                : undefined
+            }
             aria-expanded={isOpen}
           >
-            <div className={cn('flex items-center', isCollapsed ? 'justify-center' : 'space-x-3')}>
-              <Icon name={item.icon} size={isCollapsed ? 'lg' : 'md'} />
-              {!isCollapsed && <span className="text-sm">{item.name}</span>}
+            <div className={cn('flex items-center min-w-0', isCollapsed ? 'justify-center' : 'space-x-3')}>
+              {isCollapsed ? (
+                <span className="relative inline-flex">
+                  <Icon name={item.icon} size="lg" />
+                  {showPendingBadge && (
+                    <span
+                      className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[9px] font-bold rounded-full bg-red-500 text-white ring-2 ring-white"
+                      aria-label={`${pendingBorrowCount} pending borrow request${pendingBorrowCount !== 1 ? 's' : ''}`}
+                    >
+                      {pendingBorrowCount > 99 ? '99+' : pendingBorrowCount}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <>
+                  <Icon name={item.icon} size="md" />
+                  <span className="text-sm truncate">{item.name}</span>
+                  {showPendingBadge && (
+                    <span
+                      className="ml-1 inline-flex items-center justify-center px-1.5 min-w-[20px] h-5 text-[10px] font-bold rounded-full bg-red-500 text-white"
+                      aria-label={`${pendingBorrowCount} pending borrow request${pendingBorrowCount !== 1 ? 's' : ''}`}
+                    >
+                      {pendingBorrowCount > 99 ? '99+' : pendingBorrowCount}
+                    </span>
+                  )}
+                </>
+              )}
             </div>
             {!isCollapsed && (
               <Icon
@@ -286,10 +326,23 @@ export function Sidebar({ isOpen, onToggle, isCollapsed, onCollapsedToggle }: Si
           className="z-40 w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
           role="menu"
         >
-          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
               {openParent.name}
             </p>
+            {/* Pending borrow count in the flyout header so the
+                Library Admin sees the count without having to
+                look back at the sidebar. Only shown when the
+                open parent is "Books" and there are pending
+                requests. */}
+            {openParent.name === 'Books' && pendingBorrowCount > 0 && (
+              <span
+                className="inline-flex items-center justify-center px-1.5 min-w-[20px] h-5 text-[10px] font-bold rounded-full bg-red-500 text-white"
+                aria-label={`${pendingBorrowCount} pending borrow request${pendingBorrowCount !== 1 ? 's' : ''}`}
+              >
+                {pendingBorrowCount > 99 ? '99+' : pendingBorrowCount}
+              </span>
+            )}
           </div>
           <div className="p-1 max-h-80 overflow-y-auto">
             {flyoutChildren.length === 0 ? (
@@ -297,6 +350,12 @@ export function Sidebar({ isOpen, onToggle, isCollapsed, onCollapsedToggle }: Si
             ) : (
               flyoutChildren.map(child => {
                 const childActive = pathname === child.href
+                // Show the pending count on the "Manage Books"
+                // flyout entry -- it's the link that takes the
+                // Library Admin to the page where pending
+                // requests are listed and approved.
+                const showChildBadge =
+                  child.name === 'Manage Books' && pendingBorrowCount > 0
                 return (
                   <Link
                     key={child.name}
@@ -310,7 +369,15 @@ export function Sidebar({ isOpen, onToggle, isCollapsed, onCollapsedToggle }: Si
                     role="menuitem"
                   >
                     <Icon name={child.icon} size="sm" />
-                    <span className="truncate">{child.name}</span>
+                    <span className="truncate flex-1">{child.name}</span>
+                    {showChildBadge && (
+                      <span
+                        className="inline-flex items-center justify-center px-1.5 min-w-[20px] h-5 text-[10px] font-bold rounded-full bg-red-500 text-white"
+                        aria-label={`${pendingBorrowCount} pending borrow request${pendingBorrowCount !== 1 ? 's' : ''}`}
+                      >
+                        {pendingBorrowCount > 99 ? '99+' : pendingBorrowCount}
+                      </span>
+                    )}
                   </Link>
                 )
               })

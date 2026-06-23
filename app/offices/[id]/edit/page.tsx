@@ -291,10 +291,11 @@ export default function EditOfficePage() {
                   variant="outline" 
                   onClick={() => router.back()}
                   disabled={submitting}
+                  className='bg-gray-200 hover:bg-gray-300 px-4 py-5'
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className='bg-primary-600 hover:bg-primary-700 text-white px-4 py-5'>
                   {submitting ? 'Updating...' : 'Update Office'}
                 </Button>
               </div>

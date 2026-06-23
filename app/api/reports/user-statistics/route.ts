@@ -128,26 +128,70 @@ export const GET = withAuth(
       const bookPenalties = penalties.filter(p => p.transaction_type === 'BOOK')
       const lockerPenalties = penalties.filter(p => p.transaction_type === 'LOCKER')
 
-      // Calculate active/ongoing penalties from book transactions (ACTIVE or OVERDUE status)
+      // A penalty exists in two places:
+      //   1. The transaction row's `penalty` column (book_transaction / locker_transaction)
+      //   2. An overdue_settlement row (one record per settled / in-progress penalty)
+      // These must NOT be summed together. Once a settlement exists for a
+      // transaction, that penalty has already been counted via the settlement
+      // records, so we must exclude those transactions from the "active"
+      // calculation to avoid double counting (previously: 1 × 80-peso locker
+      // penalty was being reported as 160 because both branches added 80).
+      const settledBookTxnIds = new Set<number>(
+        bookPenalties.map(p => p.transaction_id)
+      )
+      const settledLockerTxnIds = new Set<number>(
+        lockerPenalties.map(p => p.transaction_id)
+      )
+
+      // Calculate active/ongoing penalties from book transactions whose
+      // penalty has NOT yet been settled (no overdue_settlement row).
       const activeBookPenalties = bookTransactions
-        .filter(t => (t.status === 'ACTIVE' || t.status === 'OVERDUE') && Number(t.penalty) > 0)
+        .filter(t =>
+          (t.status === 'ACTIVE' || t.status === 'OVERDUE') &&
+          Number(t.penalty) > 0 &&
+          !settledBookTxnIds.has(t.transaction_id)
+        )
         .reduce((sum, t) => sum + Number(t.penalty), 0)
 
-      // Calculate active/ongoing penalties from locker transactions (ACTIVE or OVERDUE status)
+      // Calculate active/ongoing penalties from locker transactions whose
+      // penalty has NOT yet been settled.
       const activeLockerPenalties = lockerTransactions
-        .filter(t => (t.status === 'ACTIVE' || t.status === 'OVERDUE') && Number(t.penalty) > 0)
+        .filter(t =>
+          (t.status === 'ACTIVE' || t.status === 'OVERDUE') &&
+          Number(t.penalty) > 0 &&
+          !settledLockerTxnIds.has(t.transaction_id)
+        )
         .reduce((sum, t) => sum + Number(t.penalty), 0)
 
-      // Combine settled penalties with active ongoing penalties
-      const totalBookPenaltiesFromSettlements = bookPenalties.reduce((sum, p) => sum + Number(p.penalty_amount), 0)
-      const totalLockerPenaltiesFromSettlements = lockerPenalties.reduce((sum, p) => sum + Number(p.penalty_amount), 0)
-      
+      // Total settled amount (from overdue_settlement.penalty_amount).
+      const totalBookPenaltiesFromSettlements = bookPenalties.reduce(
+        (sum, p) => sum + Number(p.penalty_amount), 0
+      )
+      const totalLockerPenaltiesFromSettlements = lockerPenalties.reduce(
+        (sum, p) => sum + Number(p.penalty_amount), 0
+      )
+
       const penaltySummary = {
         total_book_penalties: totalBookPenaltiesFromSettlements + activeBookPenalties,
         total_locker_penalties: totalLockerPenaltiesFromSettlements + activeLockerPenalties,
-        total_penalties: penalties.reduce((sum, p) => sum + Number(p.penalty_amount), 0) + activeBookPenalties + activeLockerPenalties,
+        total_penalties:
+          (totalBookPenaltiesFromSettlements + activeBookPenalties) +
+          (totalLockerPenaltiesFromSettlements + activeLockerPenalties),
         total_paid: penalties.reduce((sum, p) => sum + Number(p.amount_paid), 0),
-        total_balance: penalties.reduce((sum, p) => sum + Number(p.remaining_balance), 0) + activeBookPenalties + activeLockerPenalties
+        // Outstanding balance has two legs:
+        //   1. SUM(overdue_settlement.remaining_balance) — the unsettled
+        //      portion of every settlement (PARTIAL/PENDING). Settled
+        //      records contribute 0 here, which is correct.
+        //   2. SUM(active transaction.penalty) for transactions that have
+        //      no settlement row yet — those are still accruing.
+        // The previous version only summed leg #2, which always read 0
+        // once every penalty was settled (even partially), making the
+        // report show "Outstanding balance: PHP 0.00" even when the
+        // settlements were still partially unpaid.
+        total_balance:
+          penalties.reduce((sum, p) => sum + Number(p.remaining_balance), 0) +
+          activeBookPenalties +
+          activeLockerPenalties
       }
 
       // Calculate visit statistics
@@ -167,8 +211,10 @@ export const GET = withAuth(
 
       const lockerSummary = {
         total_rentals: lockerTransactions.length,
-        current_rental: lockerTransactions.find(t => t.status === 'ACTIVE') || null,
-        overdue_count: lockerTransactions.filter(t => t.status === 'OVERDUE').length
+        active_count: lockerTransactions.filter(t => t.status === 'ACTIVE').length,
+        completed_count: lockerTransactions.filter(t => t.status === 'COMPLETED').length,
+        overdue_count: lockerTransactions.filter(t => t.status === 'OVERDUE').length,
+        current_rental: lockerTransactions.find(t => t.status === 'ACTIVE') || null
       }
 
       return createSuccessResponse({

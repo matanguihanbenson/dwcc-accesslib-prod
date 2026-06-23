@@ -84,8 +84,16 @@ export class PDFReportGenerator {
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ]
+  /**
+   * The library name shown on the report header (under "Divine Word
+   * College of Calapan"). Defaults to "College Library" so existing
+   * callers without a campus see the same header they always have.
+   * Set via the constructor (or `setLibraryName()`) to switch to
+   * "Basic Education Library" or any other label.
+   */
+  private libraryName: string
 
-  constructor(paperSize: PaperSize = 'short') {
+  constructor(paperSize: PaperSize = 'short', libraryName: string = 'College Library') {
     // Convert paper size to dimensions
     const paperFormats = {
       short: [215.9, 279.4],  // 8.5" x 11" in mm
@@ -98,6 +106,12 @@ export class PDFReportGenerator {
       unit: 'mm',
       format: paperFormats[paperSize]
     })
+    this.libraryName = libraryName
+  }
+
+  /** Override the library-name label on the report header. */
+  setLibraryName(name: string): void {
+    this.libraryName = name
   }
 
   // Helper to group daily data by month and insert month separators
@@ -145,7 +159,7 @@ export class PDFReportGenerator {
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
@@ -346,10 +360,10 @@ export class PDFReportGenerator {
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     
     this.doc.setFontSize(8)
-    this.doc.setFont('helvetica', 'normal')
+    this.doc.setFont('helvetica', 'normalnormal')
     this.doc.text("User's Statistics", centerX, 27, { align: 'center' })
     this.doc.text(`for ${dateRangeTitle || `the month of ${this.monthNames[month - 1]}, ${year}`}`, centerX, 32, { align: 'center' })
 
@@ -450,11 +464,14 @@ export class PDFReportGenerator {
     totalsRow.push(grandUniqueTotal)
     tableData.push(totalsRow)
 
-    // Column widths optimized for portrait
-    const dateColWidth = 23  // Time & Date column (increased for \"Month Day\" format)
-    const timeSlotWidth = 9.5 // Each time slot column (13 slots, reduced to fit)
-    const totalColWidth = 13 // Total column
-    const uniqueColWidth = 13 // UNIQUE column
+    // Column widths optimized for portrait. The date column was
+    // shrunk to 20 (was 23) to free up horizontal space for the
+    // UNIQUE column to be wide enough that the header text doesn't
+    // wrap to "UNIQU / E".
+    const dateColWidth = 20
+    const timeSlotWidth = 9.5 // Each time slot column (13 slots)
+    const totalColWidth = 13
+    const uniqueColWidth = 18 // UNIQUE column (widened to fit 'UNIQUE' without wrap)
     
     const columnWidths = [
       dateColWidth,
@@ -505,7 +522,12 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. Without this guard, a multi-day holiday
+        // whose first day happens to be the first data row would
+        // paint the holiday name over the header's "7:00 AM" cell.
+        if (data.row.section !== 'body') return
+
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
@@ -556,22 +578,29 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. The "special day" merge (colSpan = 13) below
+        // is a DATA-ROW feature -- without this guard the header cell at
+        // column 1 inherits the first data row's day-of-week, which made
+        // "7:00 AM" get replaced with "Sunday" whenever the first day of
+        // the report was a Sunday.
+        if (data.row.section !== 'body') return
+
         // Check if this is a special day (holiday or Sunday)
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const isSunday = rowData.dayOfWeek?.toLowerCase() === 'sunday'
-          
+
           if (isHoliday || isSunday) {
             // Get multi-day holiday metadata from the row
             const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
-            
+
             // For special days, merge all 13 time columns
             if (colIndex === 1) {
               data.cell.colSpan = 13
               data.cell.styles.halign = 'center'
               data.cell.styles.fontStyle = 'bold'
-              
+
               if (isHoliday) {
                 // Only show holiday name on first day of multi-day holiday
                 if (!holidayMeta || holidayMeta.isFirstDay) {
@@ -672,7 +701,7 @@ export class PDFReportGenerator {
     this.doc.setFont('helvetica', 'bold')
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
     this.doc.text('Student Visits Report', centerX, 27, { align: 'center' })
@@ -745,7 +774,7 @@ export class PDFReportGenerator {
     this.doc.text('Divine Word College of Calapan', centerX, 25, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 31, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 31, { align: 'center' })
     
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
@@ -861,7 +890,7 @@ export class PDFReportGenerator {
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
@@ -960,11 +989,12 @@ export class PDFReportGenerator {
     totalsRow.push(grandUniqueTotal)
     tableData.push(totalsRow)
 
-    // Column widths optimized for portrait
-    const dateColWidth = 21  // Time & Date column (increased for "Mon DD" format)
-    const timeSlotWidth = 9.7 // Each time slot column (13 slots, reduced to fit)
-    const totalColWidth = 13 // Total column
-    const uniqueColWidth = 13 // UNIQUE column
+    // Column widths optimized for portrait. UNIQUE column is wide
+    // enough that the header text doesn't wrap to "UNIQU / E".
+    const dateColWidth = 20
+    const timeSlotWidth = 9.5
+    const totalColWidth = 13
+    const uniqueColWidth = 18
 
     // Generate table
     autoTable(this.doc, {
@@ -1009,7 +1039,12 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. Without this guard, a multi-day holiday
+        // whose first day happens to be the first data row would
+        // paint the holiday name over the header's "7:00 AM" cell.
+        if (data.row.section !== 'body') return
+
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
@@ -1060,22 +1095,29 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. The "special day" merge (colSpan = 13) below
+        // is a DATA-ROW feature -- without this guard the header cell at
+        // column 1 inherits the first data row's day-of-week, which made
+        // "7:00 AM" get replaced with "Sunday" whenever the first day of
+        // the report was a Sunday.
+        if (data.row.section !== 'body') return
+
         // Check if this is a special day (holiday or Sunday)
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const isSunday = rowData.dayOfWeek?.toLowerCase() === 'sunday'
-          
+
           if (isHoliday || isSunday) {
             // Get multi-day holiday metadata from the row
             const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
-            
+
             // For special days, merge all 13 time columns
             if (colIndex === 1) {
               data.cell.colSpan = 13
               data.cell.styles.halign = 'center'
               data.cell.styles.fontStyle = 'bold'
-              
+
               if (isHoliday) {
                 // Only show holiday name on first day of multi-day holiday
                 if (!holidayMeta || holidayMeta.isFirstDay) {
@@ -1176,7 +1218,7 @@ export class PDFReportGenerator {
     this.doc.text('DIVINE WORD COLLEGE OF CALAPAN', centerX, 15, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('COLLEGE LIBRARY', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
@@ -1317,7 +1359,7 @@ export class PDFReportGenerator {
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
@@ -1431,12 +1473,13 @@ export class PDFReportGenerator {
     averagesRow.push(Math.round(totalUnique / daysInMonth))
     tableData.push(averagesRow)
 
-    // Column widths
+    // Column widths. UNIQUE column is wide enough that the header
+    // text doesn't wrap to "UNIQU / E".
     const dateColWidth = 18
-    const timeSlotWidth = 10
+    const timeSlotWidth = 9.5
     const totalColWidth = 13
-    const uniqueColWidth = 13
-    
+    const uniqueColWidth = 18
+
     const columnWidths = [
       dateColWidth,
       ...Array(13).fill(timeSlotWidth),
@@ -1486,7 +1529,12 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. Without this guard, a multi-day holiday
+        // whose first day happens to be the first data row would
+        // paint the holiday name over the header's "7:00 AM" cell.
+        if (data.row.section !== 'body') return
+
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
@@ -1534,18 +1582,25 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. The "special day" merge (colSpan = 15) below
+        // is a DATA-ROW feature -- without this guard the header cell at
+        // column 1 inherits the first data row's day-of-week, which made
+        // "7:00 AM" get replaced with "SUNDAY" whenever the first day of
+        // the report was a Sunday.
+        if (data.row.section !== 'body') return
+
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const dayOfWeek = rowData.dayOfWeek || ''
           const isSunday = dayOfWeek.toLowerCase() === 'sunday'
-          
+
           if (isHoliday || isSunday) {
             if (colIndex >= 1 && colIndex <= 15) {
               const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
               const isMultiDay = holidayMeta?.isMultiDay || false
               const isFirstDay = holidayMeta?.isFirstDay || false
-              
+
               if (isHoliday && isMultiDay) {
                 if (colIndex === 1 && isFirstDay) {
                   data.cell.styles.fillColor = [255, 200, 200]
@@ -1561,14 +1616,16 @@ export class PDFReportGenerator {
               } else if (isSunday && colIndex === 1) {
                 data.cell.styles.fillColor = [255, 255, 200]
                 data.cell.colSpan = 15
+                data.cell.text = ['SUNDAY']
               } else if (isHoliday && !isMultiDay && colIndex === 1) {
                 data.cell.styles.fillColor = [255, 200, 200]
                 data.cell.colSpan = 15
+                data.cell.text = [rowData.holiday?.name ?? 'Holiday']
               }
             }
           }
         }
-        
+
         const lastTwoRows = tableData.length - 2
         if (rowIndex >= lastTwoRows) {
           data.cell.styles.fontStyle = 'bold'
@@ -1578,64 +1635,19 @@ export class PDFReportGenerator {
             data.cell.styles.fillColor = [240, 240, 240]
           }
         }
-      },
-      willDrawCell: (data: any) => {
-        const rowIndex = data.row.index
-        const colIndex = data.column.index
-        const rowData = dailyData[rowIndex]
-        
-        if (rowData && rowIndex < dailyData.length) {
-          const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
-          const dayOfWeek = rowData.dayOfWeek || ''
-          const isSunday = dayOfWeek.toLowerCase() === 'sunday'
-          const cell = data.cell
-          
-          if (colIndex >= 1 && colIndex <= 15) {
-            const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
-            
-            if (isHoliday && holidayMeta?.isMultiDay && colIndex === 1 && holidayMeta.isFirstDay) {
-              const pdf = this.doc
-              const pageWidth = pdf.internal.pageSize.getWidth()
-              const totalDays = holidayMeta.totalDays
-              const cellHeight = cell.height
-              const totalHeight = cellHeight * totalDays
-              const cellY = cell.y + (totalHeight / 2)
-              
-              pdf.setTextColor(139, 0, 0)
-              pdf.setFont('helvetica', 'bold')
-              pdf.text(rowData.holiday?.name || '', pageWidth / 2, cellY, {
-                align: 'center',
-              })
-              
-              return false
-            } else if (isSunday && colIndex === 1) {
-              const pdf = this.doc
-              const pageWidth = pdf.internal.pageSize.getWidth()
-              const cellY = cell.y + cell.height / 2 + 1.5
-              
-              pdf.setTextColor(0, 0, 0)
-              pdf.setFont('helvetica', 'bold')
-              pdf.text('SUNDAY', pageWidth / 2, cellY, {
-                align: 'center',
-              })
-              
-              return false
-            } else if (isHoliday && !holidayMeta?.isMultiDay && colIndex === 1) {
-              const pdf = this.doc
-              const pageWidth = pdf.internal.pageSize.getWidth()
-              const cellY = cell.y + cell.height / 2 + 1.5
-              
-              pdf.setTextColor(139, 0, 0)
-              pdf.setFont('helvetica', 'bold')
-              pdf.text(rowData.holiday?.name || '', pageWidth / 2, cellY, {
-                align: 'center',
-              })
-              
-              return false
-            }
-          }
-        }
       }
+      // NOTE: the previous `willDrawCell` callback that drew "SUNDAY"
+      // and `return false`-ed has been removed. It was redundant with
+      // the didParseCell merge above and was the source of TWO bugs:
+      //   1. It fired for the HEADER row too (no guard) and overwrote
+      //      the "7:00 AM" header cell with "SUNDAY" (then returned
+      //      false to suppress the default "7:00 AM" rendering).
+      //   2. The `return false` for the date column of Sunday rows
+      //      suppressed the cell's borders too, leaving the date
+      //      column borderless on Sunday rows.
+      // The didParseCell above already sets colSpan=15 + cell.text
+      // for the merged Sunday/holiday cells, so the default renderer
+      // draws them correctly with full borders.
     })
 
     if (preparedBy) {
@@ -1660,7 +1672,7 @@ export class PDFReportGenerator {
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
     
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     
     this.doc.setFontSize(8)
     this.doc.setFont('helvetica', 'normal')
@@ -1764,10 +1776,10 @@ export class PDFReportGenerator {
     tableData.push(averagesRow)
 
     const dateColWidth = 18
-    const timeSlotWidth = 10
+    const timeSlotWidth = 9.5
     const totalColWidth = 13
-    const uniqueColWidth = 13
-    
+    const uniqueColWidth = 18 // UNIQUE column (widened to fit 'UNIQUE' without wrap)
+
     const columnWidths = [
       dateColWidth,
       ...Array(13).fill(timeSlotWidth),
@@ -1817,7 +1829,12 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. Without this guard, a multi-day holiday
+        // whose first day happens to be the first data row would
+        // paint the holiday name over the header's "7:00 AM" cell.
+        if (data.row.section !== 'body') return
+
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
@@ -1863,18 +1880,25 @@ export class PDFReportGenerator {
         const rowIndex = data.row.index
         const colIndex = data.column.index
         const rowData = dailyData[rowIndex]
-        
+
+        // Skip header rows. The "special day" merge (colSpan = 15) below
+        // is a DATA-ROW feature -- without this guard the header cell at
+        // column 1 inherits the first data row's day-of-week, which made
+        // "7:00 AM" get replaced with "SUNDAY" whenever the first day of
+        // the report was a Sunday.
+        if (data.row.section !== 'body') return
+
         if (rowData && rowIndex < dailyData.length) {
           const isHoliday = rowData.holiday !== null && rowData.holiday !== undefined
           const dayOfWeek = rowData.dayOfWeek || ''
           const isSunday = dayOfWeek.toLowerCase() === 'sunday'
-          
+
           if (isHoliday || isSunday) {
             if (colIndex >= 1 && colIndex <= 15) {
               const holidayMeta = (tableData[rowIndex] as any)?._holidayMeta
               const isMultiDay = holidayMeta?.isMultiDay || false
               const isFirstDay = holidayMeta?.isFirstDay || false
-              
+
               if (isHoliday && isMultiDay) {
                 if (colIndex === 1 && isFirstDay) {
                   data.cell.colSpan = 15
@@ -1903,7 +1927,7 @@ export class PDFReportGenerator {
             }
           }
         }
-        
+
         const lastTwoRows = tableData.length - 2
         if (rowIndex >= lastTwoRows) {
           data.cell.styles.fontStyle = 'bold'
@@ -2080,313 +2104,828 @@ export class PDFReportGenerator {
 
   /**
    * Generate Individual User Statistics Report
+   *
+   * Layout (geometric, uniform, consistent margins):
+   *   Page 1 — header, profile card (avatar placeholder + identity fields),
+   *            4-card overview (one per concern).
+   *   Page 2 — concern-by-concern summary blocks (Borrowing, Penalties,
+   *            Visits, Locker Rentals) using two-column metric tables.
+   *   Page 3+ — full per-concern tables:
+   *              1. Books Borrowed
+   *              2. Recent Visits (latest 10)
+   *              3. Penalty History
+   *              4. Locker Rental History
+   *   Footer — "Prepared by" on the last page.
    */
   generateIndividualUserReport(data: any, preparedBy: string, dateRangeTitle: string): void {
     const pageWidth = this.doc.internal.pageSize.getWidth()
     const pageHeight = this.doc.internal.pageSize.getHeight()
     const centerX = pageWidth / 2
-    
+    const marginX = 14
+    const contentWidth = pageWidth - marginX * 2
+
+    // Color palette — one accent per concern, used everywhere consistently.
+    type RGB = [number, number, number]
+    const C: Record<string, RGB> = {
+      primary:    [37,  99, 235],   // blue-600
+      primaryDk:  [30,  64, 175],   // blue-800
+      borrowing:  [37,  99, 235],   // blue
+      penalties:  [220, 38,  38],   // red-600
+      visits:     [5,  150, 105],   // emerald-600
+      lockers:    [217, 119,  6],   // amber-600
+      slate900:   [15,  23,  42],
+      slate700:   [51,  65,  85],
+      slate500:   [100, 116, 139],
+      slate300:   [203, 213, 225],
+      slate100:   [241, 245, 249],
+      slate50:    [248, 250, 252],
+      white:      [255, 255, 255]
+    }
+
+    const formatDate = (d: any) => d ? new Date(d).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: '2-digit'
+    }) : '—'
+    const formatDateTime = (d: any) => d ? new Date(d).toLocaleString('en-US', {
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: true
+    }) : '—'
+    const peso = (n: number) => `PHP ${(Number(n) || 0).toFixed(2)}`
+
+    // Derived counts used in tables & summaries.
+    const borrowHistory = Array.isArray(data?.borrowing?.history) ? data.borrowing.history : []
+    const visitLogs = Array.isArray(data?.visits?.logs) ? data.visits.logs : []
+    const lockerAssignments = Array.isArray(data?.locker_usage?.assignments)
+      ? data.locker_usage.assignments
+      : []
+    const penaltyBooks = Array.isArray(data?.penalties?.books) ? data.penalties.books : []
+    const penaltyLockers = Array.isArray(data?.penalties?.lockers) ? data.penalties.lockers : []
+    const allPenalties = [...penaltyBooks, ...penaltyLockers].sort(
+      (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    const user = data?.user || {}
+
+    // ===== Page 1: Header + Profile + Overview =====
+
+    // Header band (geometric: solid block, centered text)
+    this.doc.setFillColor(...C.primaryDk)
+    this.doc.rect(0, 0, pageWidth, 38, 'F')
+    this.doc.setTextColor(...C.white)
+    this.doc.setFont('helvetica', 'bold')
+    this.doc.setFontSize(14)
+    this.doc.text('Divine Word College of Calapan', centerX, 14, { align: 'center' })
+    this.doc.setFontSize(10)
+    this.doc.text(this.libraryName, centerX, 22, { align: 'center' })
+    this.doc.setFontSize(11)
+    this.doc.text('Individual User Statistics Report', centerX, 31, { align: 'center' })
+    this.doc.setTextColor(...C.slate900)
+
+    // Subtitle: date range + prepared by (right)
+    let y = 46
+    this.doc.setFont('helvetica', 'bold')
+    this.doc.setFontSize(13)
+    this.doc.text('User Profile', marginX, y)
+    y += 2
+    // Divider under section title
+    this.doc.setDrawColor(...C.primary)
+    this.doc.setLineWidth(0.6)
+    this.doc.line(marginX, y, marginX + contentWidth, y)
+    y += 8
+
+    // Profile card — split: avatar circle (left), key-value grid (right)
+    const profileTop = y
+    const cardPadding = 6
+    const avatarSize = 22
+    const avatarX = marginX + cardPadding
+    const avatarY = profileTop + cardPadding
+
+    // Avatar placeholder (filled circle with initials)
+    const initials = (user.full_name || '?')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s: string) => s[0]?.toUpperCase())
+      .join('') || '?'
+    this.doc.setFillColor(...C.primary)
+    this.doc.circle(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 'F')
+    this.doc.setTextColor(...C.white)
+    this.doc.setFont('helvetica', 'bold')
+    this.doc.setFontSize(13)
+    this.doc.text(initials, avatarX + avatarSize / 2, avatarY + avatarSize / 2 + 4, { align: 'center' })
+
+    // Identity grid (two columns of label/value pairs)
+    const gridX = avatarX + avatarSize + 8
+    const gridW = contentWidth - (gridX - marginX) - cardPadding
+    const labelW = gridW * 0.32
+    const valueW = gridW * 0.68
+    const colWidths = [labelW, valueW]
+
+    const buildIdentityRow = (label: string, value: string): [string, string] => [label, value]
+
+    const identityRows: Array<[string, string]> = [
+      buildIdentityRow('ID Number', user.account_id || '—'),
+      buildIdentityRow('Full Name', user.full_name || '—'),
+      buildIdentityRow('User Type', user.user_type || '—'),
+      buildIdentityRow('Email', user.email || '—'),
+    ]
+    if (user.department) identityRows.push(buildIdentityRow('Department', user.department))
+    if (user.program)    identityRows.push(buildIdentityRow('Program', user.program))
+    if (user.grade_level) identityRows.push(buildIdentityRow('Grade Level', user.grade_level))
+    if (user.section)    identityRows.push(buildIdentityRow('Section', user.section))
+    if (user.office)     identityRows.push(buildIdentityRow('Office', user.office))
+    identityRows.push(buildIdentityRow('Report Period', dateRangeTitle || '—'))
+
+    autoTable(this.doc, {
+      startY: profileTop + cardPadding,
+      margin: { left: gridX, right: marginX + cardPadding },
+      tableWidth: gridW,
+      body: identityRows,
+      theme: 'plain',
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 1.5, bottom: 1.5, left: 4, right: 4 },
+        lineColor: C.slate300,
+        lineWidth: 0
+      },
+      columnStyles: {
+        0: { cellWidth: labelW, fontStyle: 'bold', textColor: C.slate700, halign: 'left' },
+        1: { cellWidth: valueW, textColor: C.slate900, halign: 'left' }
+      },
+      didDrawCell: (data) => {
+        // Thin underline under each row for geometric separation
+        if (data.section === 'body' && data.column.index === 1) {
+          const cell = data.cell as any
+          const doc = this.doc as any
+          doc.setDrawColor(C.slate100[0], C.slate100[1], C.slate100[2])
+          doc.setLineWidth(0.2)
+          doc.line(cell.x, cell.y + cell.height, cell.x + cell.width, cell.y + cell.height)
+        }
+      }
+    })
+
+    y = (this.doc as any).lastAutoTable.finalY + 10
+
+    // 4-card overview (Borrowing, Penalties, Visits, Lockers) — same metrics
+    this.doc.setFont('helvetica', 'bold')
+    this.doc.setFontSize(13)
+    this.doc.text('Overview', marginX, y)
+    y += 2
+    this.doc.setDrawColor(...C.primary)
+    this.doc.setLineWidth(0.6)
+    this.doc.line(marginX, y, marginX + contentWidth, y)
+    y += 8
+
+    const cardGap = 4
+    const cardW = (contentWidth - cardGap * 3) / 4
+    const cardH = 26
+    const overviewCards = [
+      {
+        label: 'Books Borrowed',
+        accent: C.borrowing,
+        lines: [
+          ['Total', borrowHistory.length],
+          ['Active', borrowHistory.filter((b: any) => b.status === 'ACTIVE').length],
+          ['Returned', borrowHistory.filter((b: any) => b.status === 'COMPLETED').length]
+        ]
+      },
+      {
+        label: 'Penalties',
+        accent: C.penalties,
+        lines: [
+          ['Records', allPenalties.length],
+          ['Total', peso(data?.penalties?.summary?.total_penalties || 0)],
+          ['Balance', peso(data?.penalties?.summary?.total_balance || 0)]
+        ]
+      },
+      {
+        label: 'Visits',
+        accent: C.visits,
+        lines: [
+          ['Total', data?.visits?.summary?.total_visits || visitLogs.length],
+          ['Avg Duration', `${data?.visits?.summary?.avg_duration_minutes || 0} min`],
+          ['Still Inside', visitLogs.filter((v: any) => !v.exit_time).length]
+        ]
+      },
+      {
+        label: 'Locker Rentals',
+        accent: C.lockers,
+        lines: [
+          ['Total', data?.locker_usage?.summary?.total_rentals ?? lockerAssignments.length],
+          ['Active', data?.locker_usage?.summary?.active_count ?? lockerAssignments.filter((l: any) => l.status === 'ACTIVE').length],
+          ['Completed', data?.locker_usage?.summary?.completed_count ?? lockerAssignments.filter((l: any) => l.status === 'COMPLETED').length],
+          ['Overdue', data?.locker_usage?.summary?.overdue_count ?? lockerAssignments.filter((l: any) => l.status === 'OVERDUE').length]
+        ]
+      }
+    ]
+
+    overviewCards.forEach((card, idx) => {
+      const x = marginX + idx * (cardW + cardGap)
+      // Card body
+      this.doc.setFillColor(...C.slate50)
+      this.doc.rect(x, y, cardW, cardH, 'F')
+      // Accent strip on the left
+      this.doc.setFillColor(card.accent[0], card.accent[1], card.accent[2])
+      this.doc.rect(x, y, 2.2, cardH, 'F')
+      // Card label
+      this.doc.setFont('helvetica', 'bold')
+      this.doc.setFontSize(9.5)
+      this.doc.setTextColor(...C.slate700)
+      this.doc.text(card.label, x + 5, y + 6)
+      // Card metric lines (right-aligned value, label left-aligned)
+      this.doc.setFont('helvetica', 'normal')
+      this.doc.setFontSize(8.5)
+      card.lines.forEach(([k, v], i) => {
+        const lineY = y + 12 + i * 4.6
+        this.doc.setTextColor(...C.slate500)
+        this.doc.text(String(k), x + 5, lineY)
+        this.doc.setFont('helvetica', 'bold')
+        this.doc.setTextColor(...C.slate900)
+        this.doc.text(String(v), x + cardW - 5, lineY, { align: 'right' })
+        this.doc.setFont('helvetica', 'normal')
+      })
+    })
+    y += cardH + 12
+
+    // ===== Page 2: Concern-by-concern summary blocks =====
+    this.doc.addPage()
+    y = 18
+
+    const drawSectionTitle = (title: string, accent: number[]) => {
+      this.doc.setFont('helvetica', 'bold')
+      this.doc.setFontSize(13)
+      this.doc.setTextColor(...C.slate900)
+      this.doc.text(title, marginX, y)
+      // Accent square next to title for geometric consistency
+      this.doc.setFillColor(accent[0], accent[1], accent[2])
+      this.doc.rect(marginX + this.doc.getTextWidth(title) + 4, y - 3.2, 3, 3, 'F')
+      y += 2
+      this.doc.setDrawColor(...C.slate300)
+      this.doc.setLineWidth(0.4)
+      this.doc.line(marginX, y, marginX + contentWidth, y)
+      y += 6
+    }
+
+    const drawTwoColMetricTable = (
+      options: {
+        rows: Array<[string, string]>
+        totalsRow?: [string, string]
+        highlightRows?: Array<{ index: number; accent?: [number,number,number]; label?: string }>
+      }
+    ) => {
+      const { rows, totalsRow, highlightRows = [] } = options
+      const bodyRows = totalsRow ? [...rows, totalsRow] : rows
+      const totalsIndex = totalsRow ? rows.length : -1
+      const highlightIndexMap = new Map<number, { accent: number[]; label?: string }>()
+      highlightRows.forEach((h) => highlightIndexMap.set(h.index, {
+        accent: h.accent || C.penalties,
+        label: h.label
+      }))
+
+      autoTable(this.doc, {
+        startY: y,
+        margin: { left: marginX, right: marginX },
+        tableWidth: contentWidth,
+        body: bodyRows,
+        theme: 'plain',
+        styles: {
+          fontSize: 9,
+          cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
+          lineColor: C.slate100,
+          lineWidth: 0.2
+        },
+        columnStyles: {
+          0: { cellWidth: contentWidth * 0.55, fontStyle: 'bold', textColor: C.slate700, halign: 'left' },
+          1: { cellWidth: contentWidth * 0.45, textColor: C.slate900, halign: 'right', fontStyle: 'bold' }
+        },
+        didParseCell: (data) => {
+          if (data.section !== 'body') return
+
+          // Highlight a specific row (e.g., Outstanding balance) — bold red
+          // accent so it pops next to the surrounding slate-700 rows.
+          const highlight = highlightIndexMap.get(data.row.index)
+          if (highlight) {
+            data.cell.styles.fillColor = [254, 226, 226] // red-100
+            data.cell.styles.textColor = highlight.accent as [number,number, number]
+            data.cell.styles.fontStyle = 'bold'
+            data.cell.styles.lineWidth = 0.4
+            data.cell.styles.lineColor = highlight.accent as [number,number, number]
+            data.cell.styles.cellPadding = { top: 3, bottom: 3, left: 4, right: 4 }
+            return
+          }
+
+          // Totals row (appended at the end) — bold slate block.
+          if (totalsIndex >= 0 && data.row.index === totalsIndex) {
+            data.cell.styles.fillColor = C.slate100
+            data.cell.styles.textColor = C.slate900
+            data.cell.styles.fontStyle = 'bold'
+            data.cell.styles.lineWidth = 0.6
+            data.cell.styles.lineColor = C.slate700
+            data.cell.styles.cellPadding = { top: 3, bottom: 3, left: 4, right: 4 }
+          }
+        }
+      })
+      y = (this.doc as any).lastAutoTable.finalY + 8
+    }
+
+    // --- Borrowing summary ---
+    drawSectionTitle('Book Borrowing Summary', C.borrowing)
+    drawTwoColMetricTable({
+      rows: [
+        ['Total books borrowed', String(borrowHistory.length)],
+        ['Currently borrowed', String(borrowHistory.filter((b: any) => b.status === 'ACTIVE').length)],
+        ['Returned', String(borrowHistory.filter((b: any) => b.status === 'COMPLETED').length)],
+        ['Overdue', String(borrowHistory.filter((b: any) => b.status === 'OVERDUE').length)],
+        ['Active penalties on books', peso(borrowHistory.reduce(
+          (s: number, b: any) => s + (Number(b.penalty) || 0), 0
+        ))]
+      ]
+    })
+
+    // --- Penalties summary ---
+    // Outstanding balance is moved above the totals and rendered with a
+    // red accent so the reader's eye lands on the still-owed amount first.
+    drawSectionTitle('Penalties Summary', C.penalties)
+    drawTwoColMetricTable({
+      rows: [
+        ['Penalty records (total)', String(allPenalties.length)],
+        ['Book penalty records', String(penaltyBooks.length)],
+        ['Locker penalty records', String(penaltyLockers.length)],
+        ['Outstanding balance', peso(data?.penalties?.summary?.total_balance || 0)],
+        ['Total penalties assessed', peso(data?.penalties?.summary?.total_penalties || 0)],
+        ['Total amount paid', peso(data?.penalties?.summary?.total_paid || 0)]
+      ],
+      // Highlight the Outstanding balance row (index 3) in red so the
+      // still-owed amount stands out from the surrounding slate rows.
+      highlightRows: [{ index: 3, accent: C.penalties }],
+      totalsRow: ['TOTAL PENALTIES', peso(
+        // Grand total = assessed penalties (which already includes active ongoing).
+        (Number(data?.penalties?.summary?.total_penalties) || 0)
+      )]
+    })
+
+    // --- Visits summary ---
+    drawSectionTitle('Library Visits Summary', C.visits)
+    drawTwoColMetricTable({
+      rows: [
+        ['Total visits', String(data?.visits?.summary?.total_visits || visitLogs.length)],
+        ['Currently inside', String(visitLogs.filter((v: any) => !v.exit_time).length)],
+        ['Completed visits', String(visitLogs.filter((v: any) => !!v.exit_time).length)],
+        ['Average duration', `${data?.visits?.summary?.avg_duration_minutes || 0} min`]
+      ]
+    })
+
+    // --- Locker rentals summary ---
+    drawSectionTitle('Locker Rentals Summary', C.lockers)
+    drawTwoColMetricTable({
+      rows: [
+        ['Total rentals', String(data?.locker_usage?.summary?.total_rentals ?? lockerAssignments.length)],
+        ['Active rentals', String(data?.locker_usage?.summary?.active_count ?? lockerAssignments.filter((l: any) => l.status === 'ACTIVE').length)],
+        ['Completed rentals', String(data?.locker_usage?.summary?.completed_count ?? lockerAssignments.filter((l: any) => l.status === 'COMPLETED').length)],
+        ['Overdue rentals', String(data?.locker_usage?.summary?.overdue_count ?? lockerAssignments.filter((l: any) => l.status === 'OVERDUE').length)],
+        ['Current rental', data?.locker_usage?.summary?.current_rental
+          ? `Locker #${data.locker_usage.summary.current_rental.locker?.locker_number || '—'}`
+          : 'No active rental']
+      ]
+    })
+
+    // ===== Detail tables =====
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageHeight - 22) {
+        this.doc.addPage()
+        y = 18
+      }
+    }
+
+    const drawTableHeader = (title: string, accent: number[]) => {
+      ensureSpace(20)
+      drawSectionTitle(title, accent)
+    }
+
+    const baseTableOpts = (headRow: string[]) => ({
+      margin: { left: marginX, right: marginX },
+      tableWidth: contentWidth,
+      theme: 'grid',
+      headStyles: {
+        fillColor: C.slate900,
+        textColor: C.white,
+        fontStyle: 'bold',
+        halign: 'center',
+        fontSize: 8.5
+      },
+      bodyStyles: {
+        fontSize: 8,
+        cellPadding: 2,
+        textColor: C.slate900
+      },
+      alternateRowStyles: [{ fillColor: C.slate50 }],
+      head: [headRow]
+    } as any)
+
+    // --- Books Borrowed table ---
+    drawTableHeader('Books Borrowed', C.borrowing)
+    if (borrowHistory.length === 0) {
+      this.doc.setFont('helvetica', 'italic')
+      this.doc.setFontSize(9)
+      this.doc.setTextColor(...C.slate500)
+      this.doc.text('No borrowing records in the selected period.', marginX, y)
+      y += 12
+    } else {
+      const rows = borrowHistory.map((b: any) => [
+        b.book_title || '—',
+        b.isbn || '—',
+        b.accession_number || '—',
+        formatDate(b.borrow_date),
+        formatDate(b.due_date),
+        b.return_date ? formatDate(b.return_date) : '—',
+        b.status,
+        Number(b.penalty) > 0 ? peso(b.penalty) : '—'
+      ])
+      autoTable(this.doc, {
+        startY: y,
+        ...baseTableOpts(['Title', 'ISBN', 'Accession', 'Borrowed', 'Due', 'Returned', 'Status', 'Penalty']),
+        body: rows,
+        columnStyles: {
+          0: { cellWidth: 'auto', halign: 'left',   fontStyle: 'bold' },
+          1: { cellWidth: 22,  halign: 'left' },
+          2: { cellWidth: 22,  halign: 'left' },
+          3: { cellWidth: 20,  halign: 'center' },
+          4: { cellWidth: 20,  halign: 'center' },
+          5: { cellWidth: 20,  halign: 'center' },
+          6: { cellWidth: 24,  halign: 'center', fontStyle: 'bold' },
+          7: { cellWidth: 22,  halign: 'right' }
+        },
+        didParseCell: (data) => {
+          if (data.section !== 'body') return
+          const status = String(borrowHistory[data.row.index]?.status || '')
+          if (data.column.index === 6) {
+            if (status === 'OVERDUE') {
+              data.cell.styles.textColor = C.penalties
+              data.cell.styles.fillColor = [254, 226, 226]
+            } else if (status === 'ACTIVE') {
+              data.cell.styles.textColor = C.borrowing
+              data.cell.styles.fillColor = [219, 234, 254]
+            } else if (status === 'COMPLETED') {
+              data.cell.styles.textColor = C.visits
+            }
+          }
+        }
+      })
+      y = (this.doc as any).lastAutoTable.finalY + 10
+    }
+
+    // --- Recent Visits table (latest 10) ---
+    drawTableHeader('Recent Library Visits (latest 10)', C.visits)
+    if (visitLogs.length === 0) {
+      this.doc.setFont('helvetica', 'italic')
+      this.doc.setFontSize(9)
+      this.doc.setTextColor(...C.slate500)
+      this.doc.text('No visit records in the selected period.', marginX, y)
+      y += 12
+    } else {
+      const recent = visitLogs.slice(0, 10)
+      const rows = recent.map((v: any) => [
+        formatDateTime(v.entry_time),
+        v.exit_time ? formatDateTime(v.exit_time) : 'Still inside',
+        v.duration_minutes != null ? `${v.duration_minutes} min` : 'In progress',
+        v.purpose || 'General'
+      ])
+      autoTable(this.doc, {
+        startY: y,
+        ...baseTableOpts(['Entry Time', 'Exit Time', 'Duration', 'Purpose']),
+        body: rows,
+        columnStyles: {
+          0: { cellWidth: 'auto', halign: 'left' },
+          1: { cellWidth: 'auto', halign: 'left' },
+          2: { cellWidth: 30,  halign: 'center', fontStyle: 'bold' },
+          3: { cellWidth: 36,  halign: 'left' }
+        }
+      })
+      y = (this.doc as any).lastAutoTable.finalY + 10
+    }
+
+    // --- Penalty History table ---
+    drawTableHeader('Penalty History', C.penalties)
+    if (allPenalties.length === 0) {
+      this.doc.setFont('helvetica', 'italic')
+      this.doc.setFontSize(9)
+      this.doc.setTextColor(...C.slate500)
+      this.doc.text('No penalty records in the selected period.', marginX, y)
+      y += 12
+    } else {
+      const rows = allPenalties.map((p: any) => [
+        formatDate(p.created_at),
+        p.transaction_type || '—',
+        peso(p.penalty_amount),
+        peso(p.amount_paid),
+        peso(p.remaining_balance),
+        p.status || '—'
+      ])
+
+      // Totals row — aggregates Amount / Paid / Balance across every
+      // penalty in the table so the reader sees the running balance
+      // without having to scroll-and-sum the rows manually.
+      const totalsAmount  = allPenalties.reduce((s: number, p: any) => s + (Number(p.penalty_amount)     || 0), 0)
+      const totalsPaid    = allPenalties.reduce((s: number, p: any) => s + (Number(p.amount_paid)        || 0), 0)
+      const totalsBalance = allPenalties.reduce((s: number, p: any) => s + (Number(p.remaining_balance)  || 0), 0)
+      rows.push([
+        'TOTAL',
+        `${allPenalties.length} record${allPenalties.length === 1 ? '' : 's'}`,
+        peso(totalsAmount),
+        peso(totalsPaid),
+        peso(totalsBalance),
+        ''
+      ])
+
+      autoTable(this.doc, {
+        startY: y,
+        ...baseTableOpts(['Date', 'Type', 'Amount', 'Paid', 'Balance', 'Status']),
+        body: rows,
+        columnStyles: {
+          0: { cellWidth: 24,  halign: 'center' },
+          1: { cellWidth: 20,  halign: 'center', fontStyle: 'bold' },
+          2: { cellWidth: 'auto', halign: 'right' },
+          3: { cellWidth: 'auto', halign: 'right' },
+          4: { cellWidth: 'auto', halign: 'right', fontStyle: 'bold' },
+          5: { cellWidth: 26,  halign: 'center' }
+        },
+        didParseCell: (data) => {
+          if (data.section !== 'body') return
+
+          // Style the appended totals row
+          if (data.row.index === allPenalties.length) {
+            data.cell.styles.fontStyle = 'bold'
+            data.cell.styles.fillColor = C.slate100
+            data.cell.styles.textColor = C.slate900
+            data.cell.styles.lineWidth = 0.6
+            data.cell.styles.lineColor = C.slate700
+            if (data.column.index === 2 || data.column.index === 3 || data.column.index === 4) {
+              data.cell.styles.halign = 'right'
+            }
+            return
+          }
+
+          const row = allPenalties[data.row.index]
+          const status = String(row?.status || '')
+          if (data.column.index === 1) {
+            data.cell.styles.textColor = row?.transaction_type === 'BOOK' ? C.borrowing : C.lockers
+          }
+          if (data.column.index === 4 && Number(row?.remaining_balance) > 0) {
+            data.cell.styles.textColor = C.penalties
+            data.cell.styles.fillColor = [254, 226, 226]
+          }
+          if (data.column.index === 5) {
+            if (status === 'PENDING' || status === 'PARTIAL') {
+              data.cell.styles.textColor = C.penalties
+            } else if (status === 'SETTLED') {
+              data.cell.styles.textColor = C.visits
+            }
+          }
+        }
+      })
+      y = (this.doc as any).lastAutoTable.finalY + 10
+    }
+
+    // --- Locker Rentals table ---
+    drawTableHeader('Locker Rentals', C.lockers)
+    if (lockerAssignments.length === 0) {
+      this.doc.setFont('helvetica', 'italic')
+      this.doc.setFontSize(9)
+      this.doc.setTextColor(...C.slate500)
+      this.doc.text('No locker rental records in the selected period.', marginX, y)
+      y += 12
+    } else {
+      const rows = lockerAssignments.map((l: any) => [
+        l.locker_number || '—',
+        l.location || '—',
+        formatDateTime(l.borrow_time),
+        l.due_time ? formatDateTime(l.due_time) : '—',
+        l.return_time ? formatDateTime(l.return_time) : 'Active',
+        l.status,
+        Number(l.penalty) > 0 ? peso(l.penalty) : '—'
+      ])
+      autoTable(this.doc, {
+        startY: y,
+        ...baseTableOpts(['Locker', 'Location', 'Borrowed', 'Due', 'Returned', 'Status', 'Penalty']),
+        body: rows,
+        columnStyles: {
+          0: { cellWidth: 18,  halign: 'center', fontStyle: 'bold' },
+          1: { cellWidth: 'auto', halign: 'left' },
+          2: { cellWidth: 'auto', halign: 'left' },
+          3: { cellWidth: 'auto', halign: 'left' },
+          4: { cellWidth: 'auto', halign: 'left' },
+          5: { cellWidth: 24,  halign: 'center', fontStyle: 'bold' },
+          6: { cellWidth: 22,  halign: 'right' }
+        },
+        didParseCell: (data) => {
+          if (data.section !== 'body') return
+          const status = String(lockerAssignments[data.row.index]?.status || '')
+          if (data.column.index === 5) {
+            if (status === 'OVERDUE') {
+              data.cell.styles.textColor = C.penalties
+              data.cell.styles.fillColor = [254, 226, 226]
+            } else if (status === 'ACTIVE') {
+              data.cell.styles.textColor = C.lockers
+              data.cell.styles.fillColor = [254, 243, 199]
+            } else if (status === 'COMPLETED') {
+              data.cell.styles.textColor = C.visits
+            }
+          }
+        }
+      })
+      y = (this.doc as any).lastAutoTable.finalY + 10
+    }
+
+    // ===== Footer =====
+    ensureSpace(20)
+    y += 4
+    this.doc.setDrawColor(...C.slate300)
+    this.doc.setLineWidth(0.3)
+    this.doc.line(marginX, y, marginX + contentWidth, y)
+    y += 6
+
+    this.doc.setFont('helvetica', 'normal')
+    this.doc.setFontSize(9)
+    this.doc.setTextColor(...C.slate500)
+    this.doc.text('Prepared by:', marginX, y)
+    this.doc.setFont('helvetica', 'bold')
+    this.doc.setTextColor(...C.slate900)
+    this.doc.text(preparedBy || 'Library Staff', marginX + 22, y)
+    // Signature line
+    this.doc.setDrawColor(...C.slate700)
+    this.doc.setLineWidth(0.4)
+    this.doc.line(marginX + 22, y + 1.5, marginX + 90, y + 1.5)
+  }
+
+  /**
+   * Summary of Fines — per-borrower breakdown. Shape:
+   *   {
+   *     type: 'combined' | 'book' | 'locker',
+   *     filters: { date_from, date_to, ... },
+   *     grand: { total, paid, remaining, borrower_count, settlement_count },
+   *     rows: [
+   *       {
+   *         user: { full_name, account_id, user_type, ... },
+   *         book:     { total, paid, remaining, count },
+   *         locker:   { total, paid, remaining, count },
+   *         combined: { total, paid, remaining, count },
+   *         settlements: [ ...transaction-level rows ]
+   *       }
+   *     ]
+   *   }
+   *
+   * Renders a single table with one row per borrower. Columns
+   * adapt to the report `type` so a book-only report doesn't
+   * show empty locker columns (and vice-versa).
+   */
+  generateFinesSummaryReport(
+    data: {
+      type?: 'combined' | 'book' | 'locker'
+      filters?: { date_from?: string | null; date_to?: string | null }
+      grand?: { total: number; paid: number; remaining: number; borrower_count: number; settlement_count: number }
+      rows: Array<{
+        user: any
+        book: { total: number; paid: number; remaining: number; count: number }
+        locker: { total: number; paid: number; remaining: number; count: number }
+        combined: { total: number; paid: number; remaining: number; count: number }
+      }>
+    },
+    preparedBy: string = '',
+    dateRangeTitle?: string
+  ): void {
+    const pageWidth = this.doc.internal.pageSize.getWidth()
+    const centerX = pageWidth / 2
+    const type = data.type || 'combined'
+    const fmt = (n: number) =>
+      `PHP ${(Number(n) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
     // Header
     this.doc.setFontSize(11)
     this.doc.setFont('helvetica', 'bold')
     this.doc.text('Divine Word College of Calapan', centerX, 15, { align: 'center' })
-    
     this.doc.setFontSize(9)
-    this.doc.text('College Library', centerX, 21, { align: 'center' })
-    
-    this.doc.setFontSize(8)
-    this.doc.setFont('helvetica', 'normal')
-    this.doc.text('Individual User Statistics', centerX, 27, { align: 'center' })
-    this.doc.text(`for ${dateRangeTitle}`, centerX, 32, { align: 'center' })
-    
-    let yPosition = 45
-    
-    // User Information Section
-    this.doc.setFontSize(12)
-    this.doc.setFont('helvetica', 'bold')
-    this.doc.text('User Information', 20, yPosition)
-    yPosition += 8
-    
+    this.doc.text(this.libraryName, centerX, 21, { align: 'center' })
     this.doc.setFontSize(10)
-    this.doc.setFont('helvetica', 'normal')
-    this.doc.text(`ID Number: ${data.user.account_id}`, 20, yPosition)
-    yPosition += 6
-    this.doc.text(`Full Name: ${data.user.full_name}`, 20, yPosition)
-    yPosition += 6
-    this.doc.text(`User Type: ${data.user.user_type}`, 20, yPosition)
-    yPosition += 6
-    
-    if (data.user.department) {
-      this.doc.text(`Department: ${data.user.department}`, 20, yPosition)
-      yPosition += 6
+    this.doc.text('Summary of Fines', centerX, 28, { align: 'center' })
+    if (dateRangeTitle) {
+      this.doc.setFontSize(8)
+      this.doc.setFont('helvetica', 'normal')
+      this.doc.text(`for ${dateRangeTitle}`, centerX, 33, { align: 'center' })
     }
-    
-    if (data.user.program) {
-      this.doc.text(`Program: ${data.user.program}`, 20, yPosition)
-      yPosition += 6
-    }
-    
-    yPosition += 5
-    
-    // Summary Statistics Section
-    this.doc.setFontSize(12)
+    // Report-type pill
+    this.doc.setFontSize(7)
     this.doc.setFont('helvetica', 'bold')
-    this.doc.text('Summary Statistics', 20, yPosition)
-    yPosition += 8
-    
-    this.doc.setFontSize(10)
+    const pillLabel =
+      type === 'book'
+        ? 'BOOK FINES ONLY'
+        : type === 'locker'
+          ? 'LOCKER FINES ONLY'
+          : 'COMBINED (BOOK + LOCKER)'
+    this.doc.setFillColor(220, 215, 240)
+    const pillW = 70
+    this.doc.roundedRect(centerX - pillW / 2, 36, pillW, 5, 1, 1, 'F')
+    this.doc.setTextColor(60, 40, 110)
+    this.doc.text(pillLabel, centerX, 39.5, { align: 'center' })
+    this.doc.setTextColor(0, 0, 0)
     this.doc.setFont('helvetica', 'normal')
-    
-    const summaryData = [
-      ['Metric', 'Value'],
-      ['Total Books Borrowed', (data.borrowing?.summary?.total_borrowed || 0).toString()],
-      ['Currently Borrowed', (data.borrowing?.summary?.currently_borrowed || 0).toString()],
-      ['Total Visits', (data.visits?.summary?.total_visits || 0).toString()],
-      ['Avg Duration (minutes)', (data.visits?.summary?.avg_duration_minutes || 0).toString()],
-      ['Total Penalties', `PHP ${(data.penalties?.summary?.total_penalties || 0).toFixed(2)}`],
-      ['Total Balance', `PHP ${(data.penalties?.summary?.total_balance || 0).toFixed(2)}`],
-      ['Total Locker Rentals', (data.locker_usage?.summary?.total_rentals || 0).toString()],
-      ['Current Rental Status', data.locker_usage?.summary?.current_rental ? 'Active rental' : 'No active rental']
-    ]
-    
-    autoTable(this.doc, {
-      startY: yPosition,
-      head: [summaryData[0]],
-      body: summaryData.slice(1),
-      theme: 'striped',
-      headStyles: {
-        fillColor: [59, 130, 246],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        halign: 'center',
-        fontSize: 10
-      },
-      bodyStyles: {
-        fontSize: 9
-      },
-      columnStyles: {
-        0: { cellWidth: 'auto', fontStyle: 'bold', halign: 'left' },
-        1: { cellWidth: 'auto', halign: 'right' }
-      },
-      margin: { left: 20, right: 20 }
+
+    // Column layout depends on the report type so we never show
+    // empty columns.
+    const showBook = type !== 'locker'
+    const showLocker = type !== 'book'
+    const head: string[] = ['#', 'Borrower', 'ID Number', 'Type']
+    if (showBook) head.push('Book Penalty', 'Book Paid', 'Book Remaining', '# Book')
+    if (showLocker) head.push('Locker Penalty', 'Locker Paid', 'Locker Remaining', '# Locker')
+    if (type === 'combined') {
+      head.push('Total Penalty', 'Total Paid', 'Total Remaining')
+    }
+
+    const body = data.rows.map((r, i) => {
+      const u = r.user || {}
+      const row: any[] = [
+        i + 1,
+        u.full_name || 'Unknown',
+        u.account_id || '—',
+        u.user_type || '—'
+      ]
+      if (showBook) {
+        row.push(
+          fmt(r.book.total),
+          fmt(r.book.paid),
+          fmt(r.book.remaining),
+          r.book.count
+        )
+      }
+      if (showLocker) {
+        row.push(
+          fmt(r.locker.total),
+          fmt(r.locker.paid),
+          fmt(r.locker.remaining),
+          r.locker.count
+        )
+      }
+      if (type === 'combined') {
+        row.push(
+          fmt(r.combined.total),
+          fmt(r.combined.paid),
+          fmt(r.combined.remaining)
+        )
+      }
+      return row
     })
-    
-    yPosition = (this.doc as any).lastAutoTable.finalY + 10
-    
-    // Borrowing History Section
-    if (data.borrowing?.history && data.borrowing.history.length > 0) {
-      if (yPosition > pageHeight - 80) {
-        this.doc.addPage()
-        yPosition = 20
+
+    autoTable(this.doc, {
+      startY: 46,
+      head: [head],
+      body: body.length ? body : [['—', 'No borrowers with fines in this range', '', '', '', '', '', '', '', '', '', '', ''].slice(0, head.length)],
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 1.5, halign: 'left' },
+      headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center' },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 8 },
+        1: { halign: 'left' },
+        2: { halign: 'left', cellWidth: 24 },
+        3: { halign: 'center', cellWidth: 18 }
+      },
+      didParseCell: (data) => {
+        // Right-align the currency columns.
+        const isCurrency =
+          (showBook &&
+            [4, 5, 6].includes(data.column.index)) ||
+          (showLocker &&
+            [showBook ? 8 : 4, showBook ? 9 : 5, showBook ? 10 : 6].includes(
+              data.column.index
+            ))
+        if (isCurrency && data.section === 'body') {
+          data.cell.styles.halign = 'right'
+        }
       }
-      
-      this.doc.setFontSize(12)
-      this.doc.setFont('helvetica', 'bold')
-      this.doc.text('Borrowing History', 20, yPosition)
-      yPosition += 8
-      
-      const borrowingTableData = data.borrowing.history.map((item: any) => [
-        item.book.title,
-        new Date(item.borrow_date).toLocaleDateString(),
-        new Date(item.due_date).toLocaleDateString(),
-        item.return_date ? new Date(item.return_date).toLocaleDateString() : 'Not returned',
-        item.status
-      ])
-      
-      autoTable(this.doc, {
-        startY: yPosition,
-        head: [['Book Title', 'Borrow Date', 'Due Date', 'Return Date', 'Status']],
-        body: borrowingTableData,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [59, 130, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 9
-        },
-        bodyStyles: {
-          fontSize: 8
-        },
-        columnStyles: {
-          0: { cellWidth: 60 },
-          1: { cellWidth: 30 },
-          2: { cellWidth: 30 },
-          3: { cellWidth: 30 },
-          4: { cellWidth: 25 }
-        },
-        margin: { left: 20, right: 20 }
-      })
-      
-      yPosition = (this.doc as any).lastAutoTable.finalY + 10
+    })
+
+    // Summary line at the bottom of the table
+    const finalY = (this.doc as any).lastAutoTable.finalY + 8
+    const grand = data.grand || {
+      total: data.rows.reduce((s, r) => s + r.combined.total, 0),
+      paid: data.rows.reduce((s, r) => s + r.combined.paid, 0),
+      remaining: data.rows.reduce((s, r) => s + r.combined.remaining, 0),
+      borrower_count: data.rows.length,
+      settlement_count: data.rows.reduce((s, r) => s + r.combined.count, 0)
     }
-    
-    // Penalties History Section
-    if (data.penalties?.history && data.penalties.history.length > 0) {
-      if (yPosition > pageHeight - 80) {
-        this.doc.addPage()
-        yPosition = 20
-      }
-      
-      this.doc.setFontSize(12)
+    this.doc.setFontSize(8)
+    this.doc.setFont('helvetica', 'bold')
+    this.doc.text('Grand Totals', 20, finalY)
+    this.doc.setFont('helvetica', 'normal')
+    this.doc.text(
+      `Total Penalty: ${fmt(grand.total)}    Total Paid: ${fmt(grand.paid)}    Remaining: ${fmt(grand.remaining)}    Borrowers: ${grand.borrower_count}    Settlements: ${grand.settlement_count}`,
+      20,
+      finalY + 6
+    )
+
+    // Signature
+    if (preparedBy) {
+      this.doc.setFontSize(8)
+      this.doc.text('Prepared by:', pageWidth - 70, finalY)
       this.doc.setFont('helvetica', 'bold')
-      this.doc.text('Penalty History', 20, yPosition)
-      yPosition += 8
-      
-      const penaltyTableData = data.penalties.history.map((penalty: any) => [
-        new Date(penalty.created_at).toLocaleDateString(),
-        penalty.penalty_type,
-        `PHP ${penalty.amount.toFixed(2)}`,
-        `PHP ${penalty.amount_paid.toFixed(2)}`,
-        `PHP ${penalty.balance.toFixed(2)}`,
-        penalty.reason || 'N/A',
-        penalty.status
-      ])
-      
-      autoTable(this.doc, {
-        startY: yPosition,
-        head: [['Date', 'Type', 'Amount', 'Paid', 'Balance', 'Reason', 'Status']],
-        body: penaltyTableData,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [59, 130, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 8
-        },
-        bodyStyles: {
-          fontSize: 7
-        },
-        columnStyles: {
-          0: { cellWidth: 25 },
-          1: { cellWidth: 25 },
-          2: { cellWidth: 25, halign: 'right' },
-          3: { cellWidth: 25, halign: 'right' },
-          4: { cellWidth: 25, halign: 'right' },
-          5: { cellWidth: 30 },
-          6: { cellWidth: 20 }
-        },
-        margin: { left: 20, right: 20 }
-      })
-      
-      yPosition = (this.doc as any).lastAutoTable.finalY + 10
-    }
-    
-    // Visit History Section
-    if (data.visits?.history && data.visits.history.length > 0) {
-      if (yPosition > pageHeight - 80) {
-        this.doc.addPage()
-        yPosition = 20
-      }
-      
-      this.doc.setFontSize(12)
-      this.doc.setFont('helvetica', 'bold')
-      this.doc.text('Visit History', 20, yPosition)
-      yPosition += 8
-      
-      const visitTableData = data.visits.history.map((visit: any) => [
-        new Date(visit.entry_time).toLocaleString(),
-        visit.exit_time ? new Date(visit.exit_time).toLocaleString() : 'Still Inside',
-        visit.duration || 'N/A',
-        visit.purpose || 'General'
-      ])
-      
-      autoTable(this.doc, {
-        startY: yPosition,
-        head: [['Entry Time', 'Exit Time', 'Duration', 'Purpose']],
-        body: visitTableData,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [59, 130, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 9
-        },
-        bodyStyles: {
-          fontSize: 8
-        },
-        columnStyles: {
-          0: { cellWidth: 50 },
-          1: { cellWidth: 50 },
-          2: { cellWidth: 30 },
-          3: { cellWidth: 45 }
-        },
-        margin: { left: 20, right: 20 }
-      })
-      
-      yPosition = (this.doc as any).lastAutoTable.finalY + 10
-    }
-    
-    // Locker Usage History Section
-    if (data.locker_usage?.history && data.locker_usage.history.length > 0) {
-      if (yPosition > pageHeight - 80) {
-        this.doc.addPage()
-        yPosition = 20
-      }
-      
-      this.doc.setFontSize(12)
-      this.doc.setFont('helvetica', 'bold')
-      this.doc.text('Locker Usage History', 20, yPosition)
-      yPosition += 8
-      
-      const lockerTableData = data.locker_usage.history.map((rental: any) => [
-        rental.locker.locker_number,
-        new Date(rental.start_date).toLocaleDateString(),
-        rental.end_date ? new Date(rental.end_date).toLocaleDateString() : 'Active',
-        rental.status,
-        rental.locker.rental_fee ? `PHP ${rental.locker.rental_fee.toFixed(2)}` : 'N/A'
-      ])
-      
-      autoTable(this.doc, {
-        startY: yPosition,
-        head: [['Locker Number', 'Start Date', 'End Date', 'Status', 'Fee']],
-        body: lockerTableData,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [59, 130, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 9
-        },
-        bodyStyles: {
-          fontSize: 8
-        },
-        columnStyles: {
-          0: { cellWidth: 35 },
-          1: { cellWidth: 35 },
-          2: { cellWidth: 35 },
-          3: { cellWidth: 35 },
-          4: { cellWidth: 35, halign: 'right' }
-        },
-        margin: { left: 20, right: 20 }
-      })
-    }
-    
-    // Add footer with prepared by
-    const finalY = (this.doc as any).lastAutoTable?.finalY || yPosition
-    const footerY = finalY + 15
-    
-    if (footerY + 15 > pageHeight - 20) {
-      this.doc.addPage()
-      const newPageY = 20
-      if (preparedBy) {
-        this.doc.setFontSize(9)
-        this.doc.setFont('helvetica', 'normal')
-        this.doc.text('Prepared by:', 20, newPageY)
-        this.doc.setFont('helvetica', 'bold')
-        this.doc.text(preparedBy, 20, newPageY + 7)
-        this.doc.setFont('helvetica', 'normal')
-        this.doc.line(20, newPageY + 9, 70, newPageY + 9)
-      }
-    } else {
-      if (preparedBy) {
-        this.doc.setFontSize(9)
-        this.doc.setFont('helvetica', 'normal')
-        this.doc.text('Prepared by:', 20, footerY)
-        this.doc.setFont('helvetica', 'bold')
-        this.doc.text(preparedBy, 20, footerY + 7)
-        this.doc.setFont('helvetica', 'normal')
-        this.doc.line(20, footerY + 9, 70, footerY + 9)
-      }
+      this.doc.text(preparedBy, pageWidth - 70, finalY + 6)
     }
   }
 

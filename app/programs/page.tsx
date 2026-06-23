@@ -171,14 +171,14 @@ export default function ProgramsPage() {
           <p className="text-gray-600 mt-1">Manage academic programs</p>
         </div>
         <Button 
-          className="bg-blue-600 hover:bg-blue-700 text-white"
+          className="bg-blue-600 hover:bg-blue-700 text-white py-5 px-4"
           onClick={() => router.push('/programs/add')}
         >
           <i className="fas fa-plus mr-2" />
           Add Program
         </Button>
       </div>
-
+    {/* on the add new book, on the select category, and select section, can you add a clickable option like add new category, or add new section? and when clicked will directly open a modal and add the section and category, and will show immediately after adding on the select option, also, on the add new book header, add quick actions to add section, add category, material type, subtype, interest level, etc. and when clicked, will display a 2 column modal, on left is the input, and on the right are the existing options, and when i added a new option, will show there immediately. also, on the lookup isbn, when i click the use these data, close the modal*/}
       {/* Filters */}
       <Card>
         <CardHeader>
@@ -310,6 +310,7 @@ export default function ProgramsPage() {
                             variant="outline"
                             onClick={() => router.push(`/programs/${program.program_id}`)}
                             title="See Details"
+                            className='bg-primary-600 hover:bg-primary-700 text-white py-4 px-2'
                           >
                             <i className="fas fa-eye mr-1" />
                             <span className="text-xs">Details</span>
@@ -317,6 +318,7 @@ export default function ProgramsPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className='bg-orange-500 hover:bg-orange-600 py-4 text-white px-2'
                             onClick={() => router.push(`/programs/${program.program_id}/edit`)}
                             title="Edit Program"
                           >

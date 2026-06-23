@@ -314,11 +314,12 @@ export default function EditDepartmentPage() {
                   type="button"
                   variant="outline" 
                   onClick={() => router.back()}
+                  className='bg-gray-200 px-4 py-5 hover:bg-gray-300'
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700'>
                   {submitting ? 'Updating...' : 'Update Department'}
                 </Button>
               </div>

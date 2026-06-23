@@ -246,13 +246,14 @@ export default function AddProgramPage() {
               <div className="flex justify-end space-x-3 pt-4">
                 <Button 
                   type="button"
-                  variant="outline" 
+                  variant="outline"
+                  className='bg-gray-200 px-4 py-5 hover:bg-gray-300' 
                   onClick={() => router.back()}
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className='bg-primary-600 hover:bg-primary-700 px-4 py-5 text-white'>
                   {submitting ? 'Creating...' : 'Create Program'}
                 </Button>
               </div>

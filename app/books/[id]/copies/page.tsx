@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -49,7 +50,9 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
   const [showInitializeModal, setShowInitializeModal] = useState(false)
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [showConditionModal, setShowConditionModal] = useState(false)
+  const [showLocationModal, setShowLocationModal] = useState(false)
   const [showArchiveModal, setShowArchiveModal] = useState(false)
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false)
   const [selectedCopy, setSelectedCopy] = useState<BookCopy | null>(null)
   const [addingCopies, setAddingCopies] = useState(false)
   const [authReady, setAuthReady] = useState(false)
@@ -57,7 +60,6 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
   
   // Bulk selection state
   const [selectedCopyIds, setSelectedCopyIds] = useState<number[]>([])
-  const [bulkStatus, setBulkStatus] = useState<string>('AVAILABLE')
   
   // Form state for adding copies
   const [numberOfCopies, setNumberOfCopies] = useState(1)
@@ -247,7 +249,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  const handleBulkStatusUpdate = async () => {
+  const handleBulkStatusUpdate = async (newStatus: string) => {
     if (selectedCopyIds.length === 0) {
       await notify.error('Error', 'No copies selected')
       return
@@ -260,14 +262,43 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
         credentials: 'include',
         body: JSON.stringify({
           copyIds: selectedCopyIds,
-          status: bulkStatus
+          status: newStatus
         })
       })
       
       if (response.ok) {
-        await notify.success('Success', `Updated ${selectedCopyIds.length} cop${selectedCopyIds.length > 1 ? 'ies' : 'y'}`)
+        await notify.success('Success', `Updated status of ${selectedCopyIds.length} cop${selectedCopyIds.length > 1 ? 'ies' : 'y'}`)
         setSelectedCopyIds([])
-        setBulkStatus('AVAILABLE')
+        fetchBookAndCopies()
+      } else {
+        const errorData = await response.json()
+        await notify.error('Error', errorData.error || 'Failed to update copies')
+      }
+    } catch (error) {
+      await notify.error('Error', 'Network error occurred')
+    }
+  }
+
+  const handleBulkLocationUpdate = async (newLocation: string) => {
+    if (selectedCopyIds.length === 0) {
+      await notify.error('Error', 'No copies selected')
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/books/${bookId}/copies/bulk-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          copyIds: selectedCopyIds,
+          location: newLocation
+        })
+      })
+      
+      if (response.ok) {
+        await notify.success('Success', `Updated location of ${selectedCopyIds.length} cop${selectedCopyIds.length > 1 ? 'ies' : 'y'}`)
+        setSelectedCopyIds([])
         fetchBookAndCopies()
       } else {
         const errorData = await response.json()
@@ -293,26 +324,53 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
     if (!confirmed) return
 
     try {
-      const promises = selectedCopyIds.map(copyId =>
-        fetch(`/api/books/${bookId}/copies/${copyId}`, {
-          method: 'DELETE',
-          credentials: 'include'
+      // Use the bulk-update endpoint so the operation is
+      // atomic and updates the book totals in one shot.
+      const response = await fetch(`/api/books/${bookId}/copies/bulk-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          copyIds: selectedCopyIds,
+          archive: true
         })
-      )
-      
-      const responses = await Promise.all(promises)
-      const successful = responses.filter(r => r.ok).length
-      
-      if (successful === selectedCopyIds.length) {
-        await notify.success('Success', `Archived ${successful} cop${successful > 1 ? 'ies' : 'y'}`)
+      })
+
+      const data = response.ok ? await response.json() : null
+      if (response.ok) {
+        await notify.success('Success', `Archived ${data?.data?.updatedCount ?? selectedCopyIds.length} cop${selectedCopyIds.length > 1 ? 'ies' : 'y'}`)
+        setSelectedCopyIds([])
+        fetchBookAndCopies()
       } else {
-        await notify.warning('Partial Success', `Archived ${successful} of ${selectedCopyIds.length} copies`)
+        const errorData = data || {}
+        await notify.error('Error', errorData.error || 'Failed to archive copies')
       }
-      
-      setSelectedCopyIds([])
-      fetchBookAndCopies()
     } catch (error) {
-      await notify.error('Error', 'Failed to archive copies')
+      await notify.error('Error', 'Network error occurred')
+    }
+  }
+
+  // Update a single copy's location
+  const handleUpdateCopyLocation = async (copyId: number, newLocation: string) => {
+    try {
+      const response = await fetch(`/api/books/${bookId}/copies/${copyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ location: newLocation })
+      })
+      
+      if (response.ok) {
+        await notify.success('Success', 'Location updated')
+        setShowLocationModal(false)
+        setSelectedCopy(null)
+        fetchBookAndCopies()
+      } else {
+        const errorData = await response.json()
+        await notify.error('Error', errorData.error || 'Failed to update location')
+      }
+    } catch (error) {
+      await notify.error('Error', 'Network error occurred')
     }
   }
 
@@ -428,7 +486,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
               )}
               <Button
                 onClick={() => setShowAddModal(true)}
-                className="bg-green-600 hover:bg-green-700"
+                className="bg-primary-600 hover:bg-primary-700 text-white py-5 px-4"
               >
                 <i className="fas fa-plus mr-2"></i>
                 Add Stock
@@ -480,7 +538,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
         {/* Copies Table */}
         <Card>
           <CardHeader>
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
               <CardTitle>Book Copies ({filteredCopies.length}/{copies.length})</CardTitle>
               <div className="w-full md:w-64">
                 <Input
@@ -488,50 +546,40 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                   placeholder="Search copies (accession, barcode, status, location...)"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-9"
+                  className="py-2"
                 />
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            {/* Bulk Action Toolbar */}
+            {/* Bulk Action Toolbar — keep it tidy: a single
+                "Bulk edit" button opens a modal with all the
+                available operations instead of stacking
+                every action inline. */}
             {selectedCopyIds.length > 0 && (
-              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-4">
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <i className="fas fa-check-square text-blue-600"></i>
                   <span className="text-sm font-medium text-blue-900">
                     {selectedCopyIds.length} cop{selectedCopyIds.length > 1 ? 'ies' : 'y'} selected
                   </span>
-                  <select
-                    value={bulkStatus}
-                    onChange={(e) => setBulkStatus(e.target.value)}
-                    className="text-sm border border-blue-300 rounded px-3 py-1.5"
-                  >
-                    <option value="AVAILABLE">Available</option>
-                    <option value="LOST">Lost</option>
-                    <option value="DAMAGED">Damaged</option>
-                    <option value="MAINTENANCE">Maintenance</option>
-                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
-                    onClick={handleBulkStatusUpdate}
+                    onClick={() => setShowBulkEditModal(true)}
                     className="bg-blue-600 hover:bg-blue-700 text-sm py-1.5"
                   >
-                    Update Status
+                    <i className="fas fa-pen-to-square mr-1.5"></i>
+                    Bulk edit ({selectedCopyIds.length})
                   </Button>
                   <Button
-                    onClick={handleBulkArchive}
-                    className="bg-red-600 hover:bg-red-700 text-sm py-1.5"
+                    variant="outline"
+                    onClick={() => setSelectedCopyIds([])}
+                    className="text-sm py-1.5"
                   >
-                    <i className="fas fa-archive mr-2"></i>
-                    Archive Selected
+                    Clear
                   </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={() => setSelectedCopyIds([])}
-                  className="text-sm py-1.5"
-                >
-                  Clear Selection
-                </Button>
               </div>
             )}
             
@@ -646,6 +694,16 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                             <button
                               onClick={() => {
                                 setSelectedCopy(copy)
+                                setShowLocationModal(true)
+                              }}
+                              className="inline-flex items-center justify-center w-8 h-8 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
+                              title="Edit Location"
+                            >
+                              <i className="fas fa-map-marker-alt"></i>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedCopy(copy)
                                 setShowArchiveModal(true)
                               }}
                               className="inline-flex items-center justify-center w-8 h-8 text-red-600 hover:bg-red-50 rounded-md transition-colors"
@@ -727,13 +785,14 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                 variant="outline"
                 onClick={() => setShowAddModal(false)}
                 disabled={addingCopies}
+                className='px-4 py-5 bg-gray-200 hover:bg-gray-300'
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleAddCopies}
                 disabled={addingCopies}
-                className="bg-green-600 hover:bg-green-700"
+                className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-5"
               >
                 {addingCopies ? 'Adding...' : `Add ${numberOfCopies} ${numberOfCopies > 1 ? 'Copies' : 'Copy'}`}
               </Button>
@@ -1109,6 +1168,401 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
       )}
+
+      {/* Edit Location Modal (single copy) */}
+      {showLocationModal && selectedCopy && (
+        <LocationEditModal
+          copy={selectedCopy}
+          onClose={() => {
+            setShowLocationModal(false)
+            setSelectedCopy(null)
+          }}
+          onSave={(value) => handleUpdateCopyLocation(selectedCopy.copy_id, value)}
+        />
+      )}
+
+      {/* Bulk Edit Modal — one place to choose status,
+          location, or archive for the selected copies. */}
+      {showBulkEditModal && (
+        <BulkEditModal
+          count={selectedCopyIds.length}
+          copies={copies.filter((c) => selectedCopyIds.includes(c.copy_id))}
+          onClose={() => setShowBulkEditModal(false)}
+          onStatus={(newStatus) => {
+            setShowBulkEditModal(false)
+            handleBulkStatusUpdate(newStatus)
+          }}
+          onLocation={(newLocation) => {
+            setShowBulkEditModal(false)
+            handleBulkLocationUpdate(newLocation)
+          }}
+          onArchive={() => {
+            setShowBulkEditModal(false)
+            handleBulkArchive()
+          }}
+        />
+      )}
     </>
+  )
+}
+
+// ============================================================
+// Location edit modal (single copy)
+// ============================================================
+function LocationEditModal({
+  copy,
+  onClose,
+  onSave
+}: {
+  copy: BookCopy
+  onClose: () => void
+  onSave: (value: string) => void
+}) {
+  const [value, setValue] = useState(copy.location || '')
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-3 border-b flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <i className="fas fa-map-marker-alt text-emerald-600"></i>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Edit Location
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1"
+            aria-label="Close"
+          >
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div className="p-5 space-y-3">
+          <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm">
+            <p className="text-gray-700">
+              <strong>Accession #:</strong> {copy.accession_number}
+            </p>
+            <p className="text-gray-500 text-xs mt-1">
+              Current: {copy.location || '— no location set —'}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              New location
+            </label>
+            <Input
+              autoFocus
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="e.g., Shelf A-5"
+              maxLength={120}
+            />
+            <p className="text-[11px] text-gray-500 mt-1">
+              Leave blank to clear the location.
+            </p>
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-t bg-gray-50 flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-emerald-600 hover:bg-emerald-700"
+            onClick={() => onSave(value.trim())}
+          >
+            <i className="fas fa-save mr-1.5"></i>
+            Save Location
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Bulk Edit Modal — a single, tidy place to perform any of
+// the three bulk operations. Replaces the old toolbar that
+// stacked status / location / archive buttons inline.
+// ============================================================
+type BulkOp = 'status' | 'location' | 'archive'
+
+function BulkEditModal({
+  count,
+  copies,
+  onClose,
+  onStatus,
+  onLocation,
+  onArchive
+}: {
+  count: number
+  copies: BookCopy[]
+  onClose: () => void
+  onStatus: (newStatus: string) => void
+  onLocation: (newLocation: string) => void
+  onArchive: () => void
+}) {
+  const [op, setOp] = useState<BulkOp>('status')
+  const [newStatus, setNewStatus] = useState('AVAILABLE')
+  const [newLocation, setNewLocation] = useState('')
+  const [clearingLocation, setClearingLocation] = useState(false)
+
+  const hasBorrowed = copies.some((c) => c.status === 'BORROWED')
+  const uniqueLocations = Array.from(
+    new Set(
+      copies
+        .map((c) => c.location || '')
+        .filter((l) => l.length > 0)
+    )
+  )
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-3 border-b flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <i className="fas fa-pen-to-square text-blue-600"></i>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Bulk edit {count} cop{count > 1 ? 'ies' : 'y'}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1"
+            aria-label="Close"
+          >
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-800">
+            <i className="fas fa-info-circle mr-1.5"></i>
+            Choose <strong>one</strong> operation, then click Apply. Each
+            operation runs in a single transaction.
+          </div>
+
+          {/* Operation picker */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <OpButton
+              active={op === 'status'}
+              icon="fa-sync-alt"
+              color="blue"
+              label="Status"
+              sublabel="Mark as Available / Lost / etc."
+              onClick={() => setOp('status')}
+            />
+            <OpButton
+              active={op === 'location'}
+              icon="fa-map-marker-alt"
+              color="emerald"
+              label="Location"
+              sublabel="Re-shelve or clear"
+              onClick={() => setOp('location')}
+            />
+            <OpButton
+              active={op === 'archive'}
+              icon="fa-archive"
+              color="red"
+              label="Archive"
+              sublabel="Soft-delete selected"
+              onClick={() => setOp('archive')}
+              disabled={hasBorrowed}
+              disabledReason={hasBorrowed ? 'Contains borrowed copies' : undefined}
+            />
+          </div>
+
+          {/* Operation body */}
+          {op === 'status' && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                New status
+              </label>
+              <select
+                value={newStatus}
+                onChange={(e) => setNewStatus(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="AVAILABLE">Available</option>
+                <option value="LOST">Lost</option>
+                <option value="DAMAGED">Damaged</option>
+                <option value="MAINTENANCE">Maintenance</option>
+              </select>
+              {hasBorrowed && (
+                <p className="text-xs text-amber-700">
+                  <i className="fas fa-exclamation-triangle mr-1"></i>
+                  Borrowed copies in the selection will be skipped automatically.
+                </p>
+              )}
+            </div>
+          )}
+
+          {op === 'location' && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                New location
+              </label>
+              <Input
+                value={clearingLocation ? '' : newLocation}
+                onChange={(e) => {
+                  setClearingLocation(false)
+                  setNewLocation(e.target.value)
+                }}
+                placeholder="e.g., Shelf A-5"
+                maxLength={120}
+                disabled={clearingLocation}
+              />
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={clearingLocation}
+                  onChange={(e) => {
+                    setClearingLocation(e.target.checked)
+                    if (e.target.checked) setNewLocation('')
+                  }}
+                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                Clear existing location
+              </label>
+              {uniqueLocations.length > 0 && (
+                <p className="text-[11px] text-gray-500">
+                  Current locations in selection:{' '}
+                  {uniqueLocations.slice(0, 4).join(' · ')}
+                  {uniqueLocations.length > 4 && '…'}
+                </p>
+              )}
+            </div>
+          )}
+
+          {op === 'archive' && (
+            <div className="space-y-2">
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-800">
+                <i className="fas fa-exclamation-triangle mr-1.5"></i>
+                Archiving removes the copies from the active list. They
+                can be restored from the Archived Copies view.
+              </div>
+              {hasBorrowed && (
+                <p className="text-xs text-amber-700">
+                  <i className="fas fa-exclamation-triangle mr-1"></i>
+                  Borrowed copies will be skipped automatically.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t bg-gray-50 flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          {op === 'status' && (
+            <Button
+              className="bg-blue-600 hover:bg-blue-700"
+              onClick={() => onStatus(newStatus)}
+              disabled={!newStatus}
+            >
+              <i className="fas fa-check mr-1.5"></i>
+              Apply to {count}
+            </Button>
+          )}
+          {op === 'location' && (
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={() => onLocation(clearingLocation ? '' : newLocation)}
+              disabled={!clearingLocation && !newLocation.trim()}
+            >
+              <i className="fas fa-check mr-1.5"></i>
+              Apply to {count}
+            </Button>
+          )}
+          {op === 'archive' && (
+            <Button
+              className="bg-red-600 hover:bg-red-700"
+              onClick={onArchive}
+            >
+              <i className="fas fa-archive mr-1.5"></i>
+              Archive {count}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OpButton({
+  active,
+  icon,
+  color,
+  label,
+  sublabel,
+  onClick,
+  disabled,
+  disabledReason
+}: {
+  active: boolean
+  icon: string
+  color: 'blue' | 'emerald' | 'red'
+  label: string
+  sublabel: string
+  onClick: () => void
+  disabled?: boolean
+  disabledReason?: string
+}) {
+  const colorMap: Record<string, { ring: string; bg: string; text: string; border: string }> = {
+    blue: {
+      ring: 'ring-blue-500',
+      bg: 'bg-blue-50',
+      text: 'text-blue-800',
+      border: 'border-blue-500'
+    },
+    emerald: {
+      ring: 'ring-emerald-500',
+      bg: 'bg-emerald-50',
+      text: 'text-emerald-800',
+      border: 'border-emerald-500'
+    },
+    red: {
+      ring: 'ring-red-500',
+      bg: 'bg-red-50',
+      text: 'text-red-800',
+      border: 'border-red-500'
+    }
+  }
+  const c = colorMap[color]
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
+      className={`flex flex-col items-start text-left p-3 rounded-lg border-2 transition-colors ${
+        active
+          ? `${c.border} ${c.bg}`
+          : 'border-gray-200 hover:border-gray-300 bg-white'
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <span className={`flex items-center gap-2 font-semibold text-sm ${active ? c.text : 'text-gray-700'}`}>
+        <i className={`fas ${icon}`}></i>
+        {label}
+      </span>
+      <span className="text-[11px] text-gray-500 mt-0.5 leading-tight">
+        {sublabel}
+      </span>
+    </button>
   )
 }

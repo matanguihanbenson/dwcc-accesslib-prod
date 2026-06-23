@@ -122,7 +122,7 @@ export default function CategoryViewPage({ params }: { params: Promise<{ id: str
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         <div className="max-w-5xl mx-auto">
           <Card>
             <CardHeader>

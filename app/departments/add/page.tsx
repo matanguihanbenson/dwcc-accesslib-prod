@@ -192,12 +192,13 @@ export default function AddDepartmentPage() {
                 <Button 
                   type="button"
                   variant="outline" 
+                  className='bg-gray-200 hover:bg-gray-300 px-4 py-5'
                   onClick={() => router.back()}
                   disabled={submitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className='bg-primary-600 hover:bg-primary-700 px-4 py-5 text-white'>
                   {submitting ? 'Creating...' : 'Create Department'}
                 </Button>
               </div>

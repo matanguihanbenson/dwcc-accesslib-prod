@@ -8,10 +8,13 @@ interface PublicHeaderProps {
   subtitle?: string
   showBrowseLink?: boolean
 }
+{/*  */}
 
 export function PublicHeader({ showSubtitle = false, subtitle, showBrowseLink = false }: PublicHeaderProps) {
   const { data: session, status } = useSession()
-
+  /*
+    
+  */
   return (
     <header className="bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

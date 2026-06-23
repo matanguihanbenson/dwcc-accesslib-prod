@@ -42,12 +42,112 @@ const buildProtectedRoutes = (): RoutePermission[] => {
 
 const protectedRoutes: RoutePermission[] = buildProtectedRoutes()
 
-const publicRoutes = ['/login', '/api/auth', '/', '/browse', '/search', '/about', '/contact']
+const publicRoutes = [
+  '/login',
+  '/api/auth',
+  '/',
+  '/browse',
+  '/search',
+  '/about',
+  '/contact',
+  // /setup is publicly accessible so the very first
+  // SUPER_ADMIN can be created before any account exists.
+  // The /setup page itself checks /api/setup/status on
+  // mount and redirects to /login when setup is already
+  // complete, so the route is "self-locking".
+  '/setup'
+]
+
+// Routes that bypass the setup-wizard redirect so the user can
+// actually reach /setup, /login, etc. when the system has no
+// SUPER_ADMIN yet.
+const setupBypassRoutes = [
+  '/setup',
+  '/login',
+  '/api/setup',
+  '/api/auth',
+  '/_next',
+  '/favicon.ico',
+  '/public'
+]
+
+/**
+ * Cached "is the system set up?" check used by the setup
+ * redirect below. Edge-runtime safe (no Prisma) — the actual
+ * DB count is fetched by /api/setup/status, which caches the
+ * result server-side for ~30s.
+ */
+interface SetupCacheEntry {
+  setupRequired: boolean
+  expiresAt: number
+}
+let setupCache: SetupCacheEntry | null = null
+const SETUP_CACHE_TTL_MS = 15_000
+
+async function checkSetupRequired(originUrl: string): Promise<boolean> {
+  const now = Date.now()
+  if (setupCache && setupCache.expiresAt > now) {
+    return setupCache.setupRequired
+  }
+  try {
+    // Call our own /api/setup/status from the middleware.
+    // Origin URL is the request's own host so this stays
+    // internal and works in any deployment.
+    const statusUrl = new URL('/api/setup/status', originUrl)
+    const response = await fetch(statusUrl, {
+      // Edge runtimes forbid keep-alive; this is also the
+      // default but being explicit avoids surprises.
+      cache: 'no-store',
+      headers: { accept: 'application/json' }
+    })
+    if (!response.ok) {
+      // If the status endpoint is unreachable we err on the
+      // side of "already set up" so the user isn't trapped
+      // in a redirect loop.
+      return false
+    }
+    const data = (await response.json()) as { setupRequired?: boolean }
+    const setupRequired = data.setupRequired === true
+    setupCache = { setupRequired, expiresAt: now + SETUP_CACHE_TTL_MS }
+    return setupRequired
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Build the /setup redirect URL with the SETUP_TOKEN. The
+ * token is only read from process.env (server side), never
+ * from the URL — so an attacker can't trigger a redirect
+ * with an arbitrary token and then have it round-trip back to
+ * the user.
+ */
+function buildSetupRedirect(request: NextRequest): URL {
+  const url = new URL('/setup', request.url)
+  const setupToken = process.env.SETUP_TOKEN
+  if (setupToken && setupToken.length > 0) {
+    url.searchParams.set('token', setupToken)
+  }
+  return url
+}
 
 export async function authMiddleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // If user is authenticated and visits the login page, send them to dashboard
+  // 1. First-time setup wizard: if no SUPER_ADMIN exists yet,
+  //    force every non-bypassed request to /setup. This runs
+  //    BEFORE the auth check so an unauthenticated user can
+  //    still complete the initial setup.
+  if (!setupBypassRoutes.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+    const setupRequired = await checkSetupRequired(request.url)
+    if (setupRequired) {
+      return NextResponse.redirect(buildSetupRedirect(request))
+    }
+  }
+
+  // 2. Setup is done (or the user is on /setup itself). From
+  //    here on, behave as before: bounce /login -> /dashboard
+  //    when authenticated, and gate every other route by role.
   if (pathname.startsWith('/login')) {
     try {
       const token = await getToken({
@@ -63,7 +163,7 @@ export async function authMiddleware(request: NextRequest) {
     }
     return NextResponse.next()
   }
-  
+
   // Allow public routes - no authentication required
   if (publicRoutes.some(route => pathname === route || pathname.startsWith(route + '/'))) {
     return NextResponse.next()
@@ -73,6 +173,14 @@ export async function authMiddleware(request: NextRequest) {
   if (pathname.match(/^\/books\/\d+$/)) {
     return NextResponse.next()
   }
+
+  // /setup is intentionally NOT gated by the public-route
+  // allow above. The page renders the wizard only when no
+  // SUPER_ADMIN exists yet; once one does, the page itself
+  // redirects to /login on mount (and the create endpoint
+  // also rejects any further POSTs). That way the same URL
+  // serves both "needs setup" and "already done" without
+  // needing the middleware to flip its behaviour per request.
 
   try {
     const token = await getToken({

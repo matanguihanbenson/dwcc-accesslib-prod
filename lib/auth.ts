@@ -2,7 +2,7 @@ import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { prisma } from "./prisma"
-import { UserRole, AuthUser } from "@/types"
+import { UserRole, AuthUser, Campus } from "@/types"
 import { AuditService } from "./services/audit.service"
 import { AppError, AccountLockedError, AuthenticationError } from "./errors"
 import config from "./config"
@@ -97,7 +97,11 @@ export const authOptions: NextAuthOptions = {
             username: userAccount.username,
             role: userAccount.role as UserRole,
             userType: userAccount.user.user_type,
-            accountId: userAccount.user.account_id
+            accountId: userAccount.user.account_id,
+            // STAFF accounts carry their current campus designation so
+            // the rest of the app can scope entry-log reads to that campus.
+            // ADMIN / SUPER_ADMIN have NULL (no campus restriction).
+            campus: (userAccount.campus as Campus | null | undefined) ?? null
           }
         } catch (error) {
           
@@ -126,6 +130,7 @@ export const authOptions: NextAuthOptions = {
         token.userType = user.userType
         token.username = user.username
         token.accountId = user.accountId
+        token.campus = user.campus ?? null
         token.userId = parseInt(user.id) // This is UserAccount.id (for audit logs)
         token.realUserId = user.realUserId ? parseInt(user.realUserId) : undefined // User.user_id (for notifications)
       } else if (token.userId) {
@@ -157,6 +162,9 @@ export const authOptions: NextAuthOptions = {
           token.userType = userAccount.user.user_type
           token.username = userAccount.username
           token.accountId = userAccount.user.account_id
+          // Refresh campus on every token refresh so re-designations
+          // take effect on the next request without forcing a re-login.
+          token.campus = userAccount.campus
           token.realUserId = userAccount.user.user_id
         } catch (error) {
           return {}
@@ -173,6 +181,7 @@ export const authOptions: NextAuthOptions = {
         session.user.userType = token.userType as string
         session.user.username = token.username as string
         session.user.accountId = token.accountId as string
+        session.user.campus = (token.campus as Campus | null | undefined) ?? null
       }
       return session
     },

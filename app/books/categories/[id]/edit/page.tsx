@@ -175,7 +175,7 @@ export default function EditCategoryPage({ params }: { params: Promise<{ id: str
         <div className="max-w-5xl mx-auto">
           <Card>
             <CardHeader>
-              <CardTitle>Edit Category Information</CardTitle>
+              <CardTitle className='mb-4'>Edit Category Information</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
@@ -218,10 +218,10 @@ export default function EditCategoryPage({ params }: { params: Promise<{ id: str
                     <span className="text-red-500">*</span> Required fields
                   </div>
                   <div className="flex gap-3">
-                    <Button type="button" variant="outline" onClick={() => router.back()} disabled={saving}>
+                    <Button type="button" className='bg-gray-200 hover:bg-gray-300 py-5 px-4' variant="outline" onClick={() => router.back()} disabled={saving}>
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={saving}>
+                    <Button type="submit" disabled={saving} className='bg-primary-600 hover:bg-primary-700 text-white px-4 py-5'>
                       {saving ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>

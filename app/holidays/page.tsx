@@ -255,7 +255,7 @@ export default function HolidaysPage() {
               <Button
                 variant="outline"
                 onClick={handleApplyRecurring}
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700"
+                className="bg-primary-50 hover:bg-primary-200 text-primary-600 py-5 px-4"
               >
                 <i className="fas fa-sync mr-2"></i>
                 Apply Recurring to {filterYear}
@@ -265,7 +265,7 @@ export default function HolidaysPage() {
                   resetForm()
                   setShowModal(true)
                 }}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-primary-600 hover:bg-blue-700 px-4 py-5 text-white"
               >
                 <i className="fas fa-plus mr-2"></i>
                 Add Holiday
@@ -276,7 +276,7 @@ export default function HolidaysPage() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         {/* Filter */}
         <Card className="mb-6">
           <CardContent className="pt-6">
@@ -427,18 +427,19 @@ export default function HolidaysPage() {
                             <div className="flex items-center justify-end space-x-3">
                               <button
                                 onClick={() => handleEdit(holiday)}
-                                className="text-blue-600 hover:text-blue-900"
+                                className="bg-primary-600 hover:bg-primary-700 text-white px-3 rounded-md py-2"
                                 title="Edit"
                               >
                                 <i className="fas fa-edit"></i>
                               </button>
                               <button
                                 onClick={() => setDeleteConfirm(holiday.holiday_id)}
-                                className="text-red-600 hover:text-red-900"
+                                className="border-2 rounded-md !border-red-600 px-3 hover:text-red-600 py-2"
                                 title="Delete"
                               >
                                 <i className="fas fa-trash"></i>
                               </button>
+                              {/*  on the library users page, on the archive modal, it is stuck on loading  */}
                             </div>
                           )}
                         </td>

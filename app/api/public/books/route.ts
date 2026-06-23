@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
+// Always re-run this handler on every request so newly
+// added books show up immediately on the public /browse
+// page (otherwise the route could be cached by the CDN /
+// Next.js data cache and the catalogue would look stale).
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const search = searchParams.get("search") || ""
@@ -161,6 +168,7 @@ export async function GET(request: NextRequest) {
         copies_total: true,
         description: true,
         summary: true,
+        notes: true,
         material_type: true,
         location: true,
         language: true,
@@ -189,26 +197,34 @@ export async function GET(request: NextRequest) {
     })
 
     // Map to expected format
-    const books = booksRaw.map(book => ({
-      book_id: book.book_id,
-      title: book.title,
-      subtitle: book.subtitle,
-      book_author: book.authors.map(a => a.name).join(', ') || 'Unknown Author',
-      authors: book.authors.map(a => a.name),
-      category: book.category?.name || 'Uncategorized',
-      section: book.section?.name,
-      status: book.copies_available === 0 ? 'UNAVAILABLE' : book.status,
-      isbn: book.isbn,
-      publisher: book.publisher,
-      year_published: book.year_published,
-      copies_available: book.copies_available,
-      copies_total: book.copies_total,
-      description: book.description,
-      summary: book.summary,
-      material_type: book.material_type,
-      location: book.location,
-      language: book.language
-    }))
+    const books = booksRaw.map(book => {
+      // Fall back to the first Summary-type note if the
+      // dedicated `summary` column is empty. This way
+      // books added before the summary-column sync still
+      // surface a description on the public /browse page.
+      let summary = book.summary || ''
+      if (!summary) summary = extractSummaryFromNotes(book.notes)
+      return {
+        book_id: book.book_id,
+        title: book.title,
+        subtitle: book.subtitle,
+        book_author: book.authors.map(a => a.name).join(', ') || 'Unknown Author',
+        authors: book.authors.map(a => a.name),
+        category: book.category?.name || 'Uncategorized',
+        section: book.section?.name,
+        status: book.copies_available === 0 ? 'UNAVAILABLE' : book.status,
+        isbn: book.isbn,
+        publisher: book.publisher,
+        year_published: book.year_published,
+        copies_available: book.copies_available,
+        copies_total: book.copies_total,
+        description: book.description,
+        summary,
+        material_type: book.material_type,
+        location: book.location,
+        language: book.language
+      }
+    })
 
     // Get total count for pagination
     const totalCount = await prisma.book.count({
@@ -315,6 +331,15 @@ export async function GET(request: NextRequest) {
         totalPages,
         hasMore
       }
+    }, {
+      // Bypass the Next.js data cache + CDN so newly added
+      // books are visible to the public catalogue on the
+      // very next request.
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     })
 
   } catch (error) {
@@ -328,4 +353,29 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+// Look through the `notes` JSON column (an array of
+// `{ type, content }` entries) for the first note whose
+// type is "Summary" and return its content. Used as a
+// fallback when the dedicated `summary` column is empty.
+function extractSummaryFromNotes(notesJson: any): string {
+  if (!notesJson) return ''
+  let parsed: any
+  if (typeof notesJson === 'string') {
+    try {
+      parsed = JSON.parse(notesJson)
+    } catch {
+      return ''
+    }
+  } else if (Array.isArray(notesJson)) {
+    parsed = notesJson
+  } else {
+    return ''
+  }
+  if (!Array.isArray(parsed)) return ''
+  const summaryNote = parsed.find(
+    (n: any) => n && n.type === 'Summary' && typeof n.content === 'string' && n.content.trim()
+  )
+  return summaryNote ? summaryNote.content.trim() : ''
 }

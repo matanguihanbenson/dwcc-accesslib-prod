@@ -8,6 +8,123 @@ interface StaffViewProps {
   onRefresh: () => void
 }
 
+/**
+ * Strip the campus-aware prefix from a locker number so the grid can
+ * show the short form (e.g. "01" for "LC-01", "LB-01", or the
+ * legacy "L-01"). Returns the input unchanged if no prefix matches.
+ */
+function shortLockerNumber(lockerNumber: string): string {
+  return (lockerNumber || '').replace(/^(LB|LC|L)-/, '')
+}
+
+/**
+ * Resolve a raw user-typed locker input to a matching locker in the
+ * visible (campus-scoped) lockers list. The staff's lockers are
+ * already filtered to their campus server-side, so a Basic Ed
+ * staff sees only LB-XX and a College staff sees only LC-XX.
+ *
+ *   "1"   (Basic Ed)  -> LB-01
+ *   "1"   (College)    -> LC-01
+ *   "051"               -> LB-051 / LC-051
+ *   "L-1"               -> L-01, then campus-aware prefix as fallback
+ *   "L01"               -> L-01, then campus-aware prefix as fallback
+ *   "LC-1" / "lc-1"     -> LC-01  (explicit prefix wins)
+ *   "LB-1" / "lb-1"     -> LB-01
+ *   "lb01" / "LB01"     -> LB-01
+ *
+ * Returns the matching locker (from the visible list) or null.
+ */
+function resolveLockerFromInput(
+  raw: string,
+  visibleLockers: any[],
+  myCampus: 'COLLEGE' | 'BASIC_EDUCATION' | null
+): any | null {
+  if (!raw || !raw.trim()) return null
+  const trimmed = raw.trim().toUpperCase()
+
+  // 1) Exact RFID match (case-insensitive).
+  const byRfid = visibleLockers.find(
+    (l) => l.rfid_code && l.rfid_code.toUpperCase() === trimmed
+  )
+  if (byRfid) return byRfid
+
+  // 2) Exact locker_number match (case-insensitive). Fast path when
+  // the user already typed the canonical name (e.g. "LB-01").
+  const byExact = visibleLockers.find(
+    (l) => (l.locker_number || '').toUpperCase() === trimmed
+  )
+  if (byExact) return byExact
+
+  // 3) Build candidates from the digit pattern. The contract:
+  //
+  //   * Explicit prefixes (LC-, LB-) are honored STRICTLY. Typing
+  //     "lc-1" while a Basic Ed staff will NOT silently fall back
+  //     to LB-01 -- the resolver returns null so the UI can show
+  //     "not in your campus" instead of doing the wrong thing.
+  //
+  //   * The legacy "L-" prefix is treated as a soft default: it
+  //     is tried first, then falls through to the campus-aware
+  //     prefix so old data + new data both work.
+  //
+  //   * Bare digits (no prefix) always fall through to the campus-
+  //     aware prefix so a Basic Ed staff typing "1" finds LB-01
+  //     and a College staff typing "1" finds LC-01.
+  const digits = trimmed.replace(/\D+/g, '')
+  if (!digits) return null
+  const padded = digits.padStart(2, '0')
+  const candidates: string[] = []
+
+  const hasLc = /^LC[-]?\d+$/i.test(trimmed)
+  const hasLb = /^LB[-]?\d+$/i.test(trimmed)
+  const hasLegacyL = !hasLc && !hasLb && /^L[-]?\d+$/i.test(trimmed)
+  const hasBareDigits = /^\d+$/.test(trimmed)
+
+  // Resolve which campus prefix to fall back to for bare digits
+  // and legacy "L-". ADMIN viewers (myCampus = null) get LC by
+  // default unless their visible list is exclusively LB-.
+  const campusPrefix =
+    myCampus === 'BASIC_EDUCATION'
+      ? 'LB'
+      : myCampus === 'COLLEGE'
+      ? 'LC'
+      : visibleLockers.some((l) => (l.locker_number || '').toUpperCase().startsWith('LB-')) &&
+        !visibleLockers.some((l) => (l.locker_number || '').toUpperCase().startsWith('LC-'))
+      ? 'LB'
+      : 'LC'
+
+  if (hasLc) {
+    // Explicit College prefix: do NOT fall back to campus -- if the
+    // College locker doesn't exist in the visible list, the user
+    // gets null (caller can show "not in your campus").
+    candidates.push(`LC-${padded}`)
+  } else if (hasLb) {
+    // Explicit Basic Ed prefix: same strictness as above.
+    candidates.push(`LB-${padded}`)
+  } else if (hasLegacyL) {
+    // Legacy "L-NN" / "LNN": try the literal first, then fall
+    // through to the campus-aware prefix so old-format input still
+    // works against the new naming scheme.
+    candidates.push(`L-${padded}`)
+    candidates.push(`${campusPrefix}-${padded}`)
+  } else if (hasBareDigits) {
+    // Bare digits: always use the campus-aware prefix.
+    candidates.push(`${campusPrefix}-${padded}`)
+  }
+
+  // Dedupe while preserving order, then return the first candidate
+  // that exists in the visible list.
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) continue
+    seen.add(candidate)
+    const found = visibleLockers.find(
+      (l) => (l.locker_number || '').toUpperCase() === candidate
+    )
+    if (found) return found
+  }
+  return null
+}
+
 function StaffView({ lockers, onRefresh }: StaffViewProps) {
   const [isClient, setIsClient] = useState(false)
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -34,14 +151,22 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
     max_locker_extensions: 1
   })
 
+  // The staff's CURRENT campus designation. The lockers list is
+  // already scoped server-side to this campus, so this is purely a
+  // UI affordance: a banner at the top, a campus pill on each
+  // card, and a status filter that says "Showing N lockers from
+  // <campus>".
+  const [myCampus, setMyCampus] = useState<'COLLEGE' | 'BASIC_EDUCATION' | null>(null)
+  const [myCampusLoaded, setMyCampusLoaded] = useState(false)
+
   useEffect(() => {
     setIsClient(true)
-    
+
     // Update time every second for real-time tracking
     const timer = setInterval(() => {
       setCurrentTime(new Date())
     }, 1000)
-    
+
     // Fetch system settings
     const fetchSettings = async () => {
       try {
@@ -65,8 +190,35 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
       }
     }
     fetchSettings()
-    
-    return () => clearInterval(timer)
+
+    // Fetch the staff's campus so the UI can label the scope
+    // (the locker list itself is already filtered server-side).
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/staff/me/campus', {
+          credentials: 'include',
+          headers: { 'Cache-Control': 'no-store' }
+        })
+        if (!res.ok) {
+          if (!cancelled) setMyCampusLoaded(true)
+          return
+        }
+        const body = await res.json()
+        if (cancelled) return
+        if (body?.campus === 'COLLEGE' || body?.campus === 'BASIC_EDUCATION') {
+          setMyCampus(body.campus)
+        }
+        setMyCampusLoaded(true)
+      } catch {
+        if (!cancelled) setMyCampusLoaded(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
   }, [])
 
   // Format time as HH:MM:SS
@@ -272,35 +424,12 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
     }
   }
 
-  // Get locker from scanner input
-  // Smart lookup: tries both RFID and locker-number formats regardless of the
-  // currently selected tab. If the locker has an RFID, the RFID match wins;
-  // otherwise the locker-number match handles unbound lockers (e.g. "L-20").
+  // Get locker from scanner input. Now campus-aware: a Basic Ed staff
+  // typing "1" resolves to LB-01, a College staff typing "1" resolves
+  // to LC-01, and explicit prefixes (LC-, LB-, L-) are honored in
+  // any case.
   const getLockerFromInput = (input: string) => {
-    if (!input.trim()) return null
-
-    const trimmedInput = input.trim().toUpperCase()
-
-    // 1) Try exact RFID match first
-    const byRfid = lockers.find(l => l.rfid_code && l.rfid_code.toUpperCase() === trimmedInput)
-    if (byRfid) return byRfid
-
-    // 2) Try locker-number match in common formats: "L-20", "L20", "20"
-    let lockerNum = ''
-    if (trimmedInput.match(/L-\d+/)) {
-      lockerNum = trimmedInput.match(/L-\d+/)?.[0] || ''
-    } else if (trimmedInput.match(/^\d+$/)) {
-      lockerNum = `L-${trimmedInput.padStart(2, '0')}`
-    } else if (trimmedInput.match(/^L\d+$/)) {
-      const num = trimmedInput.substring(1)
-      lockerNum = `L-${num.padStart(2, '0')}`
-    }
-
-    if (lockerNum) {
-      return lockers.find(l => l.locker_number === lockerNum) || null
-    }
-
-    return null
+    return resolveLockerFromInput(input, lockers, myCampus)
   }
 
   // Auto-switch the locker input mode based on whether the matched locker
@@ -422,30 +551,31 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
 
   return (
     <div className='px-6 py-4'>
+  
       {/* Action Buttons */}
       <div className="flex justify-end gap-3 mb-4">
-        <button 
+        <button
           onClick={() => { setShowReturnModal(true); setScannerInput('') }}
           className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2"
         >
           <i className="fas fa-undo"></i>
           Return Locker
         </button>
-        <button 
+        <button
           onClick={() => { setShowExtendModal(true); setScannerInput('') }}
           className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2"
         >
           <i className="fas fa-clock"></i>
           Extend Time
         </button>
-        <button 
-          onClick={() => { 
-            setShowAssignModal(true); 
-            setUserData(null); 
-            setUserLookupInput(''); 
-            setSelectedLockerNumber(''); 
+        <button
+          onClick={() => {
+            setShowAssignModal(true);
+            setUserData(null);
+            setUserLookupInput('');
+            setSelectedLockerNumber('');
             setLockerKeyInput('');
-            setScannerInput('') 
+            setScannerInput('')
           }}
           className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2"
         >
@@ -542,11 +672,11 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                 {/* Locker Number */}
                 <div className="text-center">
                   <div className={`w-10 h-10 mx-auto rounded-lg flex items-center justify-center text-sm font-bold mb-2 ${
-                    isAvailable ? 'bg-green-600 text-white' 
+                    isAvailable ? 'bg-green-600 text-white'
                       : isOvertime ? 'bg-orange-500 text-white'
                       : 'bg-red-500 text-white'
                   }`}>
-                    {locker.locker_number.replace('L-', '')}
+                    {shortLockerNumber(locker.locker_number)}
                   </div>
                   
                   {/* Time info */}
@@ -676,35 +806,32 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                   type="text"
                   value={lockerKeyInput}
                   onChange={(e) => {
+                    // Keep the raw value in the input (not trimmed / not
+                    // uppercased) so the user can still see what they
+                    // typed while typing. We only normalize for the
+                    // lookup.
+                    setLockerKeyInput(e.target.value)
                     const input = e.target.value.trim().toUpperCase()
-                    setLockerKeyInput(input)
-                    
+
                     if (lockerInputMode === 'rfid') {
                       // RFID mode - find locker by rfid_code
                       const locker = lockers.find(l => l.rfid_code === input)
                       setSelectedLockerNumber(locker?.locker_number || '')
                     } else {
-                      // Manual mode - try to extract locker number from various formats
-                      let lockerNum = ''
-                      
-                      // Check if it already has L- prefix
-                      if (input.match(/L-\d+/)) {
-                        lockerNum = input.match(/L-\d+/)?.[0] || ''
-                      } 
-                      // If just a number, add L- prefix
-                      else if (input.match(/^\d+$/)) {
-                        lockerNum = `L-${input.padStart(2, '0')}`
-                      }
-                      // If format is like "L01" without dash
-                      else if (input.match(/^L\d+$/)) {
-                        const num = input.substring(1)
-                        lockerNum = `L-${num.padStart(2, '0')}`
-                      }
-                      
-                      setSelectedLockerNumber(lockerNum)
+                      // Manual mode - resolve via the shared helper so
+                      // campus-aware prefixes (LC-, LB-) work the same
+                      // way as in the extend/return modals.
+                      const locker = resolveLockerFromInput(input, lockers, myCampus)
+                      setSelectedLockerNumber(locker?.locker_number || '')
                     }
                   }}
-                  placeholder={lockerInputMode === 'rfid' ? 'Scan locker RFID key...' : 'Enter locker number (e.g., L-01 or 1)...'}
+                  placeholder={
+                    lockerInputMode === 'rfid'
+                      ? 'Scan locker RFID key...'
+                      : myCampus === 'BASIC_EDUCATION'
+                        ? 'Enter locker number (e.g., 1, LB-01, lc-01...)'
+                        : 'Enter locker number (e.g., 1, LC-01, lb-01...)'
+                  }
                   className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                   disabled={!userData}
                 />
@@ -755,7 +882,10 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                 {lockerKeyInput && !selectedLockerNumber && lockerInputMode === 'manual' && (
                   <div className="mt-2 text-xs text-red-600">
                     <i className="fas fa-exclamation-triangle mr-1"></i>
-                    Invalid locker format. Use L-01, L01, or just 1
+                    {(() => {
+                      const prefix = myCampus === 'BASIC_EDUCATION' ? 'LB' : 'LC'
+                      return `Locker not found. Try ${prefix}-01, just 1, or scan an RFID.`
+                    })()}
                   </div>
                 )}
               </div>

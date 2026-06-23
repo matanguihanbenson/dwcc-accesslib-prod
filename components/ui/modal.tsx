@@ -1,6 +1,7 @@
 'use client'
 
 import { ReactNode, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { Button } from './button'
 
@@ -49,37 +50,54 @@ export function Modal({ isOpen, onClose, title, children, className, size = 'md'
     xl: 'max-w-4xl',
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div 
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
-        onClick={onClose}
-      />
+  // Render via portal at the document body level so the
+  // overlay is never clipped or constrained by an ancestor
+  // (transform / filter / overflow / perspective can all
+  // turn `position: fixed` into a non-viewport-relative
+  // box, which leaves a visible gap at the top).
+  if (typeof document === 'undefined') return null
+  return createPortal(
+    <div
+      // Full-viewport backdrop. `inset-0` plus explicit
+      // `w-screen h-screen m-0 p-0` guarantees the black
+      // overlay covers every pixel with no scroll-driven
+      // offset. Padding for the modal content lives on
+      // the inner centering div, not on the backdrop.
+      className="fixed inset-0 z-[1000] w-screen h-screen m-0 p-0 bg-black/50"
+      onClick={onClose}
+    >
       <div
-        className={cn(
-          'relative bg-white rounded-lg shadow-lg w-full mx-4',
-          sizeClasses[size],
-          className
-        )}
+        className="flex items-center justify-center min-h-screen w-full p-4"
+        onClick={(e) => e.stopPropagation()}
       >
-        {title && (
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="rounded-md p-2 hover:bg-gray-100"
-            >
-              <i className="fas fa-times" />
-            </Button>
+        <div
+          className={cn(
+            'relative bg-white rounded-lg shadow-lg w-full',
+            sizeClasses[size],
+            className
+          )}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {title && (
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="rounded-md p-2 hover:bg-gray-100"
+              >
+                <i className="fas fa-times" />
+              </Button>
+            </div>
+          )}
+          <div className="p-6">
+            {children}
           </div>
-        )}
-        <div className="p-6">
-          {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

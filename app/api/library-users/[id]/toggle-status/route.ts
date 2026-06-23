@@ -17,8 +17,14 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Only SUPER_ADMIN and ADMIN can modify library users
-    if (session.user.role !== "SUPER_ADMIN" && session.user.role !== "ADMIN") {
+    // SUPER_ADMIN, ADMIN, and STAFF can toggle user status
+    // (STAFF has the same library-user management
+    // permissions as ADMIN on the UI side).
+    if (
+      session.user.role !== "SUPER_ADMIN" &&
+      session.user.role !== "ADMIN" &&
+      session.user.role !== "STAFF"
+    ) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 })
     }
 

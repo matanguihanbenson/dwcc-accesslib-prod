@@ -82,7 +82,11 @@ export default function LibraryUserViewPage() {
       }
 
       const userRole = session.user.role as UserRole
-      if (userRole !== UserRole.SUPER_ADMIN && userRole !== UserRole.ADMIN) {
+      if (
+        userRole !== UserRole.SUPER_ADMIN &&
+        userRole !== UserRole.ADMIN &&
+        userRole !== UserRole.STAFF
+      ) {
         router.push('/dashboard')
         return
       }
@@ -218,22 +222,25 @@ export default function LibraryUserViewPage() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              {session?.user?.role === UserRole.SUPER_ADMIN && (
+              {session?.user?.role === UserRole.SUPER_ADMIN ||
+              session?.user?.role === UserRole.ADMIN ||
+              session?.user?.role === UserRole.STAFF ? (
                 <Button
                   variant="outline"
                   onClick={() => router.push(`/library-users/${userId}/edit`)}
+                  className='py-5 px-4 bg-primary-600 text-white hover:bg-primary-700'
                 >
                   <i className="fas fa-edit mr-2" />
                   Edit User
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4 space-y-6">
+      <div className="py-4 space-y-6">
         {/* User Details */}
         <Card>
           <CardHeader>
@@ -376,6 +383,7 @@ export default function LibraryUserViewPage() {
                 size="sm"
                 variant="outline"
                 onClick={() => router.push(`/borrowing-transactions?user=${userId}`)}
+                className='py-5 px-4 bg-primary-600 text-white hover:bg-primary-700'
               >
                 <i className="fas fa-external-link-alt mr-2" />
                 View All Transactions
@@ -458,6 +466,7 @@ export default function LibraryUserViewPage() {
                 size="sm"
                 variant="outline"
                 onClick={() => router.push(`/entry-monitoring?user=${userId}`)}
+                className='py-5 px-4 bg-primary-600 text-white hover:bg-primary-700'
               >
                 <i className="fas fa-external-link-alt mr-2" />
                 View All Logs

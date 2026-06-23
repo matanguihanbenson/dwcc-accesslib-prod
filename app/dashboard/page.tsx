@@ -228,6 +228,10 @@ export default function DashboardPage() {
         return [
           { icon: 'fa-user-shield', text: 'Add Admin', color: 'blue', href: '/users/register-admin' },
           { icon: 'fa-user-plus', text: 'Register User', color: 'green', href: '/library-users/add' },
+          { icon: 'fa-building', text: 'Add Department', color: 'yellow', href: '/library-users/add' },
+          { icon: 'fa-book-open-reader', text: 'Add Program', color: 'black', href: '/programs/add' },
+          { icon: 'fa-briefcase', text: 'Add Office', color: 'orange', href: '/library-users/add' },
+          { icon: 'fa-school', text: 'Manage Basic Ed', color: 'red', href: '/library-users/add' },
           { icon: 'fa-history', text: 'System Logs', color: 'purple', href: '/activity-logs' }
         ]
       case UserRole.ADMIN:
@@ -513,360 +517,333 @@ export default function DashboardPage() {
     )
   }
 
-  // Enhanced Staff Dashboard
+  // Enhanced Staff Dashboard (Bento layout)
   if (userRole === UserRole.STAFF) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4">
+        {/* Compact Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Staff Dashboard</h1>
-            <p className="text-gray-600 mt-1">
-              Monitor library operations and daily activities
+            <h1 className="text-2xl font-bold text-gray-900">Staff Dashboard</h1>
+            <p className="text-sm text-gray-600">
+              At-a-glance overview of library operations
             </p>
           </div>
-          <Badge variant="outline">
-            {userRole}
-          </Badge>
+          <Badge variant="outline">{userRole}</Badge>
         </div>
 
-        {/* Summary Cards for STAFF */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Stat Cards - full width row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {loadingStats ? (
             Array(4).fill(null).map((_, index) => (
-              <Card key={index}>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="animate-pulse bg-gray-200 h-4 w-24 rounded" />
-                    <div className="animate-pulse bg-gray-200 h-8 w-8 rounded-full" />
-                  </div>
-                  <div className="animate-pulse bg-gray-200 h-10 w-20 rounded mt-4" />
-                  <div className="animate-pulse bg-gray-200 h-3 w-32 rounded mt-2" />
+              <Card key={`stat-skel-${index}`}>
+                <CardContent className="p-3">
+                  <div className="animate-pulse bg-gray-200 h-3 w-20 rounded mb-2" />
+                  <div className="animate-pulse bg-gray-200 h-7 w-12 rounded" />
                 </CardContent>
               </Card>
             ))
           ) : (
             summaryCards.map((card, index) => (
-              <Card key={index} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-medium text-gray-600">{card.title}</h3>
-                    <div className={`w-10 h-10 rounded-full bg-${card.color}-100 flex items-center justify-center`}>
-                      <i className={`fas ${card.icon} text-${card.color}-600 text-lg`} />
+              <Card key={`stat-${index}`} className="hover:shadow-sm transition-shadow">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide truncate">{card.title}</p>
+                    <div className={`w-7 h-7 rounded-full bg-${card.color}-100 flex items-center justify-center shrink-0`}>
+                      <i className={`fas ${card.icon} text-${card.color}-600 text-xs`} />
                     </div>
                   </div>
-                  <div className="text-3xl font-bold text-gray-900">{card.value}</div>
-                  <p className="text-xs text-gray-500 mt-2">{card.description}</p>
+                  <div className="text-2xl font-bold text-gray-900 leading-tight">{card.value}</div>
+                  <p className="text-[11px] text-gray-500 truncate">{card.description}</p>
                 </CardContent>
               </Card>
             ))
           )}
         </div>
 
-        {/* Quick View Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <i className="fas fa-chart-line text-blue-600"></i>
-                Daily Usage Trends (Last 7 Days)
+        {/* Bento Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 auto-rows-min">
+          {/* Row 1-2: Main chart (4 cols x 2 rows) + Quick Actions (2x1) + 7-Day Averages (2x1) */}
+          <Card className="col-span-2 md:col-span-4 lg:col-span-4 lg:row-span-2">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <i className="fas fa-chart-line text-blue-600"></i>
+                  Daily Usage Trends (Last 7 Days)
+                </CardTitle>
                 {staffAnalytics?.summary && (
-                  <Badge 
-                    variant={staffAnalytics.trends?.entries === 'up' ? 'success' : staffAnalytics.trends?.entries === 'down' ? 'error' : 'outline'}
-                    className="ml-2"
-                  >
-                    {staffAnalytics.summary.currentTrend}
-                  </Badge>
-                )}
-              </CardTitle>
-              {staffAnalytics?.summary && (
-                <p className="text-sm text-gray-600">
-                  Most active day: {staffAnalytics.summary.mostActiveDay} • 
-                  Peak hour: {staffAnalytics.todayStats?.peakHour || 'N/A'} • 
-                  Weekly total: {staffAnalytics.summary.totalWeeklyActivity} activities
-                </p>
-              )}
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="space-y-6">
-                <div className="h-80">
-                  <LineChart
-                    data={usageChartData}
-                    lines={[
-                      { dataKey: 'entries', stroke: '#3B82F6', name: 'Library Entries' },
-                      { dataKey: 'books', stroke: '#10B981', name: 'Books Borrowed' },
-                      { dataKey: 'lockers', stroke: '#F59E0B', name: 'Lockers Assigned' }
-                    ]}
-                    height={280}
-                  />
-                </div>
-                
-                {staffAnalytics?.weeklyAverages && (
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-center">
-                      <p className="text-xs text-blue-600 font-medium uppercase tracking-wide">Avg Daily Entries</p>
-                      <p className="text-2xl font-bold text-blue-800 mt-1">{staffAnalytics.weeklyAverages.entries}</p>
-                      <p className="text-xs text-blue-600 mt-1">per day (7-day avg)</p>
-                    </div>
-                    <div className="p-3 bg-green-50 border border-green-100 rounded-lg text-center">
-                      <p className="text-xs text-green-600 font-medium uppercase tracking-wide">Avg Daily Books</p>
-                      <p className="text-2xl font-bold text-green-800 mt-1">{staffAnalytics.weeklyAverages.books}</p>
-                      <p className="text-xs text-green-600 mt-1">per day (7-day avg)</p>
-                    </div>
-                    <div className="p-3 bg-orange-50 border border-orange-100 rounded-lg text-center">
-                      <p className="text-xs text-orange-600 font-medium uppercase tracking-wide">Avg Daily Lockers</p>
-                      <p className="text-2xl font-bold text-orange-800 mt-1">{staffAnalytics.weeklyAverages.lockers}</p>
-                      <p className="text-xs text-orange-600 mt-1">per day (7-day avg)</p>
-                    </div>
-                  </div>
-                )}
-                
-                {!staffAnalytics && (
-                  <div className="flex items-center justify-center py-4">
-                    <div className="text-center">
-                      <div className="animate-pulse bg-gray-200 h-4 w-32 rounded mx-auto mb-2"></div>
-                      <p className="text-xs text-gray-500">Loading analytics...</p>
-                    </div>
+                  <div className="flex gap-3 text-[11px] text-gray-500">
+                    <span>Most active: <strong className="text-gray-700">{staffAnalytics.summary.mostActiveDay}</strong></span>
+                    <span>Peak: <strong className="text-gray-700">{staffAnalytics.todayStats?.peakHour || 'N/A'}</strong></span>
+                    <span>Total: <strong className="text-gray-700">{staffAnalytics.summary.totalWeeklyActivity}</strong></span>
                   </div>
                 )}
               </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="h-[300px]">
+                <LineChart
+                  data={usageChartData}
+                  lines={[
+                    { dataKey: 'entries', stroke: '#3B82F6', name: 'Entries' },
+                    { dataKey: 'books', stroke: '#10B981', name: 'Books' },
+                    { dataKey: 'lockers', stroke: '#F59E0B', name: 'Lockers' }
+                  ]}
+                  height={300}
+                />
+              </div>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Alerts and Quick Stats */}
-        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <i className="fas fa-exclamation-triangle text-red-600"></i>
-                Overdue Alerts
-                {overdueAlerts.length > 0 && (
-                  <Badge variant="error" className="ml-2">
-                    {overdueAlerts.length}
-                  </Badge>
-                )}
-              </CardTitle>
-              {staffAnalytics?.utilizationRates && (
-                <div className="flex gap-4 text-xs text-gray-600">
-                  <span>Locker Utilization: {staffAnalytics.utilizationRates.lockers}%</span>
-                  <span>Book Circulation: {staffAnalytics.utilizationRates.books}%</span>
+          {/* Quick Actions - compact 2x1 */}
+          <Card className="col-span-2 lg:col-span-2 lg:row-span-1">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="grid grid-cols-2 gap-1.5">
+                {quickActions.map((action, index) => (
+                  <Link
+                    key={index}
+                    href={action.href}
+                    className="flex items-center gap-2 px-4 py-4 border border-gray-200 hover:border-gray-400 hover:bg-gray-50 rounded-md transition-all group"
+                  >
+                    <i className={`fas ${action.icon} text-${action.color}-600 text-sm shrink-0`} />
+                    <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900 truncate">{action.text}</span>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Weekly Averages - compact 2x1 */}
+          <Card className="col-span-2 lg:col-span-2 lg:row-span-1">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs font-semibold text-gray-600 uppercase tracking-wide">7-Day Averages</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4">
+              {staffAnalytics?.weeklyAverages ? (
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div className="text-center p-1.5 h-20 flex justify-center flex-col bg-blue-50 border border-blue-100 rounded">
+                    <p className="text-[10px] text-blue-600 font-medium uppercase">Entries</p>
+                    <p className="text-lg font-bold text-blue-800 leading-tight">{staffAnalytics.weeklyAverages.entries}</p>
+                  </div>
+                  <div className="text-center p-1.5 flex justify-center flex-col bg-green-50 border border-green-100 rounded">
+                    <p className="text-[10px] text-green-600 font-medium uppercase">Books</p>
+                    <p className="text-lg font-bold text-green-800 leading-tight">{staffAnalytics.weeklyAverages.books}</p>
+                  </div>
+                  <div className="text-center p-1.5 flex justify-center flex-col bg-orange-50 border border-orange-100 rounded">
+                    <p className="text-[10px] text-orange-600 font-medium uppercase">Lockers</p>
+                    <p className="text-lg font-bold text-orange-800 leading-tight">{staffAnalytics.weeklyAverages.lockers}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-3">
+                  <div className="animate-pulse bg-gray-200 h-3 w-24 rounded" />
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Row 3: Overdue Alerts (3 cols) + Entries (3 cols) */}
+          <Card className="col-span-1 md:col-span-2 lg:col-span-3">
+            <CardHeader className="pb-1">
+              <div className="flex items-center justify-between flex-wrap gap-1">
+                <CardTitle className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+                  <i className="fas fa-exclamation-triangle text-red-600 text-xs"></i>
+                  Overdue Alerts
+                  {overdueAlerts.length > 0 && (
+                    <Badge variant="error" className="text-[10px] px-1.5 py-0">{overdueAlerts.length}</Badge>
+                  )}
+                </CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-64 overflow-y-auto">
+            <CardContent className="pt-4 flex flex-col">
+              <div className="space-y-1.5 flex-1">
                 {loadingStaffData ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
+                  <div className="flex items-center justify-center py-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
                   </div>
                 ) : overdueAlerts.length > 0 ? (
-                  overdueAlerts.map((alert, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <i className={`fas ${alert.book ? 'fa-book' : 'fa-lock'} text-red-600`}></i>
-                        <div>
-                          <p className="text-sm font-medium">
+                  overdueAlerts.slice(0, 5).map((alert, index) => (
+                    <div key={index} className="flex items-center justify-between p-1.5 bg-red-50 border border-red-200 rounded text-xs">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <i className={`fas ${alert.book ? 'fa-book' : 'fa-lock'} text-red-600 text-[10px] shrink-0`}></i>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-900 truncate">
                             {alert.book ? alert.book.title : `Locker #${alert.locker?.locker_number}`}
                           </p>
-                          <p className="text-xs text-red-600">
-                            {alert.book 
-                              ? `Overdue by ${alert.days_overdue} days`
-                              : `Used for ${alert.days_used} days`
-                            }
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {alert.user?.full_name || 'Unknown User'}
+                          <p className="text-[10px] text-gray-500 truncate">
+                            {alert.user?.full_name || 'Unknown'} • {alert.book ? `${alert.days_overdue}d overdue` : `${alert.days_used}d used`}
                           </p>
                         </div>
                       </div>
-                      <Badge variant="error" className="text-xs">
+                      <Badge variant="error" className="text-[10px] px-1.5 py-0 shrink-0">
                         {alert.book ? 'Book' : 'Locker'}
                       </Badge>
                     </div>
                   ))
                 ) : (
-                  <div className="text-center py-8">
-                    <i className="fas fa-check-circle text-green-600 text-3xl mb-2"></i>
-                    <p className="text-sm text-gray-600">No overdue items</p>
-                    {staffAnalytics?.summary && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Weekly activity: {staffAnalytics.summary.totalWeeklyActivity} transactions
-                      </p>
-                    )}
+                  <div className="text-center py-2">
+                    <i className="fas fa-check-circle text-green-500 text-base mb-0.5"></i>
+                    <p className="text-[11px] text-gray-500">No overdue items</p>
                   </div>
+                )}
+              </div>
+              <div className="flex justify-center pt-2 mt-1 border-t border-gray-100">
+                {overdueAlerts.length >= 5 && (
+                  <Link
+                    href="/overdue"
+                    className="text-[11px] font-medium text-red-600 hover:text-red-700 inline-flex items-center gap-1"
+                  >
+                    View all <i className="fas fa-arrow-right text-[10px]"></i>
+                  </Link>
                 )}
               </div>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Today's Activities */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Today's Entry Logs */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <i className="fas fa-door-open text-blue-600"></i>
+          {/* Today's Entry Logs (3 cols) */}
+          <Card className="col-span-1 md:col-span-2 lg:col-span-3">
+            <CardHeader className="pb-1">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+                <i className="fas fa-door-open text-blue-600 text-xs"></i>
                 Today's Entry Logs
-                <Badge variant="outline">{todayEntryLogs.length}</Badge>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-auto">{todayEntryLogs.length}</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-64 overflow-y-auto">
+            <CardContent className="pt-4 flex flex-col">
+              <div className="space-y-1.5 flex-1">
                 {loadingStaffData ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <div className="flex items-center justify-center py-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                   </div>
                 ) : todayEntryLogs.length > 0 ? (
-                  todayEntryLogs.map((log, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                          <i className="fas fa-user text-blue-600 text-sm"></i>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">{log.user?.full_name || 'Unknown User'}</p>
-                          <p className="text-xs text-gray-600">
-                            {formatTime(log.entry_time)} • {log.user?.user_type}
-                          </p>
-                        </div>
+                  todayEntryLogs.slice(0, 5).map((log, index) => (
+                    <div key={index} className="flex items-center justify-between p-1.5 bg-blue-50 border border-blue-100 rounded text-[11px]">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-gray-900 truncate">{log.user?.full_name || 'Unknown User'}</p>
+                        <p className="text-[10px] text-gray-500">{formatTime(log.entry_time)} • {log.user?.user_type}</p>
                       </div>
-                      <Badge variant={log.exit_time ? "outline" : "success"} className="text-xs">
+                      <Badge variant={log.exit_time ? "outline" : "success"} className="text-[10px] px-1.5 py-0 shrink-0 ml-1">
                         {log.exit_time ? 'Exited' : 'Inside'}
                       </Badge>
                     </div>
                   ))
                 ) : (
-                  <div className="text-center py-8">
-                    <i className="fas fa-door-open text-gray-400 text-3xl mb-2"></i>
-                    <p className="text-sm text-gray-600">No entries today</p>
+                  <div className="text-center py-2">
+                    <p className="text-[11px] text-gray-500">No entries today</p>
                   </div>
+                )}
+              </div>
+              <div className="flex justify-center pt-2 mt-1 border-t border-gray-100">
+                {todayEntryLogs.length >= 5 && (
+                  <Link
+                    href="/entry-monitoring"
+                    className="text-[11px] font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+                  >
+                    View all <i className="fas fa-arrow-right text-[10px]"></i>
+                  </Link>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Recent Locker Transactions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <i className="fas fa-lock text-green-600"></i>
+          {/* Row 4: Lockers (3 cols) + Borrows (3 cols) */}
+          <Card className="col-span-1 md:col-span-2 lg:col-span-3">
+            <CardHeader className="pb-1">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+                <i className="fas fa-lock text-green-600 text-xs"></i>
                 Lockers Assigned/Returned
-                <Badge variant="outline">{recentLockerTransactions.length}</Badge>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-auto">{recentLockerTransactions.length}</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-64 overflow-y-auto">
+            <CardContent className="pt-4 flex flex-col">
+              <div className="space-y-1.5 flex-1">
                 {loadingStaffData ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
+                  <div className="flex items-center justify-center py-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></div>
                   </div>
                 ) : recentLockerTransactions.length > 0 ? (
-                  recentLockerTransactions.map((transaction, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                          <i className="fas fa-lock text-green-600 text-sm"></i>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">Locker #{transaction.locker?.locker_number || 'N/A'}</p>
-                          <p className="text-xs text-gray-600">
-                            {transaction.user?.full_name || 'Unknown User'}
-                          </p>
-                        </div>
+                  recentLockerTransactions.slice(0, 5).map((transaction, index) => (
+                    <div key={index} className="flex items-center justify-between p-1.5 bg-green-50 border border-green-100 rounded text-[11px]">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-gray-900 truncate">Locker #{transaction.locker?.locker_number || 'N/A'}</p>
+                        <p className="text-[10px] text-gray-500 truncate">{transaction.user?.full_name || 'Unknown User'}</p>
                       </div>
-                      <Badge variant={transaction.return_time ? "outline" : "success"} className="text-xs">
+                      <Badge variant={transaction.return_time ? "outline" : "success"} className="text-[10px] px-1.5 py-0 shrink-0 ml-1">
                         {transaction.return_time ? 'Returned' : 'Assigned'}
                       </Badge>
                     </div>
                   ))
                 ) : (
-                  <div className="text-center py-8">
-                    <i className="fas fa-lock text-gray-400 text-3xl mb-2"></i>
-                    <p className="text-sm text-gray-600">No locker activity</p>
+                  <div className="text-center py-2">
+                    <p className="text-[11px] text-gray-500">No locker activity</p>
                   </div>
+                )}
+              </div>
+              <div className="flex justify-center pt-2 mt-1 border-t border-gray-100">
+                {recentLockerTransactions.length >= 5 && (
+                  <Link
+                    href="/lockers"
+                    className="text-[11px] font-medium text-green-600 hover:text-green-700 inline-flex items-center gap-1"
+                  >
+                    View all <i className="fas fa-arrow-right text-[10px]"></i>
+                  </Link>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Active Book Borrows */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <i className="fas fa-book text-purple-600"></i>
+          {/* Active Borrows (3 cols) */}
+          <Card className="col-span-1 md:col-span-2 lg:col-span-3">
+            <CardHeader className="pb-1">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+                <i className="fas fa-book text-purple-600 text-xs"></i>
                 Active Borrows
-                <Badge variant="outline">{activeBorrows.length}</Badge>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-auto">{activeBorrows.length}</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-64 overflow-y-auto">
+            <CardContent className="pt-4 flex flex-col">
+              <div className="space-y-1.5 flex-1">
                 {loadingStaffData ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                  <div className="flex items-center justify-center py-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
                   </div>
                 ) : activeBorrows.length > 0 ? (
-                  activeBorrows.map((borrow, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                          <i className="fas fa-book text-purple-600 text-sm"></i>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">{borrow.book?.title || 'Unknown Book'}</p>
-                          <p className="text-xs text-gray-600">
-                            Due: {formatDate(borrow.due_date)}
-                          </p>
-                        </div>
+                  activeBorrows.slice(0, 5).map((borrow, index) => (
+                    <div key={index} className="flex items-center justify-between p-1.5 bg-purple-50 border border-purple-100 rounded text-[11px]">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-gray-900 truncate">{borrow.book?.title || 'Unknown Book'}</p>
+                        <p className="text-[10px] text-gray-500">Due: {formatDate(borrow.due_date)}</p>
                       </div>
                       <Badge 
                         variant={new Date(borrow.due_date) < new Date() ? "error" : "success"}
-                        className="text-xs"
+                        className="text-[10px] px-1.5 py-0 shrink-0 ml-1"
                       >
                         {new Date(borrow.due_date) < new Date() ? 'Overdue' : 'Active'}
                       </Badge>
                     </div>
                   ))
                 ) : (
-                  <div className="text-center py-8">
-                    <i className="fas fa-book text-gray-400 text-3xl mb-2"></i>
-                    <p className="text-sm text-gray-600">No active borrows</p>
+                  <div className="text-center py-2">
+                    <p className="text-[11px] text-gray-500">No active borrows</p>
                   </div>
+                )}
+              </div>
+              <div className="flex justify-center pt-2 mt-1 border-t border-gray-100">
+                {activeBorrows.length >= 5 && (
+                  <Link
+                    href="/borrowing-transactions"
+                    className="text-[11px] font-medium text-purple-600 hover:text-purple-700 inline-flex items-center gap-1"
+                  >
+                    View all <i className="fas fa-arrow-right text-[10px]"></i>
+                  </Link>
                 )}
               </div>
             </CardContent>
           </Card>
         </div>
-
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {quickActions.map((action, index) => (
-                <Link
-                  key={index}
-                  href={action.href}
-                  className={
-                    `flex flex-col items-center justify-center border-2 border-gray-200 hover:border-gray-400 hover:shadow-md transition-all duration-200 group ` +
-                    (isSuperAdmin
-                      ? 'px-4 py-4 rounded-lg'
-                      : 'aspect-square p-6 rounded-xl')
-                  }
-                >
-                  <div className="flex-1 flex items-center justify-center">
-                    <i
-                      className={`fas ${action.icon} text-${action.color}-600 ${isSuperAdmin ? 'text-2xl' : 'text-3xl'} group-hover:scale-110 transition-transform duration-200`}
-                    />
-                  </div>
-                  <p className={`${isSuperAdmin ? 'text-xs' : 'text-sm'} font-semibold text-gray-700 group-hover:text-gray-900 mt-3`}>{action.text}</p>
-                </Link>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
       </div>
     )
   }
@@ -920,7 +897,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
+            <CardTitle className='mb-4'>Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -960,10 +937,10 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
+              <CardTitle className='mb-4'>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-4 gap-4">
                 {quickActions.map((action, index) => (
                   <Link
                     key={index}
@@ -980,7 +957,7 @@ export default function DashboardPage() {
                         className={`fas ${action.icon} text-${action.color}-600 ${isSuperAdmin ? 'text-2xl' : 'text-3xl'} group-hover:scale-110 transition-transform duration-200`}
                       />
                     </div>
-                    <p className={`${isSuperAdmin ? 'text-xs' : 'text-sm'} font-semibold text-gray-700 group-hover:text-gray-900 mt-3`}>{action.text}</p>
+                    <p className={`${isSuperAdmin ? 'text-[10px]' : 'text-[10px]'} font-semibold text-gray-700 group-hover:text-gray-900 mt-3`}>{action.text}</p>
                   </Link>
                 ))}
               </div>

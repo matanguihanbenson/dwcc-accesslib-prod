@@ -28,6 +28,27 @@ export class ExcelReportGenerator {
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ]
+  /**
+   * Library label shown in the report header. Defaults to
+   * "College Library" so existing callers without a campus see
+   * the same header they always have. Override with the
+   * constructor argument or `setLibraryName()`.
+   */
+  private libraryName: string
+
+  constructor(libraryName: string = 'College Library') {
+    this.libraryName = libraryName
+  }
+
+  /** Override the library-name label on the report header. */
+  setLibraryName(name: string): void {
+    this.libraryName = name
+  }
+
+  /** Helper for the standard "Divine Word College of Calapan - <library>" header. */
+  private libraryHeader(): string {
+    return `Divine Word College of Calapan - ${this.libraryName}`
+  }
 
   generateMonthlyStatistics(data: ReportData, dateRangeTitle?: string): XLSX.WorkBook {
     const workbook = XLSX.utils.book_new()
@@ -37,7 +58,7 @@ export class ExcelReportGenerator {
     const monthlyData: any[][] = []
     
     // Header rows
-    monthlyData.push(['Divine Word College of Calapan - College Library'])
+    monthlyData.push([this.libraryHeader()])
     monthlyData.push([`User's Statistics for ${dateRangeTitle || `${this.monthNames[month - 1]}, ${year}`}`])
     monthlyData.push([]) // Empty row
 
@@ -121,7 +142,7 @@ export class ExcelReportGenerator {
 
     // User Type Statistics Sheet
     const userTypeData: any[][] = []
-    userTypeData.push(['Divine Word College of Calapan - College Library'])
+    userTypeData.push([this.libraryHeader()])
     userTypeData.push([`User Type Statistics for ${this.monthNames[month - 1]}, ${year}`])
     userTypeData.push([]) // Empty row
     userTypeData.push(['User Type', 'Count', 'Percentage'])
@@ -140,7 +161,7 @@ export class ExcelReportGenerator {
     // Grade Level Statistics Sheet (if applicable)
     if (Object.keys(gradeLevelStats).length > 0) {
       const gradeLevelData: any[][] = []
-      gradeLevelData.push(['Divine Word College of Calapan - College Library'])
+      gradeLevelData.push([this.libraryHeader()])
       gradeLevelData.push([`Grade Level Statistics for ${this.monthNames[month - 1]}, ${year}`])
       gradeLevelData.push([]) // Empty row
       gradeLevelData.push(['Grade Level', 'Count', 'Percentage'])
@@ -177,7 +198,7 @@ export class ExcelReportGenerator {
     const recordsData: any[][] = []
     
     // Header rows
-    recordsData.push(['Divine Word College of Calapan - College Library'])
+    recordsData.push([this.libraryHeader()])
     recordsData.push(['ENTRY RECORDS REPORT'])
     recordsData.push([]) // Empty row
     
@@ -333,7 +354,7 @@ export class ExcelReportGenerator {
     // Main Statistics Sheet
     const statsData: any[][] = []
     
-    statsData.push(['Divine Word College of Calapan - College Library'])
+    statsData.push([this.libraryHeader()])
     statsData.push([`User's Statistics (Concurrent) for ${dateRangeTitle}`])
     statsData.push([]) // Empty row
     statsData.push(['Shows the count of library users present per hour (concurrent occupancy)'])
@@ -402,7 +423,7 @@ export class ExcelReportGenerator {
     // User Type Statistics Sheet
     if (userTypeStats && Object.keys(userTypeStats).length > 0) {
       const userTypeData: any[][] = []
-      userTypeData.push(['Divine Word College of Calapan - College Library'])
+      userTypeData.push([this.libraryHeader()])
       userTypeData.push([`User Type Statistics for ${dateRangeTitle}`])
       userTypeData.push([]) // Empty row
       userTypeData.push(['User Type', 'Count', 'Percentage'])
@@ -430,7 +451,7 @@ export class ExcelReportGenerator {
     // Main Statistics Sheet
     const statsData: any[][] = []
     
-    statsData.push(['Divine Word College of Calapan - College Library'])
+    statsData.push([this.libraryHeader()])
     statsData.push([`Users per Transaction Statistics for ${dateRangeTitle}`])
     statsData.push([]) // Empty row
     statsData.push(['Shows the number of entry/exit transactions per hour'])
@@ -495,7 +516,7 @@ export class ExcelReportGenerator {
     // User Type Statistics Sheet
     if (userTypeStats && Object.keys(userTypeStats).length > 0) {
       const userTypeData: any[][] = []
-      userTypeData.push(['Divine Word College of Calapan - College Library'])
+      userTypeData.push([this.libraryHeader()])
       userTypeData.push([`User Type Statistics for ${dateRangeTitle}`])
       userTypeData.push([]) // Empty row
       userTypeData.push(['User Type', 'Count', 'Percentage'])
@@ -523,7 +544,7 @@ export class ExcelReportGenerator {
     const workbook = XLSX.utils.book_new()
 
     const deptData: any[][] = []
-    deptData.push(['Divine Word College of Calapan - College Library'])
+    deptData.push([this.libraryHeader()])
     deptData.push([`Student Visits by Department for ${dateRangeTitle}`])
     deptData.push([])
     deptData.push(['Department', 'Code', 'Visits', 'Percentage'])
@@ -538,7 +559,7 @@ export class ExcelReportGenerator {
     XLSX.utils.book_append_sheet(workbook, deptSheet, 'By Department')
 
     const gradeData: any[][] = []
-    gradeData.push(['Divine Word College of Calapan - College Library'])
+    gradeData.push([this.libraryHeader()])
     gradeData.push([`Student Visits by Grade Level for ${dateRangeTitle}`])
     gradeData.push([])
     gradeData.push(['Grade Level', 'Education Level', 'Visits', 'Percentage'])
@@ -571,7 +592,7 @@ export class ExcelReportGenerator {
     // Main Statistics Sheet
     const statsData: any[][] = []
     
-    statsData.push(['Divine Word College of Calapan - College Library'])
+    statsData.push([this.libraryHeader()])
     statsData.push([`Entrance/Exit Control for ${dateRangeTitle}`])
     statsData.push([]) // Empty row
     statsData.push(['Hourly entrance/exit statistics by user type'])
@@ -633,7 +654,7 @@ export class ExcelReportGenerator {
     // Main Statistics Sheet
     const statsData: any[][] = []
     
-    statsData.push(['Divine Word College of Calapan - College Library'])
+    statsData.push([this.libraryHeader()])
     statsData.push([`Locker Concurrent Statistics for ${dateRangeTitle}`])
     statsData.push([]) // Empty row
     statsData.push(['Shows the number of active locker rentals per hour'])
@@ -702,7 +723,7 @@ export class ExcelReportGenerator {
     // Main Statistics Sheet
     const statsData: any[][] = []
     
-    statsData.push(['Divine Word College of Calapan - College Library'])
+    statsData.push([this.libraryHeader()])
     statsData.push([`Locker Usage Statistics for ${dateRangeTitle}`])
     statsData.push([]) // Empty row
     statsData.push(['Shows the number of locker rental transactions per hour'])
@@ -770,7 +791,7 @@ export class ExcelReportGenerator {
 
     // User Information Sheet
     const userInfoData: any[][] = []
-    userInfoData.push(['Divine Word College of Calapan - College Library'])
+    userInfoData.push([this.libraryHeader()])
     userInfoData.push([`Individual User Statistics for ${dateRangeTitle}`])
     userInfoData.push([]) // Empty row
     
@@ -884,6 +905,128 @@ export class ExcelReportGenerator {
       const lockersSheet = XLSX.utils.aoa_to_sheet(lockersData)
       XLSX.utils.book_append_sheet(workbook, lockersSheet, 'Locker Usage')
     }
+
+    return workbook
+  }
+
+  /**
+   * Summary of Fines — per-borrower breakdown. Same shape as
+   * `generateFinesSummaryReport` in the PDF generator.
+   *
+   * Renders two sheets:
+   *   1. "Fines Summary" — one row per borrower with per-type
+   *      and combined totals. Columns adapt to the report
+   *      `type` (combined / book / locker).
+   *   2. "Grand Totals"  — overall summary.
+   */
+  generateFinesSummaryReport(
+    data: {
+      type?: 'combined' | 'book' | 'locker'
+      filters?: { date_from?: string | null; date_to?: string | null }
+      grand?: { total: number; paid: number; remaining: number; borrower_count: number; settlement_count: number }
+      rows: Array<{
+        user: any
+        book: { total: number; paid: number; remaining: number; count: number }
+        locker: { total: number; paid: number; remaining: number; count: number }
+        combined: { total: number; paid: number; remaining: number; count: number }
+      }>
+    },
+    dateRangeTitle: string
+  ): XLSX.WorkBook {
+    const workbook = XLSX.utils.book_new()
+    const type = data.type || 'combined'
+    const showBook = type !== 'locker'
+    const showLocker = type !== 'book'
+    const typeLabel =
+      type === 'book'
+        ? 'Book Fines Only'
+        : type === 'locker'
+          ? 'Locker Fines Only'
+          : 'Combined (Book + Locker)'
+
+    const main: any[][] = []
+    main.push([this.libraryHeader()])
+    main.push([`Summary of Fines — ${typeLabel}`])
+    main.push([`For ${dateRangeTitle}`])
+    main.push([])
+
+    const head: string[] = ['#', 'Borrower', 'ID Number', 'User Type']
+    if (showBook) head.push('Book Penalty', 'Book Paid', 'Book Remaining', '# Book')
+    if (showLocker)
+      head.push('Locker Penalty', 'Locker Paid', 'Locker Remaining', '# Locker')
+    if (type === 'combined') {
+      head.push('Total Penalty', 'Total Paid', 'Total Remaining')
+    }
+    main.push(head)
+
+    if (data.rows.length === 0) {
+      main.push(['—', 'No borrowers with fines in this range', '', '', '', '', '', '', '', '', '', '', ''].slice(0, head.length))
+    } else {
+      data.rows.forEach((r, i) => {
+        const u = r.user || {}
+        const row: any[] = [i + 1, u.full_name || 'Unknown', u.account_id || '—', u.user_type || '—']
+        if (showBook) {
+          row.push(
+            Number(r.book.total),
+            Number(r.book.paid),
+            Number(r.book.remaining),
+            r.book.count
+          )
+        }
+        if (showLocker) {
+          row.push(
+            Number(r.locker.total),
+            Number(r.locker.paid),
+            Number(r.locker.remaining),
+            r.locker.count
+          )
+        }
+        if (type === 'combined') {
+          row.push(
+            Number(r.combined.total),
+            Number(r.combined.paid),
+            Number(r.combined.remaining)
+          )
+        }
+        main.push(row)
+      })
+    }
+
+    const mainSheet = XLSX.utils.aoa_to_sheet(main)
+    // Set column widths for readability. Compute the # of columns dynamically.
+    const totalCols = head.length
+    const colWidths: any[] = []
+    colWidths[0] = { wch: 4 } // #
+    colWidths[1] = { wch: 30 } // Borrower
+    colWidths[2] = { wch: 18 } // ID
+    colWidths[3] = { wch: 14 } // Type
+    for (let i = 4; i < totalCols; i++) colWidths[i] = { wch: 16 }
+    mainSheet['!cols'] = colWidths
+    XLSX.utils.book_append_sheet(workbook, mainSheet, 'Fines Summary')
+
+    // Grand Totals sheet
+    const grand = data.grand || {
+      total: data.rows.reduce((s, r) => s + r.combined.total, 0),
+      paid: data.rows.reduce((s, r) => s + r.combined.paid, 0),
+      remaining: data.rows.reduce((s, r) => s + r.combined.remaining, 0),
+      borrower_count: data.rows.length,
+      settlement_count: data.rows.reduce((s, r) => s + r.combined.count, 0)
+    }
+    const totals: any[][] = [
+      [this.libraryHeader()],
+      [`Summary of Fines — Grand Totals (${typeLabel})`],
+      [`For ${dateRangeTitle}`],
+      [],
+      ['Metric', 'Value'],
+      ['Total Penalty', Number(grand.total)],
+      ['Total Paid', Number(grand.paid)],
+      ['Remaining Unpaid', Number(grand.remaining)],
+      ['Borrowers with Fines', grand.borrower_count],
+      ['Total Settlements', grand.settlement_count]
+    ]
+    const totalsSheet = XLSX.utils.aoa_to_sheet(totals)
+    totalsSheet['!cols'] = [{ wch: 28 }, { wch: 18 }]
+    XLSX.utils.book_append_sheet(workbook, totalsSheet, 'Grand Totals')
 
     return workbook
   }

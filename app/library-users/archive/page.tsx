@@ -139,7 +139,11 @@ export default function LibraryUsersArchivePage() {
 
   const userRole = session.user.role as UserRole
 
-  if (userRole !== UserRole.SUPER_ADMIN) {
+  if (
+    userRole !== UserRole.SUPER_ADMIN &&
+    userRole !== UserRole.ADMIN &&
+    userRole !== UserRole.STAFF
+  ) {
     return (
       <div className="text-center py-12">
         <h1 className="text-2xl font-bold text-gray-900">Access Denied</h1>
@@ -185,6 +189,7 @@ export default function LibraryUsersArchivePage() {
           <Button 
             variant="outline" 
             onClick={() => router.push('/library-users')}
+            className='py-5 px-4 bg-primary-600 text-white hover:bg-primary-700'
           >
             <i className="fas fa-arrow-left mr-2" />
             Back to Users

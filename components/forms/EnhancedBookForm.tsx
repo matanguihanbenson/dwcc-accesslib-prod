@@ -1,8 +1,46 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  forwardRef,
+  useImperativeHandle
+} from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import IsbnLookupModal from './IsbnLookupModal'
+import AddOptionModal, {
+  type AddOptionItem
+} from './AddOptionModal'
+import type { OpenLibraryBook } from '@/lib/open-library'
+
+/**
+ * Imperative handle exposed by `EnhancedBookForm`. The parent
+ * page uses this to:
+ *   - Append a freshly-created Category / Section into the
+ *     form's dropdowns (the parent calls the API, the form
+ *     just updates its local list).
+ *   - Append a freshly-created option into one of the
+ *     form's hard-coded option arrays (Material Type, Subtype,
+ *     Interest Level, Lexile, Fountas & Pinnell).
+ *   - Set a specific form field by name (used by the page
+ *     after a header quick action to switch e.g. category_id
+ *     to the freshly-added category).
+ */
+export type OptionKind =
+  | 'materialType'
+  | 'subtype'
+  | 'interestLevel'
+  | 'lexile'
+  | 'fountasPinnell'
+
+export interface BookFormHandle {
+  addCategory: (item: { category_id: number; name: string }) => void
+  addSection: (item: { section_id: number; name: string }) => void
+  addOption: (kind: OptionKind, value: string) => void
+  setField: (name: string, value: any) => void
+}
 
 interface EnhancedBookFormProps {
   onSubmit: (data: any) => Promise<void>
@@ -16,15 +54,21 @@ interface EnhancedBookFormProps {
 
 type TabType = 'brief' | 'details' | 'series' | 'resources' | 'entries'
 
-export function EnhancedBookForm({ 
-  onSubmit, 
-  onCancel, 
-  loading = false, 
-  initialData, 
-  categories: propCategories, 
-  sections: propSections, 
-  isEditing = false 
-}: EnhancedBookFormProps) {
+export const EnhancedBookForm = forwardRef<
+  BookFormHandle,
+  EnhancedBookFormProps
+>(function EnhancedBookForm(
+  {
+    onSubmit,
+    onCancel,
+    loading = false,
+    initialData,
+    categories: propCategories,
+    sections: propSections,
+    isEditing = false
+  },
+  ref
+) {
   const [activeTab, setActiveTab] = useState<TabType>('brief')
   
   // Helper function to convert null to empty string or appropriate default
@@ -100,11 +144,136 @@ export function EnhancedBookForm({
     section_id: '' as number | '',
     language: 'English',
     description: '',
+    summary: '',
     copies: '1'
   })
 
   const [categories, setCategories] = useState<{ category_id: number; name: string }[]>(propCategories || [])
   const [sections, setSections] = useState<{ section_id: number; name: string }[]>(propSections || [])
+
+  // Dynamic option lists for the hard-coded <select> fields.
+  // We start from the same defaults the original form used,
+  // but allow new values to be appended at runtime — important
+  // for the Open Library ISBN lookup: if the scraped book is
+  // a new material type / format we don't know about yet, we
+  // can still surface it as a usable option and select it.
+  const [materialTypeOptions, setMaterialTypeOptions] = useState<string[]>([
+    'Book', 'eBook', 'Audiobook', 'DVD', 'Magazine'
+  ])
+  const [subtypeOptions, setSubtypeOptions] = useState<string[]>([
+    'Paperback', 'Hardcover', 'Board Book'
+  ])
+  const [interestLevelOptions, setInterestLevelOptions] = useState<string[]>([
+    'Adult', 'Young Adult', 'Middle Grade', 'Early Readers'
+  ])
+  const [lexileOptions, setLexileOptions] = useState<string[]>([
+    'No Code', 'BR (Beginning Reader)', 'NP (Non-Prose)', 'HL (High-Low)'
+  ])
+  const [fountasPinnellOptions, setFountasPinnellOptions] = useState<string[]>([
+    'Any Level', 'Level A', 'Level B', 'Level C', 'Level D', 'Level Z'
+  ])
+
+  // Modal that drives the Open Library ISBN lookup.
+  const [showIsbnModal, setShowIsbnModal] = useState(false)
+
+  // Inline "Add new category / section" modal state. When
+  // the user picks the special `__add_new__` option in
+  // either select, this opens the shared AddOptionModal.
+  // The newly created item is appended to the matching list
+  // AND auto-selected in the form.
+  const [inlineAdd, setInlineAdd] = useState<
+    | null
+    | {
+        kind: 'category' | 'section'
+        title: string
+        endpoint: string
+        fieldName: 'category_id' | 'section_id'
+      }
+  >(null)
+
+  // Imperative handle — exposes a small, typed surface to
+  // the parent page so the header quick-action buttons can
+  // add options into the same lists the form uses. Each
+  // method is case-insensitive de-duped against the
+  // existing options so re-clicking the same quick action
+  // twice doesn't create duplicates.
+  useImperativeHandle(
+    ref,
+    () => ({
+      addCategory: (item) => {
+        setCategories((prev) => {
+          if (
+            prev.some(
+              (c) =>
+                c.category_id === item.category_id ||
+                c.name.toLowerCase() === item.name.toLowerCase()
+            )
+          )
+            return prev
+          return [...prev, item]
+        })
+        setFormData((prev) => ({ ...prev, category_id: item.category_id }))
+      },
+      addSection: (item) => {
+        setSections((prev) => {
+          if (
+            prev.some(
+              (s) =>
+                s.section_id === item.section_id ||
+                s.name.toLowerCase() === item.name.toLowerCase()
+            )
+          )
+            return prev
+          return [...prev, item]
+        })
+        setFormData((prev) => ({ ...prev, section_id: item.section_id }))
+      },
+      addOption: (kind, value) => {
+        const cleaned = (value || '').trim()
+        if (!cleaned) return
+        // Map each option kind to its current list + setter.
+        // The setter accepts a callback form so we can
+        // de-dupe against the existing values before appending.
+        const setterByKind: Record<
+          OptionKind,
+          (updater: (prev: string[]) => string[]) => void
+        > = {
+          materialType: (updater) =>
+            setMaterialTypeOptions(updater as (prev: string[]) => string[]),
+          subtype: (updater) => setSubtypeOptions(updater as (prev: string[]) => string[]),
+          interestLevel: (updater) =>
+            setInterestLevelOptions(updater as (prev: string[]) => string[]),
+          lexile: (updater) => setLexileOptions(updater as (prev: string[]) => string[]),
+          fountasPinnell: (updater) =>
+            setFountasPinnellOptions(updater as (prev: string[]) => string[])
+        }
+        setterByKind[kind]((prev: string[]) => {
+          if (prev.some((v) => v.toLowerCase() === cleaned.toLowerCase())) return prev
+          return [...prev, cleaned]
+        })
+        // Also set the form value so the field auto-switches
+        // to the freshly-added option.
+        const formFieldMap: Record<OptionKind, string> = {
+          materialType: 'materialType',
+          subtype: 'subtype',
+          interestLevel: 'interestLevel',
+          lexile: 'lexile',
+          fountasPinnell: 'fountasPinnell'
+        }
+        setFormData((prev) => ({ ...prev, [formFieldMap[kind]]: cleaned }))
+      },
+      setField: (name, value) => {
+        setFormData((prev) => ({ ...prev, [name]: value }))
+      }
+    }),
+    [
+      materialTypeOptions,
+      subtypeOptions,
+      interestLevelOptions,
+      lexileOptions,
+      fountasPinnellOptions
+    ]
+  )
 
   useEffect(() => {
     if (propCategories) setCategories(propCategories)
@@ -188,6 +357,8 @@ export function EnhancedBookForm({
       category_id: d.category_id ?? (typeof d.category === 'object' && d.category ? d.category.category_id : ''),
       section_id: d.section_id ?? (typeof d.section === 'object' && d.section ? d.section.section_id : ''),
       language: d.language ?? 'English',
+      description: d.description ?? '',
+      summary: d.summary ?? '',
       copies: (d.copies != null ? String(d.copies) : (d.copies_total != null ? String(d.copies_total) : formData.copies)),
 
       // Resources
@@ -265,6 +436,13 @@ export function EnhancedBookForm({
     }))
   }
 
+  const removeNote = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      notes: prev.notes.filter((_, i) => i !== index)
+    }))
+  }
+
   const addLink = () => {
     setFormData(prev => ({
       ...prev,
@@ -311,6 +489,170 @@ export function EnhancedBookForm({
     }))
   }
 
+  // ---------- Open Library ISBN lookup ----------
+  // Ensures the option list contains `value` (case-insensitive
+  // de-dupe). Returns the value the select should now show.
+  const ensureOption = (
+    list: string[],
+    setter: (next: string[]) => void,
+    value: string
+  ): string => {
+    const cleaned = (value || '').trim()
+    if (!cleaned) return ''
+    const exists = list.some((v) => v.toLowerCase() === cleaned.toLowerCase())
+    if (!exists) setter([...list, cleaned])
+    return cleaned
+  }
+
+  // Apply an Open Library record to the form. The Open Library
+  // record maps onto:
+  //   - direct scalar fields (title, subtitle, isbn, ...)
+  //   - the primary author (first name in the authors array)
+  //   - the added-entries list (every other author, so the
+  //     first author slot doesn't get cluttered with co-authors)
+  //   - publisher + publish place + publish date (year)
+  //   - physical format -> material type / subtype
+  //   - the cover, but only stored locally (no upload here)
+  //
+  // New option values (e.g. a previously-unseen material type
+  // like "Audio CD") are auto-appended to the corresponding
+  // dropdown so the user can always accept the scraped value.
+  const applyOpenLibraryData = useCallback((book: OpenLibraryBook) => {
+    // 1. Auto-extend dropdowns with any new values.
+    const materialType = ensureOption(
+      materialTypeOptions,
+      setMaterialTypeOptions,
+      book.materialType
+    )
+    const subtype = ensureOption(subtypeOptions, setSubtypeOptions, book.subtype)
+    // interestLevel / lexile / fountasPinnell don't have
+    // direct Open Library equivalents, but if the lookup did
+    // provide a value we still want to surface it.
+    const interestLevel = ensureOption(
+      interestLevelOptions,
+      setInterestLevelOptions,
+      (book.raw?.interest_level as string) || ''
+    )
+    const lexile = ensureOption(
+      lexileOptions,
+      setLexileOptions,
+      (book.raw?.lexile_code as string) || ''
+    )
+    const fountasPinnell = ensureOption(
+      fountasPinnellOptions,
+      setFountasPinnellOptions,
+      (book.raw?.fountas_pinnell as string) || ''
+    )
+
+    // 2. Build the alternate titles list. Open Library
+    //    exposes these as `subjects` (the most common
+    //    ones are sub-titles) and `alternative_title` /
+    //    `subtitle`. We collect anything that looks like an
+    //    extra title.
+    const altTitleCandidates: string[] = []
+    if (book.subtitle) altTitleCandidates.push(book.subtitle)
+    if (Array.isArray(book.raw?.subjects)) {
+      book.raw.subjects
+        .filter((s: any) => typeof s === 'string')
+        .slice(0, 8)
+        .forEach((s: string) => altTitleCandidates.push(s))
+    }
+    // The "brief" alternate title (single field) takes the
+    // first non-empty alternate; the full list is preserved
+    // in `coAuthors`-adjacent "Notes" if the user wants
+    // to copy it over manually.
+    const alternateTitle = book.subtitle || book.title
+
+    // 3. Build the added-entries (contributors) list. Every
+    //    author beyond the primary is added as a "Co-Author"
+    //    entry — the form's "Added Entries" tab lets the user
+    //    change the role / dates freely.
+    const addedEntries = book.coAuthors.map((name) => ({
+      name,
+      dates: '',
+      role: 'Co-Author'
+    }))
+
+    // 4. Build a starter Notes array. The description (if
+    //    Open Library returned one) is added first as a
+    //    "Summary" note so it lands on top of the list; any
+    //    subjects are added below as "General" notes.
+    const notes: Array<{ type: string; content: string }> = []
+    if (book.description) {
+      notes.push({ type: 'Summary', content: book.description })
+    }
+    if (book.subjects.length > 0) {
+      book.subjects.slice(0, 5).forEach((content) => {
+        notes.push({ type: 'General', content })
+      })
+    }
+
+    // 5. Compute the LCCN / ISSN from the merged identifier
+    //    arrays. Open Library sometimes returns more than one
+    //    value; we take the first.
+    const lccn = book.lccn[0] || ''
+    const issn = book.issn[0] || ''
+
+    // 6. Publish place: Open Library returns an array. Take
+    //    the first non-empty value.
+    const publicationPlace = book.publishPlaces[0] || ''
+
+    // 7. Year: prefer the explicitly extracted year, fall back
+    //    to whatever we can pull from the raw date string.
+    const publicationYear = book.publishYear || ''
+
+    setFormData((prev) => ({
+      ...prev,
+      // Brief Title
+      title: book.title || prev.title,
+      alternateTitle,
+      // Open Library doesn't expose MARC "uniform title" or
+      // "varying form" — leave as-is.
+      // Series uniform title similarly left as-is.
+      // Primary author: take from the lookup but don't blow
+      // away a value the user has already typed manually.
+      book_author: book.primaryAuthor || prev.book_author,
+      authorName: book.primaryAuthor || prev.authorName,
+
+      // Title Information
+      subtitle: book.subtitle,
+      edition: (book.raw?.edition_statement as string) || prev.edition,
+      lccn,
+      isbn: book.isbn,
+      issn,
+      materialType: materialType || prev.materialType,
+      subtype: subtype || prev.subtype,
+      publicationPlace,
+      publisher: book.publishers[0] || '',
+      publication_year: publicationYear,
+      extent: book.numberOfPages,
+      size: [book.physicalDimensions, book.weight]
+        .filter(Boolean)
+        .join(' · '),
+
+      // Reading-level selects (only fill when the lookup
+      // actually returned something — otherwise keep the
+      // current value).
+      interestLevel: interestLevel || prev.interestLevel,
+      lexile: lexile || prev.lexile,
+      fountasPinnell: fountasPinnell || prev.fountasPinnell,
+
+      // Series/Notes
+      // Keep the existing series title; Open Library doesn't
+      // expose a uniform series name.
+      notes: notes.length > 0 ? notes : prev.notes,
+
+      // Added Entries
+      coAuthors: addedEntries.length > 0 ? addedEntries : prev.coAuthors
+    }))
+  }, [
+    materialTypeOptions,
+    subtypeOptions,
+    interestLevelOptions,
+    lexileOptions,
+    fountasPinnellOptions
+  ])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -342,9 +684,22 @@ export function EnhancedBookForm({
     }
     
     // If book_author is empty but we have coAuthors, use the first coAuthor as the main author
+    // Derive `summary` from the first note with type "Summary"
+    // so the public /browse page can render it on the card.
+    // If no Summary note exists, fall back to the existing
+    // formData.summary so the user can still set it manually
+    // (the form's notes panel is the primary source though).
+    const firstSummaryNote = formData.notes.find(
+      (n) => n.type === 'Summary' && n.content && n.content.trim()
+    )
+    const derivedSummary = firstSummaryNote
+      ? firstSummaryNote.content.trim()
+      : (typeof formData.summary === 'string' ? formData.summary : '')
+
     const submissionData = {
       ...formData,
-      book_author: formData.book_author.trim() || formData.coAuthors.find(a => a.name.trim())?.name || ''
+      book_author: formData.book_author.trim() || formData.coAuthors.find(a => a.name.trim())?.name || '',
+      summary: derivedSummary
     }
     
     await onSubmit(submissionData)
@@ -385,6 +740,38 @@ export function EnhancedBookForm({
             {/* Brief Title Tab */}
             {activeTab === 'brief' && (
               <div className="space-y-6">
+                {/* Auto-fill via Open Library: a single button
+                    opens a small ISBN prompt, fetches the
+                    record, and (on confirm) populates all the
+                    fields below. The button is shown only on
+                    the Brief Title tab so it doesn't compete
+                    with the rest of the form chrome. */}
+                <div className="flex items-center justify-between gap-3 p-3 rounded-md border border-dashed border-blue-200 bg-blue-50/50">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-md bg-blue-100 flex items-center justify-center flex-shrink-0">
+                      <i className="fas fa-wand-magic-sparkles text-blue-600"></i>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900">
+                        Auto-fill from ISBN
+                      </p>
+                      <p className="text-xs text-gray-600 truncate">
+                        Enter an ISBN to pull title, author, publisher,
+                        year, format, identifiers, and subjects from
+                        Open Library.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => setShowIsbnModal(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white flex-shrink-0"
+                  >
+                    <i className="fas fa-barcode mr-1.5"></i>
+                    Lookup by ISBN
+                  </Button>
+                </div>
+
                 {/* Title Section */}
                 <div className="space-y-4">
                   <div>
@@ -534,11 +921,9 @@ export function EnhancedBookForm({
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
-                        <option value="Book">Book</option>
-                        <option value="eBook">eBook</option>
-                        <option value="Audiobook">Audiobook</option>
-                        <option value="DVD">DVD</option>
-                        <option value="Magazine">Magazine</option>
+                        {materialTypeOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -549,9 +934,9 @@ export function EnhancedBookForm({
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
-                        <option value="Paperback">Paperback</option>
-                        <option value="Hardcover">Hardcover</option>
-                        <option value="Board Book">Board Book</option>
+                        {subtypeOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -642,7 +1027,29 @@ export function EnhancedBookForm({
                       <select
                         name="category_id"
                         value={formData.category_id}
-                        onChange={handleInputChange}
+                        onChange={(e) => {
+                          // The form's `handleInputChange` is
+                          // for plain text/number fields. The
+                          // category / section selects need
+                          // their own handler so we can detect
+                          // the special "__add_new__" value the
+                          // user picks from the inline option.
+                          const v = e.target.value
+                          if (v === '__add_new__') {
+                            setInlineAdd({
+                              kind: 'category',
+                              title: 'Add New Category',
+                              endpoint: '/api/book-categories',
+                              fieldName: 'category_id'
+                            })
+                            // Reset the select back to its
+                            // current value so the inline modal
+                            // is the only visible state.
+                            e.target.value = String(formData.category_id ?? '')
+                            return
+                          }
+                          handleInputChange(e)
+                        }}
                         required
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
@@ -650,6 +1057,9 @@ export function EnhancedBookForm({
                         {categories.map(c => (
                           <option key={c.category_id} value={c.category_id}>{c.name}</option>
                         ))}
+                        <option value="__add_new__" className="font-semibold text-blue-600">
+                          + Add new category…
+                        </option>
                       </select>
                     </div>
                     <div>
@@ -657,13 +1067,29 @@ export function EnhancedBookForm({
                       <select
                         name="section_id"
                         value={formData.section_id}
-                        onChange={handleInputChange}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          if (v === '__add_new__') {
+                            setInlineAdd({
+                              kind: 'section',
+                              title: 'Add New Section',
+                              endpoint: '/api/sections',
+                              fieldName: 'section_id'
+                            })
+                            e.target.value = String(formData.section_id ?? '')
+                            return
+                          }
+                          handleInputChange(e)
+                        }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
                         <option value="">No section</option>
                         {sections.map(s => (
                           <option key={s.section_id} value={s.section_id}>{s.name}</option>
                         ))}
+                        <option value="__add_new__" className="font-semibold text-blue-600">
+                          + Add new section…
+                        </option>
                       </select>
                     </div>
                   </div>
@@ -722,10 +1148,9 @@ export function EnhancedBookForm({
                       onChange={handleInputChange}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
-                      <option value="Adult">Adult</option>
-                      <option value="Young Adult">Young Adult</option>
-                      <option value="Middle Grade">Middle Grade</option>
-                      <option value="Early Readers">Early Readers</option>
+                      {interestLevelOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -737,10 +1162,9 @@ export function EnhancedBookForm({
                       onChange={handleInputChange}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
-                      <option value="No Code">No Code</option>
-                      <option value="BR">BR (Beginning Reader)</option>
-                      <option value="NP">NP (Non-Prose)</option>
-                      <option value="HL">HL (High-Low)</option>
+                      {lexileOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -752,12 +1176,9 @@ export function EnhancedBookForm({
                       onChange={handleInputChange}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
-                      <option value="Any Level">Any Level</option>
-                      <option value="Level A">Level A</option>
-                      <option value="Level B">Level B</option>
-                      <option value="Level C">Level C</option>
-                      <option value="Level D">Level D</option>
-                      <option value="Level Z">Level Z</option>
+                      {fountasPinnellOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -775,15 +1196,26 @@ export function EnhancedBookForm({
                     <div className="space-y-3">
                       {formData.notes.map((note, index) => (
                         <div key={index} className="space-y-2 p-3 border border-gray-200 rounded">
-                          <select
-                            value={note.type}
-                            onChange={(e) => updateNote(index, 'type', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                          >
-                            <option value="Summary">Summary</option>
-                            <option value="Content">Content</option>
-                            <option value="General">General</option>
-                          </select>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={note.type}
+                              onChange={(e) => updateNote(index, 'type', e.target.value)}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
+                            >
+                              <option value="Summary">Summary</option>
+                              <option value="Content">Content</option>
+                              <option value="General">General</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => removeNote(index)}
+                              className="inline-flex items-center justify-center w-9 h-9 text-red-600 hover:bg-red-50 border border-red-200 rounded-md transition-colors"
+                              title="Remove this note"
+                              aria-label="Remove note"
+                            >
+                              <i className="fas fa-trash-can text-sm"></i>
+                            </button>
+                          </div>
                           <textarea
                             value={note.content}
                             onChange={(e) => updateNote(index, 'content', e.target.value)}
@@ -869,11 +1301,9 @@ export function EnhancedBookForm({
                       onChange={handleInputChange}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
-                      <option value="Book">Book</option>
-                      <option value="eBook">eBook</option>
-                      <option value="Audiobook">Audiobook</option>
-                      <option value="DVD">DVD</option>
-                      <option value="Magazine">Magazine</option>
+                      {materialTypeOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -884,9 +1314,9 @@ export function EnhancedBookForm({
                       onChange={handleInputChange}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
-                      <option value="Paperback">Paperback</option>
-                      <option value="Hardcover">Hardcover</option>
-                      <option value="Board Book">Board Book</option>
+                      {subtypeOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -994,7 +1424,20 @@ export function EnhancedBookForm({
                     <select
                       name="category_id"
                       value={formData.category_id}
-                      onChange={handleInputChange}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === '__add_new__') {
+                          setInlineAdd({
+                            kind: 'category',
+                            title: 'Add New Category',
+                            endpoint: '/api/book-categories',
+                            fieldName: 'category_id'
+                          })
+                          e.target.value = String(formData.category_id ?? '')
+                          return
+                        }
+                        handleInputChange(e)
+                      }}
                       required
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
@@ -1002,6 +1445,9 @@ export function EnhancedBookForm({
                       {categories.map(c => (
                         <option key={c.category_id} value={c.category_id}>{c.name}</option>
                       ))}
+                      <option value="__add_new__" className="font-semibold text-blue-600">
+                        + Add new category…
+                      </option>
                     </select>
                   </div>
                   <div>
@@ -1009,13 +1455,29 @@ export function EnhancedBookForm({
                     <select
                       name="section_id"
                       value={formData.section_id}
-                      onChange={handleInputChange}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === '__add_new__') {
+                          setInlineAdd({
+                            kind: 'section',
+                            title: 'Add New Section',
+                            endpoint: '/api/sections',
+                            fieldName: 'section_id'
+                          })
+                          e.target.value = String(formData.section_id ?? '')
+                          return
+                        }
+                        handleInputChange(e)
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
                       <option value="">No section</option>
                       {sections.map(s => (
                         <option key={s.section_id} value={s.section_id}>{s.name}</option>
                       ))}
+                      <option value="__add_new__" className="font-semibold text-blue-600">
+                        + Add new section…
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -1208,11 +1670,11 @@ export function EnhancedBookForm({
         </div>
         <div className="flex gap-3">
           {onCancel && (
-            <Button type="button" onClick={onCancel} variant="outline">
+            <Button type="button" onClick={onCancel} variant="outline" className='px-4 py-5 bg-gray-200 hover:bg-gray-300'>
               Cancel
             </Button>
           )}
-          <Button type="submit" disabled={loading}>
+          <Button type="submit" disabled={loading} className='bg-primary-600 hover:bg-primary-700 text-white px-4 py-5'>
             {loading ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
@@ -1227,6 +1689,72 @@ export function EnhancedBookForm({
           </Button>
         </div>
       </div>
+
+      {/* Open Library ISBN lookup modal. Drives the
+          "Auto-fill from ISBN" button in the Brief Title tab.
+          The modal itself is a two-step wizard (input →
+          preview) and the result is funneled back into the
+          form via `applyOpenLibraryData`. */}
+      <IsbnLookupModal
+        isOpen={showIsbnModal}
+        onClose={() => setShowIsbnModal(false)}
+        onApply={applyOpenLibraryData}
+      />
+
+      {/* Inline "Add new category / section" modal — opened
+          by selecting the special `__add_new__` option in the
+          category or section <select>. The modal uses the
+          server endpoint that already exists, then appends the
+          new record to the local list and auto-selects it. */}
+      {inlineAdd && (
+        <AddOptionModal
+          isOpen={true}
+          onClose={() => setInlineAdd(null)}
+          title={inlineAdd.title}
+          description="Created categories and sections are saved to the
+            library and become available to every book record."
+          icon={inlineAdd.kind === 'category' ? 'fa-folder' : 'fa-layer-group'}
+          endpoint={inlineAdd.endpoint}
+          existingOptions={
+            inlineAdd.kind === 'category'
+              ? categories.map((c) => ({ id: c.category_id, name: c.name }))
+              : sections.map((s) => ({ id: s.section_id, name: s.name }))
+          }
+          mode="name-and-description"
+          onAdded={(item) => {
+            // Push the freshly-created item into the matching
+            // local list and select it. The select's special
+            // `__add_new__` option only carries a string value,
+            // so we treat the numeric id (category_id /
+            // section_id) as the source of truth here.
+            if (inlineAdd.kind === 'category') {
+              setCategories((prev) => {
+                if (prev.some((c) => c.category_id === item.id)) return prev
+                return [
+                  ...prev,
+                  { category_id: item.id as number, name: item.name }
+                ]
+              })
+              setFormData((prev) => ({
+                ...prev,
+                [inlineAdd.fieldName]: item.id as number
+              }))
+            } else {
+              setSections((prev) => {
+                if (prev.some((s) => s.section_id === item.id)) return prev
+                return [
+                  ...prev,
+                  { section_id: item.id as number, name: item.name }
+                ]
+              })
+              setFormData((prev) => ({
+                ...prev,
+                [inlineAdd.fieldName]: item.id as number
+              }))
+            }
+          }}
+        />
+      )}
     </form>
   )
-}
+})

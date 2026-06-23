@@ -157,6 +157,7 @@ export default function OfficeViewPage() {
               <Button
                 variant="outline"
                 onClick={() => router.push(`/offices/${officeId}/edit`)}
+                className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-5"
               >
                 <i className="fas fa-edit mr-2" />
                 Edit Office

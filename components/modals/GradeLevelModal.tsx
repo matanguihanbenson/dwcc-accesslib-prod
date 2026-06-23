@@ -231,14 +231,14 @@ export default function GradeLevelModal({
               variant="outline"
               onClick={handleClose}
               disabled={processing}
-              className="flex-1"
+              className="flex-1 bg-gray-200 px-4 py-5 hover:bg-gray-300"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={processing}
-              className="flex-1"
+              className="flex-1 bg-primary-600 px-4 py-5 text-white hover:bg-primary-700"
             >
               {processing ? 'Saving...' : isEditMode ? 'Update' : 'Create'}
             </Button>

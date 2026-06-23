@@ -224,11 +224,13 @@ export const POST = withAuth(
           }
         })
 
-        // Send notifications to all ADMIN and SUPER_ADMIN users
+        // Send notifications to ADMIN users only. SUPER_ADMIN
+        // oversees the whole system and doesn't approve book
+        // borrows, so they are intentionally excluded.
         try {
           const adminUsers = await prisma.userAccount.findMany({
             where: {
-              role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+              role: 'ADMIN',
               is_active: true
             },
             include: {

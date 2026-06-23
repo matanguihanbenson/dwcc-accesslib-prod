@@ -98,5 +98,5 @@ export const POST = withAuth(
       keyFields: ['account_id', 'email', 'full_name'] // Key fields for duplicate detection
     }
   ),
-  [UserRole.SUPER_ADMIN, UserRole.ADMIN]
+  [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF]
 )

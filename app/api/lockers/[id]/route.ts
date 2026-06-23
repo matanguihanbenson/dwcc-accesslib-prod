@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth, createSuccessResponse, createErrorResponse, validateId } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
-import { UserRole } from '@/types'
+import { UserRole, Campus } from '@/types'
 import { AuditService } from '@/lib/services/audit.service'
 
 // PATCH /api/lockers/[id] - Update locker (Admin only)
@@ -14,9 +14,9 @@ export const PATCH = withAuth(
       const resolvedParams = await params
       const lockerId = validateId(resolvedParams.id, 'Locker ID')
       const body = await req.json()
-      const { locker_number, location, status, unarchive } = body
-      
-      console.log('Update Locker - Validated:', { lockerId, locker_number, location, status })
+      const { locker_number, location, status, unarchive, campus } = body
+
+      console.log('Update Locker - Validated:', { lockerId, locker_number, location, status, campus })
 
       // Check if locker exists
       const existing = await prisma.locker.findUnique({
@@ -46,7 +46,13 @@ export const PATCH = withAuth(
       if (locker_number) updateData.locker_number = locker_number
       if (location) updateData.location = location
       if (status) updateData.status = status
-      
+      // Allow re-designating the locker's campus from the update
+      // modal. Validate against the Campus enum so a typo can't
+      // silently misroute assignments.
+      if (campus === Campus.COLLEGE || campus === Campus.BASIC_EDUCATION) {
+        updateData.campus = campus
+      }
+
       if (unarchive === true) {
         if (existing.rfid_code) {
           const conflictingLocker = await prisma.locker.findFirst({
@@ -99,7 +105,9 @@ export const PATCH = withAuth(
         parseInt(session.user.id),
         session.user.role as UserRole,
         'UPDATE_LOCKER',
-        `Updated locker ${updated.locker_number}`
+        campus
+          ? `Updated locker ${updated.locker_number} (re-designated campus to ${updated.campus})`
+          : `Updated locker ${updated.locker_number}`
       )
 
       return createSuccessResponse(updated, 'Locker updated successfully')

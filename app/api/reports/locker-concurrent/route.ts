@@ -1,17 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
-import { LockerStatisticsReportData } from '@/types'
+import { LockerStatisticsReportData, UserRole, Campus } from '@/types'
 import { categorizeUserForEntranceExit } from '@/lib/utils'
-import { UserRole } from '@prisma/client'
 
-export const GET = withAuth(async (req: NextRequest) => {
+/**
+ * Auto-scope STAFF to their own campus. The campus lives on the
+ * `locker` row, so the filter goes through the locker relation
+ * (`locker: { campus: ... }`). ADMIN / SUPER_ADMIN can pass an
+ * explicit `campus` query param.
+ */
+async function resolveReportCampus(
+  session: any,
+  queryCampus: string | null
+): Promise<Campus | null> {
+  if (session?.user?.role === UserRole.STAFF) {
+    const accountId = parseInt(session.user.id || '0')
+    if (!isNaN(accountId) && accountId > 0) {
+      const account = await prisma.userAccount.findUnique({
+        where: { id: accountId },
+        select: { campus: true }
+      })
+      if (account?.campus) return account.campus
+    }
+  }
+  if (queryCampus === Campus.COLLEGE || queryCampus === Campus.BASIC_EDUCATION) {
+    return queryCampus
+  }
+  return null
+}
+
+export const GET = withAuth(async (req: NextRequest, session) => {
   try {
     const { searchParams } = new URL(req.url)
     const monthParam = searchParams.get('month')
     const yearParam = searchParams.get('year')
     const dateFrom = searchParams.get('date_from')
     const dateTo = searchParams.get('date_to')
+    const queryCampus = searchParams.get('campus')
 
     // Determine date range
     let startDate: Date
@@ -45,9 +71,15 @@ export const GET = withAuth(async (req: NextRequest) => {
       return createErrorResponse('Month and year, or date range is required', 400)
     }
 
+    // Auto-scope by campus (filter via the locker relation since
+    // locker_transaction has no campus column of its own).
+    const effectiveCampus = await resolveReportCampus(session, queryCampus)
+    const campusWhere = effectiveCampus ? { locker: { campus: effectiveCampus } } : {}
+
     // Fetch all locker transactions that overlap with the month
     const lockerTransactions = await prisma.lockerTransaction.findMany({
       where: {
+        ...campusWhere,
         OR: [
           {
             // Transactions that started in this month

@@ -13,6 +13,9 @@ interface User {
   username: string
   role: string
   is_active: boolean
+  /** Current campus designation. NULL for ADMIN / SUPER_ADMIN and for
+   *  legacy rows predating the campus feature. */
+  campus?: 'COLLEGE' | 'BASIC_EDUCATION' | null
   user: {
     user_id: number
     full_name: string
@@ -77,6 +80,10 @@ function StaffAccounts() {
   const [showRfidBindModal, setShowRfidBindModal] = useState(false)
   const [rfidBindUser, setRfidBindUser] = useState<{id: number, name: string, currentRfid: string | null} | null>(null)
   const [rfidInput, setRfidInput] = useState('')
+  const [showCampusModal, setShowCampusModal] = useState(false)
+  const [campusUser, setCampusUser] = useState<{id: number, name: string, currentCampus: 'COLLEGE' | 'BASIC_EDUCATION' | null} | null>(null)
+  const [campusInput, setCampusInput] = useState<'COLLEGE' | 'BASIC_EDUCATION'>('COLLEGE')
+  const [campusBusy, setCampusBusy] = useState(false)
 
   // Mutation hooks for staff operations
   const { execute: toggleStatus, loading: toggleLoading } = useApi({
@@ -189,6 +196,66 @@ function StaffAccounts() {
     setShowRfidBindModal(false)
     setRfidBindUser(null)
     setRfidInput('')
+  }
+
+  // ---- Campus reassignment modal ----
+  const handleOpenCampusModal = (
+    userId: number,
+    fullName: string,
+    currentCampus: 'COLLEGE' | 'BASIC_EDUCATION' | null
+  ) => {
+    setCampusUser({ id: userId, name: fullName, currentCampus })
+    setCampusInput(currentCampus ?? 'COLLEGE')
+    setShowCampusModal(true)
+  }
+
+  const handleCloseCampusModal = () => {
+    if (campusBusy) return
+    setShowCampusModal(false)
+    setCampusUser(null)
+    setCampusInput('COLLEGE')
+  }
+
+  const handleSubmitCampusReassignment = async () => {
+    if (!campusUser) return
+    if (campusUser.currentCampus === campusInput) {
+      await notify.info(
+        'No change',
+        `${campusUser.name} is already assigned to ${campusInput === 'COLLEGE' ? 'College' : 'Basic Education'}.`
+      )
+      handleCloseCampusModal()
+      return
+    }
+    setCampusBusy(true)
+    try {
+      const response = await fetch(`/api/staff-accounts/${campusUser.id}/campus`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ campus: campusInput })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (response.ok) {
+        await notify.success(
+          'Campus updated',
+          data.message ||
+            `${campusUser.name} re-designated to ${campusInput === 'COLLEGE' ? 'College' : 'Basic Education'}.`
+        )
+        handleCloseCampusModal()
+        // Tiny delay so the DB write commits before SWR re-fetches.
+        setTimeout(() => {
+          refreshStaffUsers()
+          invalidateUserData()
+        }, 300)
+      } else {
+        await notify.error('Error', data.error || 'Failed to re-designate campus')
+      }
+    } catch (error) {
+      console.error('Error re-designating campus:', error)
+      await notify.error('Error', 'Network error occurred')
+    } finally {
+      setCampusBusy(false)
+    }
   }
 
   const handleBindRfid = async (userId: number, fullName: string, newRfid: string) => {
@@ -336,7 +403,7 @@ function StaffAccounts() {
       </div>
 
       {/* Content */}
-      <div className="px-6 py-4">
+      <div className="py-4">
         {/* Search and Filters */}
         <div className="mb-6 space-y-4">
           <div className="flex flex-col lg:flex-row gap-4">
@@ -407,9 +474,12 @@ function StaffAccounts() {
                       Role
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Campus
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-56">
                       Actions
                     </th>
                   </tr>
@@ -417,7 +487,7 @@ function StaffAccounts() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {currentUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                         {searchTerm || statusFilter ? 'No staff accounts found matching your filters.' : 'No staff accounts found.'}
                       </td>
                     </tr>
@@ -466,6 +536,20 @@ function StaffAccounts() {
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
                             {user.role}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {user.campus ? (
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-1 text-xs font-semibold rounded-full ${
+                              user.campus === 'COLLEGE'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              <i className={`fas ${user.campus === 'COLLEGE' ? 'fa-graduation-cap' : 'fa-school'} text-[10px]`} />
+                              {user.campus === 'COLLEGE' ? 'College' : 'Basic Education'}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">—</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(user.is_active)}`}>
@@ -517,6 +601,16 @@ function StaffAccounts() {
                             >
                               <i className="fas fa-key"></i>
                             </button>
+
+                            {(userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') && (
+                              <button
+                                onClick={() => handleOpenCampusModal(user.id, user.user.full_name || 'Staff', user.campus || null)}
+                                className="text-teal-600 hover:text-teal-900 px-2 py-1 text-sm border border-teal-600 hover:bg-teal-50 rounded transition-colors"
+                                title={user.campus ? `Reassign campus (currently ${user.campus === 'COLLEGE' ? 'College' : 'Basic Education'})` : 'Assign campus'}
+                              >
+                                <i className="fas fa-school"></i>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -773,6 +867,124 @@ function StaffAccounts() {
                     </div>
                   </form>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Campus Reassignment Modal — ADMIN / SUPER_ADMIN only. */}
+        {showCampusModal && campusUser && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Reassign Campus
+                  </h3>
+                  <button
+                    onClick={handleCloseCampusModal}
+                    disabled={campusBusy}
+                    className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-6 py-4">
+                <p className="text-sm text-gray-600 mb-1">
+                  Staff: <span className="font-semibold text-gray-900">{campusUser.name}</span>
+                </p>
+                <p className="text-sm text-gray-600 mb-4">
+                  Current campus:{' '}
+                  <span className="font-semibold text-gray-900">
+                    {campusUser.currentCampus
+                      ? campusUser.currentCampus === 'COLLEGE'
+                        ? 'College Campus'
+                        : 'Basic Education Campus'
+                      : '— not yet assigned —'}
+                  </span>
+                </p>
+
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  New campus designation <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-2">
+                  <label className={`flex items-start gap-3 p-3 border rounded-md cursor-pointer transition-colors ${
+                    campusInput === 'COLLEGE' ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:bg-gray-50'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="campus"
+                      value="COLLEGE"
+                      checked={campusInput === 'COLLEGE'}
+                      onChange={() => setCampusInput('COLLEGE')}
+                      disabled={campusBusy}
+                      className="mt-1"
+                    />
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        <i className="fas fa-graduation-cap text-blue-600"></i>
+                        College Campus
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Future entries this staff logs will be stamped COLLEGE.
+                      </div>
+                    </div>
+                  </label>
+                  <label className={`flex items-start gap-3 p-3 border rounded-md cursor-pointer transition-colors ${
+                    campusInput === 'BASIC_EDUCATION' ? 'border-amber-500 bg-amber-50' : 'border-gray-300 hover:bg-gray-50'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="campus"
+                      value="BASIC_EDUCATION"
+                      checked={campusInput === 'BASIC_EDUCATION'}
+                      onChange={() => setCampusInput('BASIC_EDUCATION')}
+                      disabled={campusBusy}
+                      className="mt-1"
+                    />
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        <i className="fas fa-school text-amber-600"></i>
+                        Basic Education Campus
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Future entries this staff logs will be stamped BASIC_EDUCATION.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  Past entry-log records keep the campus they were stamped with at the time
+                  of entry. Only future entries are affected.
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleCloseCampusModal}
+                  disabled={campusBusy}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitCampusReassignment}
+                  disabled={campusBusy || campusUser.currentCampus === campusInput}
+                  className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                >
+                  {campusBusy && (
+                    <span className="inline-block h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  {campusUser.currentCampus === campusInput
+                    ? 'No change'
+                    : 'Save Campus'}
+                </button>
               </div>
             </div>
           </div>

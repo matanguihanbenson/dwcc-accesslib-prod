@@ -101,7 +101,7 @@ export const POST = withDuplicatePreventionByBody(
         )
       }
 
-      const { full_name, email, user_type, password, department_id, program_id, office_id, contact_number, rfid_code, purpose } = await req.json()
+      const { full_name, email, user_type, password, department_id, program_id, office_id, contact_number, rfid_code, purpose, account_id: providedAccountId } = await req.json()
 
       // Validate required fields
       if (!full_name || !password) {
@@ -131,17 +131,52 @@ export const POST = withDuplicatePreventionByBody(
         }
       }
 
-      // Generate unique account_id
-      const timestamp = Date.now()
-      const account_id = `ADMIN-${timestamp}`
+      // ID Number / Username. Super admin enters this manually
+      // (e.g. "libadmin.2024") instead of the previous
+      // auto-generated `ADMIN-${timestamp}`. The same value is
+      // used as both `User.account_id` (the human-readable ID
+      // shown in reports / activity logs) and
+      // `UserAccount.username` (the login name).
+      const account_id = (providedAccountId || '').trim()
+      if (!account_id) {
+        return NextResponse.json(
+          { error: 'ID Number / Username is required' },
+          { status: 400 }
+        )
+      }
+      if (!/^[A-Za-z0-9._-]{3,20}$/.test(account_id)) {
+        return NextResponse.json(
+          { error: 'ID Number / Username must be 3-20 characters (letters, numbers, . _ -)' },
+          { status: 400 }
+        )
+      }
+      // Reject values that look like a generated fallback so a
+      // genuine typo can't collide with the legacy `ADMIN-*`
+      // pattern from older records.
+      if (/^ADMIN-\d+$/i.test(account_id)) {
+        return NextResponse.json(
+          { error: 'ID Number / Username cannot use the auto-generated ADMIN-* format' },
+          { status: 400 }
+        )
+      }
 
-      // Check if account_id already exists (unlikely but safe)
-      const existingAccount = await prisma.user.findUnique({
+      // Check uniqueness against both `User.account_id` and
+      // `UserAccount.username`.
+      const existingUser = await prisma.user.findUnique({
         where: { account_id }
       })
-      if (existingAccount) {
+      if (existingUser) {
         return NextResponse.json(
-          { error: 'Generated account ID conflict. Please try again.' },
+          { error: 'ID Number already exists' },
+          { status: 409 }
+        )
+      }
+      const existingUsername = await prisma.userAccount.findUnique({
+        where: { username: account_id }
+      })
+      if (existingUsername) {
+        return NextResponse.json(
+          { error: 'Username already exists' },
           { status: 409 }
         )
       }
@@ -215,7 +250,7 @@ export const POST = withDuplicatePreventionByBody(
             actorId,
             token.role as any,
             'CREATE_ADMIN_ACCOUNT',
-            `Created ADMIN account for ${result.user.full_name} (${result.user.account_id})`,
+            `Created ADMIN account for ${result.user.full_name} (ID/username: ${account_id})`,
             req
           )
         }
@@ -242,6 +277,6 @@ export const POST = withDuplicatePreventionByBody(
   },
   {
     ttl: 15000,
-    keyFields: ['full_name', 'email']
+    keyFields: ['full_name', 'email', 'account_id']
   }
 )

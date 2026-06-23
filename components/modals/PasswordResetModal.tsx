@@ -80,7 +80,7 @@ export function PasswordResetModal({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <Card className="w-full max-w-md mx-4">
         <CardHeader>
-          <CardTitle className="text-center">Reset Password</CardTitle>
+          <CardTitle className="text-center pb-2">Reset Password</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="text-center">
@@ -165,14 +165,14 @@ export function PasswordResetModal({
             <Button
               onClick={handleClose}
               variant="outline"
-              className="flex-1"
+              className="flex-1 px-5 h-[50px] bg-gray-100 hover:bg-gray-200"
               disabled={isResetting || loading}
             >
               Cancel
             </Button>
             <Button
               onClick={handleReset}
-              className="flex-1"
+              className="flex-1 bg-primary-600 px-5 h-[50px]"
               disabled={isResetting || loading || !newPassword || !confirmPassword || !!passwordError}
             >
               {isResetting || loading ? (

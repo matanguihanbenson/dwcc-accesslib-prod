@@ -172,6 +172,7 @@ export default function ProgramViewPage() {
             <div className="flex items-center space-x-3">
               <Button
                 variant="outline"
+                className='bg-primary-600 px-4 py-5 text-white'
                 onClick={() => router.push(`/programs/${programId}/edit`)}
               >
                 <i className="fas fa-edit mr-2" />
@@ -269,6 +270,7 @@ export default function ProgramViewPage() {
               <Button
                 size="sm"
                 variant="outline"
+                className='bg-primary-600 px-4 py-5 text-white'
                 onClick={() => router.push(`/library-users?program=${programId}`)}
               >
                 <i className="fas fa-external-link-alt mr-2" />

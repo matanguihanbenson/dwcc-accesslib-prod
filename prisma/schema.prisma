@@ -73,12 +73,18 @@ model UserAccount {
   created_at     DateTime   @default(now()) @db.Timestamp(0)
   updated_at     DateTime?  @db.Timestamp(0)
   is_active      Boolean    @default(true)
+  // Current campus designation for staff accounts. NULL for ADMIN/
+  // SUPER_ADMIN (no campus) and for non-staff roles. The entry-log API
+  // stamps this value onto every new entry so historical records keep
+  // their original campus even if a staff is later re-designated.
+  campus         Campus?    @default(COLLEGE)
   audit_logs     AuditLog[]
   sessions       Session[]
   user           User       @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@index([last_login])
   @@index([locked_until])
+  @@index([campus])
   @@map("user_account")
 }
 
@@ -308,6 +314,11 @@ model Locker {
   locker_number       String              @unique @db.VarChar(20)
   location            String              @db.VarChar(100)
   status              LockerStatus        @default(AVAILABLE)
+  // Campus designation for the locker. Drives the LC-/LB- prefix on
+  // the locker number and the campus scope shown to STAFF users on the
+  // lockers page. Defaulted to COLLEGE so pre-existing rows that pre-
+  // date this column keep working without a backfill.
+  campus              Campus              @default(COLLEGE)
   created_at          DateTime            @default(now()) @db.Timestamp(0)
   updated_at          DateTime            @updatedAt @db.Timestamp(0)
   archived_at         DateTime?           @db.Timestamp(0)
@@ -317,6 +328,7 @@ model Locker {
   @@index([location])
   @@index([archived_at])
   @@index([rfid_code])
+  @@index([campus])
   @@map("locker")
 }
 
@@ -354,12 +366,14 @@ model EntryLog {
   rfid_code   String?   @db.VarChar(50)
   purpose     String?   @db.VarChar(100)
   verified_by Int?
+  campus      Campus    @default(COLLEGE)
   user        User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@index([user_id])
   @@index([entry_time])
   @@index([exit_time])
   @@index([rfid_code])
+  @@index([campus])
   @@map("entrylog")
 }
 
@@ -780,4 +794,12 @@ enum BookCopyStatus {
   LOST
   DAMAGED
   ARCHIVED
+}
+
+// Campus designation for staff accounts and entry-log audit. Drives
+// which campus a staff is currently responsible for and which campus a
+// logged entry was recorded against.
+enum Campus {
+  COLLEGE
+  BASIC_EDUCATION
 }

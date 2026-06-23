@@ -2,11 +2,25 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { notify } from '@/lib/notification'
 
+type Campus = 'COLLEGE' | 'BASIC_EDUCATION'
+
 interface AdminViewProps {
   lockers: any[]
   transactions: any[]
   onRefresh: () => void
 }
+
+
+function buildLockerNumber(raw: string, campus: Campus): string {
+  const digits = (raw || '').replace(/\D+/g, '')
+  if (!digits) return ''
+  const padded = digits.padStart(2, '0')
+  const prefix = campus === 'COLLEGE' ? 'LC' : 'LB'
+  return `${prefix}-${padded}`
+}
+
+const campusLabel = (c: Campus | null | undefined) =>
+  c === 'BASIC_EDUCATION' ? 'Basic Education Campus' : 'College Campus'
 
 function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -106,24 +120,34 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
   const [lockerForm, setLockerForm] = useState({
     lockerNumber: '',
     location: '',
+    campus: 'COLLEGE' as Campus,
     status: 'AVAILABLE'
   })
+
+  // The number the form will actually submit, derived from the raw
+  // user input + the selected campus. Shown in the Add modal as a
+  // live preview so the admin always sees what will be saved.
+  const resolvedLockerNumber = useMemo(
+    () => buildLockerNumber(lockerForm.lockerNumber, lockerForm.campus),
+    [lockerForm.lockerNumber, lockerForm.campus]
+  )
 
   const handleAddLocker = () => {
     setShowAddLockerModal(true)
     setLockerForm({
       lockerNumber: '',
-      location: 'Main Library',
+      location: 'College Campus',
+      campus: 'COLLEGE',
       status: 'AVAILABLE'
     })
   }
 
   const handleUpdateLocker = (locker: any) => {
     setSelectedLocker(locker)
-    setShowUpdateLockerModal(true)
     setLockerForm({
       lockerNumber: locker.locker_number,
       location: locker.location,
+      campus: (locker.campus as Campus) || 'COLLEGE',
       status: locker.status
     })
   }
@@ -131,8 +155,21 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
   const handleSubmitAddLocker = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!lockerForm.lockerNumber.trim() || !lockerForm.location.trim()) {
-      notify.error('Error', 'Please enter locker number and location')
+    if (!lockerForm.lockerNumber.trim() || !lockerForm.campus) {
+      notify.error('Error', 'Please enter a locker number and pick a campus')
+      return
+    }
+
+    // Auto-build the final locker number with the right prefix. The
+    // admin may type "1", "L-1", "LC-1", or "LB-1" -- the result is
+    // always `LC-01` (college) or `LB-01` (basic ed), depending on
+    // the selected campus.
+    const finalLockerNumber = buildLockerNumber(
+      lockerForm.lockerNumber,
+      lockerForm.campus
+    )
+    if (!finalLockerNumber) {
+      notify.error('Error', 'Locker number must contain at least one digit')
       return
     }
 
@@ -143,35 +180,42 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          locker_number: lockerForm.lockerNumber,
-          location: lockerForm.location
+          locker_number: finalLockerNumber,
+          // The location is now derived from the campus. Send the
+          // human-readable label so the Locker.location column still
+          // reads nicely if anyone looks at it directly in the DB.
+          location: campusLabel(lockerForm.campus),
+          campus: lockerForm.campus
         })
       })
 
       if (response.ok) {
-        notify.success('Success', `Locker ${lockerForm.lockerNumber} added successfully!`)
+        notify.success(
+          'Success',
+          `Locker ${finalLockerNumber} added to ${campusLabel(lockerForm.campus)}!`
+        )
         setShowAddLockerModal(false)
-        setLockerForm({ lockerNumber: '', location: '', status: 'AVAILABLE' })
+        setLockerForm({ lockerNumber: '', location: '', campus: 'COLLEGE', status: 'AVAILABLE' })
         onRefresh()
       } else {
         const error = await response.json()
-        
+
         // Check if there's an archived locker with the same name
         if (error.error === 'ARCHIVED_LOCKER_EXISTS') {
           setIsSubmitting(false)
-          
+
           const confirmed = await notify.confirm(
             'Archived Locker Found',
-            `Locker ${lockerForm.lockerNumber} exists in the archive. Would you like to restore it instead?`
+            `Locker ${finalLockerNumber} exists in the archive. Would you like to restore it instead?`
           )
-          
+
           if (confirmed) {
             // Restore the archived locker
             await handleRestoreArchivedLocker(error.data.locker_id)
           }
           return
         }
-        
+
         notify.error('Error', error.message || error.error || 'Failed to add locker')
       }
     } catch (error) {
@@ -197,7 +241,7 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
       if (response.ok) {
         notify.success('Success', 'Locker restored from archive successfully!')
         setShowAddLockerModal(false)
-        setLockerForm({ lockerNumber: '', location: '', status: 'AVAILABLE' })
+        setLockerForm({ lockerNumber: '', location: '', campus: 'COLLEGE', status: 'AVAILABLE' })
         onRefresh()
       } else {
         const error = await response.json()
@@ -213,8 +257,8 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
   const handleSubmitUpdateLocker = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!lockerForm.lockerNumber.trim() || !lockerForm.location.trim()) {
-      notify.error('Error', 'Please enter locker number and location')
+    if (!lockerForm.lockerNumber.trim() || !lockerForm.campus) {
+      notify.error('Error', 'Please enter a locker number and pick a campus')
       return
     }
 
@@ -225,14 +269,25 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
 
     setIsSubmitting(true)
     try {
+      // Re-apply the campus-prefix rule on edit too, so a typo in the
+      // existing locker number is corrected to the new campus's prefix.
+      const finalLockerNumber = buildLockerNumber(
+        lockerForm.lockerNumber,
+        lockerForm.campus
+      )
+      if (!finalLockerNumber) {
+        notify.error('Error', 'Locker number must contain at least one digit')
+        return
+      }
       const payload = {
-        locker_number: lockerForm.lockerNumber.trim(),
-        location: lockerForm.location.trim(),
+        locker_number: finalLockerNumber,
+        location: campusLabel(lockerForm.campus),
+        campus: lockerForm.campus,
         status: lockerForm.status
       }
-      
+
       console.log('Updating locker:', selectedLocker.locker_id, payload)
-      
+
       const response = await fetch(`/api/lockers/${selectedLocker.locker_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -247,7 +302,7 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
         notify.success('Success', result.message || 'Locker updated successfully!')
         setShowUpdateLockerModal(false)
         setSelectedLocker(null)
-        setLockerForm({ lockerNumber: '', location: '', status: 'AVAILABLE' })
+        setLockerForm({ lockerNumber: '', location: '', campus: 'COLLEGE', status: 'AVAILABLE' })
         onRefresh()
       } else {
         notify.error('Error', result.error || result.message || 'Failed to update locker')
@@ -616,6 +671,9 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                   <i className="fas fa-map-marker-alt mr-2 text-gray-400"></i>Location
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <i className="fas fa-school mr-2 text-gray-400"></i>Campus
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                   <i className="fas fa-info-circle mr-2 text-gray-400"></i>Status
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -633,9 +691,9 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
-              {filteredLockers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center">
+                {filteredLockers.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center justify-center text-gray-400">
                       <i className="fas fa-inbox text-4xl mb-3"></i>
                       <p className="text-sm font-medium">No lockers found</p>
@@ -653,6 +711,19 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-700">{locker.location}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {locker.campus === 'BASIC_EDUCATION' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+                          <i className="fas fa-school text-[10px]"></i>
+                          Basic Ed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                          <i className="fas fa-graduation-cap text-[10px]"></i>
+                          College
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-3 py-1.5 inline-flex text-xs leading-5 font-semibold rounded-lg ${getStatusBadge(locker.status)}`}>
@@ -1056,6 +1127,24 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
             <form onSubmit={handleSubmitAddLocker} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Campus *
+                </label>
+                <select
+                  value={lockerForm.campus}
+                  onChange={(e) =>
+                    setLockerForm(prev => ({ ...prev, campus: e.target.value as Campus }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  required
+                >
+                  <option value="COLLEGE">College Campus (LC-)</option>
+                  <option value="BASIC_EDUCATION">Basic Education Campus (LB-)</option>
+                </select>
+               
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Locker Number *
                 </label>
                 <input
@@ -1063,23 +1152,22 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                   value={lockerForm.lockerNumber}
                   onChange={(e) => setLockerForm(prev => ({ ...prev, lockerNumber: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="e.g., L-051"
+                  placeholder="e.g., 1, 051, L-051, LC-051"
                   required
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Location *
-                </label>
-                  <input
-                    type="text"
-                  value={lockerForm.location}
-                  onChange={(e) => setLockerForm(prev => ({ ...prev, location: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="e.g., Main Library"
-                  required
-                />
+                <p className="mt-1 text-xs text-gray-500">
+                  You can type just a number. The <code>{lockerForm.campus === 'COLLEGE' ? 'LC-' : 'LB-'}</code> prefix
+                  is added automatically based on the selected campus.
+                </p>
+                {resolvedLockerNumber && (
+                  <div className="mt-2 px-3 py-2 rounded-md bg-green-50 border border-green-200 text-sm text-green-800 flex items-center gap-2">
+                    <i className="fas fa-tag"></i>
+                    <span>
+                      Will be saved as:{' '}
+                      <span className="font-mono font-bold">{resolvedLockerNumber}</span>
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -1093,7 +1181,7 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !resolvedLockerNumber}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors disabled:opacity-50"
                 >
                   {isSubmitting ? 'Adding...' : 'Add Locker'}
@@ -1118,6 +1206,27 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
             <form onSubmit={handleSubmitUpdateLocker} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Campus *
+                </label>
+                <select
+                  value={lockerForm.campus}
+                  onChange={(e) =>
+                    setLockerForm(prev => ({ ...prev, campus: e.target.value as Campus }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  required
+                >
+                  <option value="COLLEGE">College Campus (LC-)</option>
+                  <option value="BASIC_EDUCATION">Basic Education Campus (LB-)</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Changing the campus re-prefixes the locker number (<code>LC-/LB-</code>) and
+                  updates which staff can see it.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Locker Number *
                 </label>
                 <input
@@ -1127,20 +1236,16 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Location *
-                </label>
-                  <input
-                    type="text"
-                  value={lockerForm.location}
-                  onChange={(e) => setLockerForm(prev => ({ ...prev, location: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
+                {resolvedLockerNumber && (
+                  <div className="mt-2 px-3 py-2 rounded-md bg-blue-50 border border-blue-200 text-sm text-blue-800 flex items-center gap-2">
+                    <i className="fas fa-tag"></i>
+                    <span>
+                      Will be saved as:{' '}
+                      <span className="font-mono font-bold">{resolvedLockerNumber}</span>
+                    </span>
                   </div>
+                )}
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">

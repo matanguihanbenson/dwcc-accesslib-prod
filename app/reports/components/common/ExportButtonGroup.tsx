@@ -25,7 +25,7 @@ export function ExportButtonGroup({
           size="sm"
           onClick={onExportCSV}
           disabled={disabled}
-          className={variant === 'colored' ? 'bg-blue-50 hover:bg-blue-100 text-blue-700' : ''}
+          className={variant === 'colored' ? 'bg-blue-50 h-[50px] px-4 hover:bg-blue-100 text-blue-700' : ''}
         >
           <i className="fas fa-file-csv mr-2"></i>
           Export CSV
@@ -37,7 +37,7 @@ export function ExportButtonGroup({
           size="sm"
           onClick={onExportExcel}
           disabled={disabled}
-          className={variant === 'colored' ? 'bg-green-50 hover:bg-green-100 text-green-700' : ''}
+          className={variant === 'colored' ? 'bg-green-50 h-[50px] px-4 hover:bg-green-100 text-green-700' : ''}
         >
           <i className="fas fa-file-excel mr-2"></i>
           Export Excel
@@ -49,7 +49,7 @@ export function ExportButtonGroup({
           size="sm"
           onClick={onExportPDF}
           disabled={disabled}
-          className={variant === 'colored' ? 'bg-red-50 hover:bg-red-100 text-red-700' : ''}
+          className={variant === 'colored' ? 'bg-red-50 h-[50px] px-4 hover:bg-red-100 text-red-700' : ''}
         >
           <i className="fas fa-file-pdf mr-2"></i>
           Export PDF
