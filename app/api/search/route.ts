@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { prisma } from '@/lib/prisma'
+import { bookHref } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   try {
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
         id: book.book_id,
         title: book.title,
         subtitle: `by ${authorName} - ${book.category?.name || 'Unknown Category'}`,
-        url: `/books/${book.book_id}`
+        url: bookHref(book)
       })
     })
 

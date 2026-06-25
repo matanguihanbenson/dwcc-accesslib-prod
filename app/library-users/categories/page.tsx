@@ -99,7 +99,7 @@ export default function StudentCategoriesPage() {
                 <span className="text-gray-900 font-medium">Categories</span>
               </nav>
             </div>
-            <Button variant="outline" onClick={() => router.push('/library-users')}>
+            <Button variant="outline" onClick={() => router.push('/library-users')} className='px-4 py-5 bg-primary-600 hover:bg-primary-700 text-white'>
               <i className="fas fa-arrow-left mr-2"></i>
               Back to Users
             </Button>

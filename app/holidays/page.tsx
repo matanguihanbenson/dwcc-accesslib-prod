@@ -439,7 +439,7 @@ export default function HolidaysPage() {
                               >
                                 <i className="fas fa-trash"></i>
                               </button>
-                              {/*  , */}
+                              {/*  */}
                             </div>
                           )}
                         </td>
@@ -447,6 +447,7 @@ export default function HolidaysPage() {
                     ))}
                   </tbody>
                 </table>
+                {/**/}
               </div>
             )}
           </CardContent>

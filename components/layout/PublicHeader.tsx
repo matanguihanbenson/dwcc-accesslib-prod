@@ -21,7 +21,7 @@ export function PublicHeader({ showSubtitle = false, subtitle, showBrowseLink = 
         <div className="flex items-center justify-between h-16">
           {/* Left side - Title and optional subtitle or browse link */}
           <div className="flex items-center space-x-8">
-            <Link href="/" className="text-2xl font-bold text-gray-900 hover:text-green-600 transition-colors">
+            <Link href="/" className="text-2xl font-bold text-gray-900 hover:text-primary-600 transition-colors">
               DWCC AccessLib
             </Link>
             {showSubtitle && subtitle && (
@@ -33,7 +33,7 @@ export function PublicHeader({ showSubtitle = false, subtitle, showBrowseLink = 
             {showBrowseLink && (
               <>
                 <span className="text-gray-500">|</span>
-                <Link href="/browse" className="text-gray-700 font-medium hover:text-green-600 transition-colors">
+                <Link href="/browse" className="text-gray-700 font-medium hover:text-primary-600 transition-colors">
                   Browse Books
                 </Link>
               </>
@@ -70,7 +70,7 @@ export function PublicHeader({ showSubtitle = false, subtitle, showBrowseLink = 
             ) : (
               <Link
                 href="/login"
-                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center"
+                className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center"
               >
                 <i className="fas fa-sign-in-alt mr-2"></i>
                 Staff Login

@@ -169,8 +169,18 @@ export async function authMiddleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Allow public access to book detail pages (e.g., /books/123)
-  if (pathname.match(/^\/books\/\d+$/)) {
+  // Allow public access to book detail pages. Accepts either
+  // a bare numeric ID (e.g. /books/123) or a slug-id (e.g.
+  // /books/good-omens-1). The regex matches lowercase letters,
+  // digits, and hyphens and explicitly excludes known admin
+  // sub-routes (/books/add, /books/borrow, /books/return,
+  // /books/transactions, /books/archived-copies,
+  // /books/categories, /books/sections) so they keep the
+  // authenticated sidebar layout.
+  const bookDetailMatch = pathname.match(
+    /^\/books\/(?!add$|borrow$|return$|transactions$|archived-copies$|categories$|sections$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i
+  )
+  if (bookDetailMatch) {
     return NextResponse.next()
   }
 

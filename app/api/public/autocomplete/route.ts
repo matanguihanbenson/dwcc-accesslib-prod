@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { bookHref } from "@/lib/utils"
 
 export async function GET(request: NextRequest) {
   try {
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
       category: book.category?.name || 'Uncategorized',
       section: book.section?.name,
       location: book.location,
-      url: `/books/${book.book_id}`
+      url: bookHref(book)
     }))
 
     return NextResponse.json({ suggestions })

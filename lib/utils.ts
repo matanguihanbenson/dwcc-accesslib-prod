@@ -6,6 +6,63 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
 }
 
+/**
+ * Convert a free-form string (typically a book title) into
+ * a URL-safe slug. The output is lowercase, ASCII-only, and
+ * hyphen-separated. Non-alphanumeric runs collapse to a
+ * single hyphen; leading and trailing hyphens are trimmed.
+ *
+ * Example: `slugify("Good Omens: The Nice and Accurate…")`
+ * → `"good-omens-the-nice-and-accurate"`
+ */
+export function slugify(input: string): string {
+  return (input || '')
+    .toString()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // strip diacritics
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')   // remove non-alphanumeric
+    .replace(/[\s_-]+/g, '-')        // collapse spaces / underscores
+    .replace(/^-+|-+$/g, '')         // trim leading/trailing hyphens
+}
+
+/**
+ * Parse a route slug back into its numeric book ID and
+ * optional title slug. Accepts both:
+ *   - pure numeric strings: "1" -> { id: 1, titleSlug: null }
+ *   - slug-id format:       "good-omens-1" -> { id: 1, titleSlug: "good-omens" }
+ *
+ * If the slug doesn't end with a number, returns the whole
+ * slug as `titleSlug` and `id` is null (caller can decide
+ * how to handle that — usually by searching by title).
+ */
+export function parseSlug(slug: string): { id: number | null; titleSlug: string | null } {
+  if (!slug) return { id: null, titleSlug: null }
+  // Pure numeric — treat as the legacy ID.
+  if (/^\d+$/.test(slug)) {
+    return { id: parseInt(slug, 10), titleSlug: null }
+  }
+  // Try to split off a trailing "-NN" as the ID.
+  const match = slug.match(/^(.+?)-(\d+)$/)
+  if (match) {
+    return { id: parseInt(match[2], 10), titleSlug: match[1] }
+  }
+  return { id: null, titleSlug: slug }
+}
+
+/**
+ * Build a canonical book URL of the form
+ *   /books/{title-slug}-{id}
+ * Falls back to /books/{id} if the title is empty.
+ */
+export function bookHref(book: { book_id: number; title?: string | null }): string {
+  if (!book) return '/books'
+  const id = book.book_id
+  const slug = book.title ? slugify(book.title) : ''
+  return slug ? `/books/${slug}-${id}` : `/books/${id}`
+}
+
 export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
   return d.toLocaleDateString('en-US', {

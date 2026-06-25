@@ -42,9 +42,12 @@ function resolveLockerFromInput(
   if (!raw || !raw.trim()) return null
   const trimmed = raw.trim().toUpperCase()
 
-  // 1) Exact RFID match (case-insensitive).
+  // 1) Exact RFID match (case-insensitive, whitespace-tolerant).
+  // The `.trim()` on `l.rfid_code` guards against trailing
+  // whitespace in the database record (some RFID readers
+  // append a trailing CR/LF when the tag is written).
   const byRfid = visibleLockers.find(
-    (l) => l.rfid_code && l.rfid_code.toUpperCase() === trimmed
+    (l) => l.rfid_code && l.rfid_code.trim().toUpperCase() === trimmed
   )
   if (byRfid) return byRfid
 
@@ -125,6 +128,9 @@ function resolveLockerFromInput(
   return null
 }
 
+/*
+ 
+*/
 function StaffView({ lockers, onRefresh }: StaffViewProps) {
   const [isClient, setIsClient] = useState(false)
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -556,14 +562,14 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
       <div className="flex justify-end gap-3 mb-4">
         <button
           onClick={() => { setShowReturnModal(true); setScannerInput('') }}
-          className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2"
+          className="bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-md font-medium transition-colors shadow-sm flex items-center gap-2"
         >
           <i className="fas fa-undo"></i>
           Return Locker
         </button>
         <button
           onClick={() => { setShowExtendModal(true); setScannerInput('') }}
-          className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2"
+          className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-3 rounded-md font-medium transition-colors shadow-sm flex items-center gap-2"
         >
           <i className="fas fa-clock"></i>
           Extend Time
@@ -577,7 +583,7 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
             setLockerKeyInput('');
             setScannerInput('')
           }}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-md font-medium transition-colors shadow-sm flex items-center gap-2"
         >
           <i className="fas fa-plus"></i>
           Assign Locker
@@ -647,13 +653,42 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
 
       {/* Lockers Grid */}
       <div className="bg-white rounded-lg shadow-sm border p-4">
-        <div className="grid grid-cols-8 gap-3 max-h-[calc(100vh-400px)] overflow-y-auto">
-          {filteredLockers.map((locker: any) => {
+
+        {filteredLockers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+              <i className="fas fa-lock text-2xl text-gray-400"></i>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">
+              No lockers to show
+            </h3>
+            <p className="text-sm text-gray-500 max-w-md">
+              {statusFilter && statusFilter !== 'All Status'
+                ? `No lockers match the "${statusFilter}" filter right now. Try switching to "All Status" to see every locker.`
+                : lockers.length === 0
+                  ? "There are no lockers available for your campus yet. Please contact the library admin to add lockers."
+                  : "No lockers match your current filter."}
+            </p>
+            {(statusFilter && statusFilter !== 'All Status') && (
+              <button
+                type="button"
+                onClick={() => setStatusFilter('All Status')}
+                className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+              >
+                <i className="fas fa-undo text-xs"></i>
+                Show all lockers
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-8 gap-3 max-h-[calc(100vh-400px)] overflow-y-auto">
+            {filteredLockers.map((locker: any) => {
             const status = calculateLockerStatus(locker)
             const isAvailable = locker.status === 'AVAILABLE'
             const isOvertime = status?.isOvertime || false
             
             return (
+             
               <div
                 key={locker.locker_id}
                 onClick={() => {
@@ -669,6 +704,7 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                 }`}
                 title={isAvailable ? `${locker.locker_number} - Available (Click for details)` : `${locker.locker_number} - ${locker.activeTransaction?.user.full_name} (Click for details)`}
               >
+                
                 {/* Locker Number */}
                 <div className="text-center">
                   <div className={`w-10 h-10 mx-auto rounded-lg flex items-center justify-center text-sm font-bold mb-2 ${
@@ -689,7 +725,7 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                     </div>
                   )}
                 </div>
-
+                  
                 {/* Status Icon */}
                 <i className={`absolute top-2 right-2 text-xs ${
                   isAvailable ? 'fas fa-check-circle text-green-500' 
@@ -714,7 +750,8 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
               </div>
             )
           })}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Assign Locker Modal */}
@@ -814,8 +851,14 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                     const input = e.target.value.trim().toUpperCase()
 
                     if (lockerInputMode === 'rfid') {
-                      // RFID mode - find locker by rfid_code
-                      const locker = lockers.find(l => l.rfid_code === input)
+                      // RFID mode - resolve via the shared
+                      // helper so the lookup is case-insensitive
+                      // and whitespace-tolerant (matching the
+                      // extend/return modals). Otherwise the
+                      // lookup silently fails when the stored
+                      // RFID has trailing whitespace or a
+                      // different case than what the user typed.
+                      const locker = resolveLockerFromInput(input, lockers, myCampus)
                       setSelectedLockerNumber(locker?.locker_number || '')
                     } else {
                       // Manual mode - resolve via the shared helper so

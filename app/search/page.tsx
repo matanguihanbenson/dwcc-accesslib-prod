@@ -93,8 +93,15 @@ function SearchContent() {
     setCurrentPage(1)
   }
 
-  const handleBookClick = (bookId: number) => {
-    router.push(`/books/${bookId}`)
+  const handleBookClick = (book: { book_id: number; title?: string | null }) => {
+    const slug = (book.title || '').toString()
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    const url = slug ? `/books/${slug}-${book.book_id}` : `/books/${book.book_id}`
+    router.push(url)
   }
 
   return (
@@ -238,7 +245,7 @@ function SearchContent() {
               {books.map((book) => (
                 <div
                   key={book.book_id}
-                  onClick={() => handleBookClick(book.book_id)}
+                  onClick={() => handleBookClick(book)}
                   className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer transform hover:-translate-y-1"
                 >
                     {/* Title and Subtitle */}

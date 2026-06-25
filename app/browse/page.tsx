@@ -161,8 +161,15 @@ function BrowseContent() {
     availableOnly
   ].filter(Boolean).length
 
-  const handleBookClick = (bookId: number) => {
-    window.location.href = `/books/${bookId}`
+  const handleBookClick = (book: { book_id: number; title?: string | null }) => {
+    const slug = (book.title || '').toString()
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    const url = slug ? `/books/${slug}-${book.book_id}` : `/books/${book.book_id}`
+    window.location.href = url
   }
 
   // Google-style pagination helper
@@ -217,12 +224,12 @@ function BrowseContent() {
                   placeholder="Search by title, author, publisher, ISBN..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors font-medium"
+                className="px-6 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors font-medium"
               >
                 <i className="fas fa-search mr-2"></i>
                 Search
@@ -234,7 +241,7 @@ function BrowseContent() {
           <div className="text-center mt-3">
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="text-sm text-green-600 hover:text-green-800 transition-colors font-medium"
+              className="text-sm text-primary-600 hover:text-primary-800 transition-colors font-medium"
             >
               <i className={`fas fa-${showFilters ? 'chevron-up' : 'chevron-down'} mr-2`}></i>
               {showFilters ? 'Hide' : 'Show'} Advanced Filters
@@ -249,13 +256,13 @@ function BrowseContent() {
                 {/* Category Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <i className="fas fa-folder text-green-600 mr-2"></i>
+                    <i className="fas fa-folder text-primary-600 mr-2"></i>
                     Category
                   </label>
                   <select
                     value={selectedCategory}
                     onChange={(e) => { setSelectedCategory(e.target.value); setCurrentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">All Categories</option>
                     {categories.map((cat) => (
@@ -273,7 +280,7 @@ function BrowseContent() {
                   <select
                     value={selectedSection}
                     onChange={(e) => { setSelectedSection(e.target.value); setCurrentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">All Sections</option>
                     {sections.map((sec) => (
@@ -291,7 +298,7 @@ function BrowseContent() {
                   <select
                     value={selectedMaterialType}
                     onChange={(e) => { setSelectedMaterialType(e.target.value); setCurrentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">All Types</option>
                     {materialTypes.map((type) => (
@@ -309,7 +316,7 @@ function BrowseContent() {
                   <select
                     value={selectedLanguage}
                     onChange={(e) => { setSelectedLanguage(e.target.value); setCurrentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">All Languages</option>
                     {languages.map((lang) => (
@@ -331,7 +338,7 @@ function BrowseContent() {
                     onChange={(e) => { setYearFrom(e.target.value); setCurrentPage(1); }}
                     min={yearRange.min}
                     max={yearRange.max}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
 
@@ -348,7 +355,7 @@ function BrowseContent() {
                     onChange={(e) => { setYearTo(e.target.value); setCurrentPage(1); }}
                     min={yearRange.min}
                     max={yearRange.max}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
 
@@ -361,7 +368,7 @@ function BrowseContent() {
                   <select
                     value={sortBy}
                     onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="title">Title (A-Z)</option>
                     <option value="year_desc">Year (Newest First)</option>
@@ -377,10 +384,10 @@ function BrowseContent() {
                       type="checkbox"
                       checked={availableOnly}
                       onChange={(e) => { setAvailableOnly(e.target.checked); setCurrentPage(1); }}
-                      className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                      className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                     />
                     <span className="text-sm font-medium text-gray-700">
-                      <i className="fas fa-check-circle text-green-600 mr-2"></i>
+                      <i className="fas fa-check-circle text-primary-600 mr-2"></i>
                       Available Only
                     </span>
                   </label>
@@ -414,8 +421,8 @@ function BrowseContent() {
                 onClick={() => handleCategoryChange('')}
                 className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
                   selectedCategory === ''
-                    ? 'bg-green-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:border-green-500 hover:text-green-600'
+                    ? 'bg-primary-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:border-primary-500 hover:text-primary-600'
                 }`}
               >
                 All ({totalCount})
@@ -426,8 +433,8 @@ function BrowseContent() {
                   onClick={() => handleCategoryChange(category)}
                   className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
                     selectedCategory === category
-                      ? 'bg-green-600 text-white shadow-md'
-                      : 'bg-white text-gray-700 border border-gray-300 hover:border-green-500 hover:text-green-600'
+                      ? 'bg-primary-600 text-white shadow-md'
+                      : 'bg-white text-gray-700 border border-gray-300 hover:border-primary-500 hover:text-primary-600'
                   }`}
                 >
                   {category}
@@ -455,24 +462,13 @@ function BrowseContent() {
               </p>
               
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCurrentPage(1)
-                    fetchBooks()
-                  }}
-                  className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-blue-700 transition-colors"
-                  title="Refresh catalogue"
-                >
-                  <i className={`fas fa-rotate-right ${loading ? 'fa-spin' : ''}`}></i>
-                  Refresh
-                </button>
+  
 
                 {/* Active Filters Badge */}
                 {activeFiltersCount > 0 && (
                   <>
                     <span className="text-sm text-gray-600">
-                      <i className="fas fa-filter text-green-600 mr-1"></i>
+                      <i className="fas fa-filter text-primary-600 mr-1"></i>
                       {activeFiltersCount} filter{activeFiltersCount > 1 ? 's' : ''} active
                     </span>
                     <button
@@ -521,7 +517,7 @@ function BrowseContent() {
                   return (
                   <div
                     key={book.book_id}
-                    onClick={() => handleBookClick(book.book_id)}
+                    onClick={() => handleBookClick(book)}
                     className="bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer p-4 border border-gray-100"
                   >
                     {/* Location badge — sits above the title so
@@ -540,20 +536,19 @@ function BrowseContent() {
                     </h3>
                     
                     {/* URL-style breadcrumb */}
-                    <div className="flex items-center text-xs text-green-700 mb-2">
+                    <div className="flex items-center text-xs text-primary-700 mb-2">
                       <span>DWCC Library › {book.category}</span>
                       {book.section && <span> › {book.section}</span>}
                     </div>
                     
-                    {/* Summary / Description — always visible so
-                        the layout is consistent across cards.
-                        Clamped to 2 lines with a trailing
-                        ellipsis. Books without a description
-                        get a muted placeholder. */}
+                    {/* 
+                        
+                    
+                    */}
                     <div
-                      className={`mb-3 rounded-md border px-3 py-2 ${
+                      className={`mb-3 border${
                         hasSummary
-                          ? 'border-amber-200 bg-amber-50/60'
+                          ? 'border-amber-200 bg-primary-100/60 p-2'
                           : 'border-dashed border-gray-200 bg-gray-50'
                       }`}
                     >
@@ -562,8 +557,6 @@ function BrowseContent() {
                           hasSummary ? 'text-amber-800' : 'text-gray-400'
                         }`}
                       >
-                        <i className="fas fa-book-open"></i>
-                        Summary
                       </div>
                       {hasSummary ? (
                         <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-line line-clamp-2">
@@ -589,7 +582,7 @@ function BrowseContent() {
                     {/* Tags and Status */}
                     <div className="flex flex-wrap items-center gap-2">
                       {book.copies_available > 0 ? (
-                        <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-primary-100 text-primary-800">
                           <i className="fas fa-check-circle mr-1"></i>
                           {book.copies_available} of {book.copies_total} available
                         </span>
@@ -711,7 +704,7 @@ function LoadingFallback() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
         <p className="text-gray-600">Loading book catalog...</p>
       </div>
     </div>
