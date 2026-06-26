@@ -483,7 +483,7 @@ function CopiesTab({
 }) {
   if (loading) {
     return (
-      <div className="bg-white border border-gray-200 rounded-md p-8 text-center">
+      <div className="border border-gray-200 rounded-md p-8 text-center">
         <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600 mb-2"></div>
         <p className="text-sm text-gray-500">Loading copies…</p>
       </div>
@@ -503,7 +503,7 @@ function CopiesTab({
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+    <div className=" border border-gray-200 rounded-md overflow-hidden">
       {/* Mobile cards */}
       <div className="md:hidden divide-y divide-gray-100">
         {copies.map((c) => (
@@ -534,7 +534,7 @@ function CopiesTab({
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block overflow-x-auto">
+      <div className="hidden md:block overflow-x-auto min-h-[400px] ">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
