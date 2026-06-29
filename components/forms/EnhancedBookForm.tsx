@@ -13,6 +13,10 @@ import IsbnLookupModal from './IsbnLookupModal'
 import AddOptionModal, {
   type AddOptionItem
 } from './AddOptionModal'
+import AuthorContributorLookup, {
+  type AuthorHit,
+  type ContributorHit
+} from './AuthorContributorLookup'
 import type { OpenLibraryBook } from '@/lib/open-library'
 
 /**
@@ -517,6 +521,69 @@ export const EnhancedBookForm = forwardRef<
   // New option values (e.g. a previously-unseen material type
   // like "Audio CD") are auto-appended to the corresponding
   // dropdown so the user can always accept the scraped value.
+  // Cached "is this name already in the DB?" hints shown
+  // beside the primary author + co-author rows when the
+  // ISBN lookup populates the form. Maps a lower-cased
+  // name to the canonical record we found.
+  const [authorDbHints, setAuthorDbHints] = useState<Record<
+    string,
+    { name: string; work_count: number; source: 'author' | 'contributor' }
+  >>({})
+
+  // Look up the DB for each author/co-author Open Library
+  // hands us so we can show a "Already in DB (N works)" hint.
+  // Safe to call concurrently — the API is idempotent and
+  // rate-limit friendly.
+  const checkAuthorInDb = useCallback(async (rawNames: string[]) => {
+    const names = Array.from(
+      new Set(
+        rawNames
+          .map((n) => n.trim())
+          .filter((n) => n.length >= 2)
+      )
+    )
+    if (names.length === 0) return
+
+    // Fire one combined lookup per name; the backend
+    // returns both author + contributor hits, so we pick
+    // whichever has the higher work_count.
+    const results = await Promise.all(
+      names.map(async (n): Promise<[string, any] | null> => {
+        try {
+          const res = await fetch(
+            `/api/author-contributor-lookup?q=${encodeURIComponent(n)}&limit=1`
+          )
+          if (!res.ok) return null
+          const data = await res.json()
+          const authorHits: any[] = (data.authors || []).map((h: any) => ({
+            ...h,
+            source: 'author'
+          }))
+          const contributorHits: any[] = (data.contributors || []).map(
+            (h: any) => ({ ...h, source: 'contributor' })
+          )
+          const candidate = [...authorHits, ...contributorHits].sort(
+            (a, b) => b.work_count - a.work_count
+          )[0]
+          return candidate ? [n, candidate] : null
+        } catch {
+          return null
+        }
+      })
+    )
+
+    setAuthorDbHints((prev) => {
+      const next = { ...prev }
+      for (const r of results) {
+        if (r) {
+          const [n, hit] = r as [string, any]
+          next[n.toLowerCase()] = hit
+        }
+      }
+      return next
+    })
+  }, [])
+
   const applyOpenLibraryData = useCallback((book: OpenLibraryBook) => {
     // 1. Auto-extend dropdowns with any new values.
     const materialType = ensureOption(
@@ -645,12 +712,19 @@ export const EnhancedBookForm = forwardRef<
       // Added Entries
       coAuthors: addedEntries.length > 0 ? addedEntries : prev.coAuthors
     }))
+
+    // After the form is populated, fire off a single DB
+    // lookup to check whether the scraped author /
+    // co-authors already exist in the DB. The hints are
+    // rendered as small badges next to the input rows.
+    void checkAuthorInDb([book.primaryAuthor, ...book.coAuthors])
   }, [
     materialTypeOptions,
     subtypeOptions,
     interestLevelOptions,
     lexileOptions,
-    fountasPinnellOptions
+    fountasPinnellOptions,
+    checkAuthorInDb
   ])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -848,16 +922,45 @@ export const EnhancedBookForm = forwardRef<
                 {/* Authors Section */}
                 <div className="space-y-4 pt-4 border-t border-gray-200">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Primary author
-                    </label>
-                    <input
-                      type="text"
-                      name="book_author"
-                      value={formData.book_author}
-                      onChange={handleInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                      placeholder="Enter primary author name or use Added Entries"
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Primary author
+                      </label>
+                      {(() => {
+                        const hint =
+                          authorDbHints[formData.book_author.trim().toLowerCase()]
+                        if (!hint) return null
+                        return (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            title={`${hint.source === 'author' ? 'Primary author' : 'Contributor'} already exists in the DB. Saving will be relational so future reports (e.g. "all works by this author") stay accurate.`}
+                          >
+                            <i className="fas fa-circle-check"></i>
+                            Already in DB ({hint.work_count}{' '}
+                            {hint.work_count === 1 ? 'work' : 'works'})
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    <AuthorContributorLookup
+                      source="author"
+                      label=""
+                      placeholder="Search existing authors or type a new one…"
+                      initialValue={formData.book_author}
+                      onPick={(hit) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          book_author: hit.name,
+                          // Carry the dates over from the picked
+                          // author so the same canonical
+                          // capitalization and date range is
+                          // reused across books.
+                          authorDates: (hit as AuthorHit).dates || prev.authorDates
+                        }))
+                      }
+                      onCreateNew={(raw) =>
+                        setFormData((prev) => ({ ...prev, book_author: raw }))
+                      }
                     />
                   </div>
 
@@ -1509,19 +1612,71 @@ export const EnhancedBookForm = forwardRef<
                       Add Entry
                     </Button>
                   </div>
+
+                  {/* Lookup widget for the *next* entry the user
+                      is about to add. Once they pick a hit (or
+                      type a new name and press Enter / "Add new"),
+                      the entry is appended to the list below and
+                      the lookup clears itself for the next one. */}
+                  <AuthorContributorLookup
+                    source="contributor"
+                    label="Lookup existing contributor"
+                    placeholder="Search existing contributors or type a new name…"
+                    initialValue=""
+                    onPick={(hit) => {
+                      const c = hit as ContributorHit
+                      setFormData((prev) => ({
+                        ...prev,
+                        coAuthors: [
+                          ...prev.coAuthors,
+                          {
+                            name: c.name,
+                            dates: c.dates || '',
+                            role: c.role || 'Contributor'
+                          }
+                        ]
+                      }))
+                    }}
+                    onCreateNew={(raw) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        coAuthors: [
+                          ...prev.coAuthors,
+                          { name: raw, dates: '', role: 'Contributor' }
+                        ]
+                      }))
+                    }}
+                  />
+
                   {formData.coAuthors.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">There are no added entries for this title</p>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 mt-3">
                       {formData.coAuthors.map((author, index) => (
-                        <div key={index} className="grid grid-cols-3 gap-3 p-3 border border-gray-200 rounded">
-                          <input
-                            type="text"
-                            placeholder="Name"
-                            value={author.name}
-                            onChange={(e) => updateCoAuthor(index, 'name', e.target.value)}
-                            className="px-3 py-2 border border-gray-300 rounded-md"
-                          />
+                        <div key={index} className="grid grid-cols-3 gap-3 p-3 border border-gray-200 rounded relative">
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Name"
+                              value={author.name}
+                              onChange={(e) => updateCoAuthor(index, 'name', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            />
+                            {(() => {
+                              const hint =
+                                authorDbHints[author.name.trim().toLowerCase()]
+                              if (!hint) return null
+                              return (
+                                <span
+                                  className="absolute -top-2 right-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  title={`${hint.work_count} existing works — saving keeps the DB relational so reports like "all works by this contributor" stay accurate.`}
+                                >
+                                  <i className="fas fa-circle-check"></i>
+                                  In DB ({hint.work_count})
+                                </span>
+                              )
+                            })()}
+                          </div>
                           <input
                             type="text"
                             placeholder="Dates"

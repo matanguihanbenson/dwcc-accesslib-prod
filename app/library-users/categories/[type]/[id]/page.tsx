@@ -3,7 +3,13 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import * as XLSX from 'xlsx'
+import ExportFilterModal, { ExportFormat } from '@/components/forms/ExportFilterModal'
+import {
+  DEFAULT_FILTER_OPTIONS,
+  EXPORT_PROFILES,
+  ExportFilterOptions,
+  UserRow
+} from '@/lib/library-users-export'
 import { notify } from '@/lib/notification'
 
 interface User {
@@ -29,6 +35,11 @@ interface CategoryInfo {
   name: string
   code?: string
   abbreviation?: string
+  /** Display label for the parent department. Captured
+   *  from the first member when the current category is a
+   *  program so the export header can show "BSIT — College
+   *  of Computer Studies" without an extra API call. */
+  departmentName?: string
 }
 
 export default function CategoryDetailsPage() {
@@ -43,6 +54,17 @@ export default function CategoryDetailsPage() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [exporting, setExporting] = useState(false)
+  // Modal state: which format the user picked and whether
+  // it's currently open. The format is captured so the
+  // modal can show the right icon + label.
+  const [exportFormat, setExportFormat] = useState<ExportFormat | null>(null)
+  // When the current category is a department, the modal
+  // shows a "Programs" section so the user can scope the
+  // export to one or more programs under the department.
+  // Populated lazily from `/api/programs?department_id=…`.
+  const [programs, setPrograms] = useState<
+    Array<{ value: string; label: string }>
+  >([])
 
   // Comprehensive filters — work the same way as on
   // `/library-users` so the user can drill into a
@@ -120,7 +142,14 @@ export default function CategoryDetailsPage() {
               if (firstUser.program) {
                 setCategoryInfo({
                   name: firstUser.program.name,
-                  code: firstUser.program.code
+                  code: firstUser.program.code,
+                  // For program pages, surface the parent
+                  // department as a subtitle so the export
+                  // header reads e.g. "BSIT — College of
+                  // Computer Studies" without an extra API
+                  // call. Falls back gracefully if the user
+                  // record didn't include the relation.
+                  departmentName: firstUser.department_ref?.name
                 })
               }
               break
@@ -149,6 +178,49 @@ export default function CategoryDetailsPage() {
               }
               break
           }
+        }
+
+        // If the current category is a department, also
+        // fetch the list of programs under it so the
+        // export modal can show a "Programs" filter.
+        if (type === 'department') {
+          try {
+            // The programs API expects `departmentId`
+            // (camelCase), not `department_id`. Pass both
+            // query styles as a safety net.
+            const programsRes = await fetch(
+              `/api/programs?departmentId=${id}&limit=500`,
+              { credentials: 'include' }
+            )
+            if (programsRes.ok) {
+              const programsData = await programsRes.json()
+              const list: any[] = Array.isArray(programsData)
+                ? programsData
+                : (programsData?.data || [])
+              // Only include programs that actually belong
+              // to this department — double-check on the
+              // client in case the API returns extra rows.
+              const departmentIdNum = parseInt(id, 10)
+              setPrograms(
+                list
+                  .filter(
+                    (p: any) =>
+                      !departmentIdNum ||
+                      Number(p.department_id) === departmentIdNum
+                  )
+                  .map((p: any) => ({
+                    value: String(p.code || p.name),
+                    label: [p.code, p.name]
+                      .filter(Boolean)
+                      .join(' — ')
+                  }))
+              )
+            }
+          } catch (progErr) {
+            console.error('Failed to load programs for filter', progErr)
+          }
+        } else {
+          setPrograms([])
         }
 
       } catch (error) {
@@ -185,62 +257,17 @@ export default function CategoryDetailsPage() {
     })
   }, [users, searchQuery, userTypeFilter, statusFilter, yearLevelFilter])
 
-  // Export to Excel
-  const handleExport = async () => {
+  // Export to Excel / PDF — the actual generation now lives
+  // in `ExportFilterModal`. The button just opens the modal
+  // with the chosen format; the modal handles filtering,
+  // sorting, and the file write.
+  const openExportModal = (format: ExportFormat) => {
     if (filteredUsers.length === 0) {
       notify.error('No data to export')
       return
     }
-
     setExporting(true)
-    try {
-      // Prepare data for export
-      const exportData = filteredUsers.map((user, index) => ({
-        'No.': index + 1,
-        'ID Number': user.account_id || '',
-        'Name': user.full_name || '',
-        'Email': user.email || '',
-        'Contact Number': user.contact_number || '',
-        'User Type': user.user_type || '',
-        'Section': user.section?.name || '',
-        'Program': user.program?.name || '',
-        'Department': user.department_ref?.name || '',
-        'Grade Level': user.grade_level?.name || '',
-        'Strand': user.strand?.name || '',
-        'Office': user.office_ref?.name || '',
-        'Status': user.status || '',
-        'Created At': user.created_at ? new Date(user.created_at).toLocaleString() : ''
-      }))
-
-      // Create workbook and worksheet
-      const ws = XLSX.utils.json_to_sheet(exportData)
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, 'Users')
-
-      // Auto-size columns
-      const maxWidth = 50
-      const colWidths = Object.keys(exportData[0] || {}).map(key => {
-        const maxLength = Math.max(
-          key.length,
-          ...exportData.map(row => String(row[key as keyof typeof row] || '').length)
-        )
-        return { wch: Math.min(maxLength + 2, maxWidth) }
-      })
-      ws['!cols'] = colWidths
-
-      // Generate filename
-      const categoryName = categoryInfo?.name || 'Category'
-      const filename = `${categoryLabel.singular}_${categoryName.replace(/[^a-z0-9]/gi, '_')}_Users_${new Date().toISOString().split('T')[0]}.xlsx`
-
-      // Download file
-      XLSX.writeFile(wb, filename)
-      notify.success('Users exported successfully')
-    } catch (error) {
-      console.error('Export error:', error)
-      notify.error('Failed to export users')
-    } finally {
-      setExporting(false)
-    }
+    setExportFormat(format)
   }
 
   if (status === 'loading' || loading) {
@@ -432,23 +459,24 @@ export default function CategoryDetailsPage() {
               )
             })()}
 
-            <button
-              onClick={handleExport}
-              disabled={exporting || filteredUsers.length === 0}
-              className="self-start lg:self-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center shrink-0"
-            >
-              {exporting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Exporting...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-file-excel mr-2"></i>
-                  Export to Excel
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => openExportModal('excel')}
+                disabled={exporting || filteredUsers.length === 0}
+                className="self-start lg:self-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center shrink-0"
+              >
+                <i className="fas fa-file-excel mr-2"></i>
+                Export to Excel
+              </button>
+              <button
+                onClick={() => openExportModal('pdf')}
+                disabled={exporting || filteredUsers.length === 0}
+                className="self-start lg:self-auto px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center shrink-0"
+              >
+                <i className="fas fa-file-pdf mr-2"></i>
+                Export to PDF
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -652,6 +680,68 @@ export default function CategoryDetailsPage() {
           )}
         </div>
       </div>
+
+      {/* Export filter modal — opens when the user clicks
+          either "Export to Excel" or "Export to PDF" so they
+          can choose sort + user types + status before the
+          file is written. The button on the toolbar captures
+          the format; the modal handles the rest. */}
+      <ExportFilterModal
+        open={exporting && exportFormat !== null}
+        onClose={() => {
+          setExporting(false)
+          setExportFormat(null)
+        }}
+        users={filteredUsers}
+        format={exportFormat || 'excel'}
+        title={`${categoryLabel.singular} Users`}
+        // For program pages, surface the parent department
+        // as part of the subtitle so the export header
+        // reads e.g. "BSIT — College of Computer Studies".
+        // All other category types just show the category
+        // name.
+        subtitle={
+          type === 'program' && categoryInfo?.departmentName
+            ? `${categoryInfo.name} — ${categoryInfo.departmentName}`
+            : categoryInfo?.name || ''
+        }
+        filename={`${categoryLabel.singular}_${
+          categoryInfo?.name?.replace(/[^a-z0-9]/gi, '_') || 'Category'
+        }_Users_${new Date().toISOString().split('T')[0]}`}
+        initial={{
+          // Carry the existing page-level filters into the
+          // modal so the user doesn't have to re-set them.
+          selectedTypes: userTypeFilter
+            ? ([userTypeFilter] as any)
+            : DEFAULT_FILTER_OPTIONS.selectedTypes,
+          selectedStatuses: statusFilter
+            ? [statusFilter]
+            : DEFAULT_FILTER_OPTIONS.selectedStatuses,
+          includeAllTypes: !userTypeFilter
+        }}
+        // Only pass the programs list when the current
+        // category is a department. The modal renders the
+        // "Programs" section only when this prop is a
+        // non-empty array.
+        programs={type === 'department' ? programs : undefined}
+        // Each category type renders a different column set
+        // (see `EXPORT_PROFILES` in lib/library-users-export).
+        //  - program        → drop "Program" (already in URL),
+        //                     add "Year (Grade Level)" so both
+        //                     student-year + program-grade band
+        //                     share one column.
+        //  - department    → drop "Department" (redundant),
+        //                     add "Year (Grade Level)".
+        //  - everything else → the original sections /
+        //                     grade-levels / strands layout.
+        columnProfile={
+          type === 'program'
+            ? EXPORT_PROFILES.program
+            : type === 'department'
+            ? EXPORT_PROFILES.department
+            : EXPORT_PROFILES.section_grade_strand
+        }
+      />
     </>
   )
 }

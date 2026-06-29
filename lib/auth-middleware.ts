@@ -184,6 +184,16 @@ export async function authMiddleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Public author / contributor works page at
+  // /authors/[slug]. Accepts single-character and
+  // multi-character slugs.
+  const publicAuthorMatch = pathname.match(
+    /^\/authors\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i
+  )
+  if (publicAuthorMatch) {
+    return NextResponse.next()
+  }
+
   // /setup is intentionally NOT gated by the public-route
   // allow above. The page renders the wizard only when no
   // SUPER_ADMIN exists yet; once one does, the page itself

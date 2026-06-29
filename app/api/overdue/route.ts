@@ -106,11 +106,7 @@ export async function GET(request: NextRequest) {
       const overdueBooks = await prisma.bookTransaction.findMany({
         where: {
           // Only ACTIVE transactions are considered "overdue".
-          // PENDING_APPROVAL transactions are requests that the
-          // library admin hasn't approved yet — they shouldn't
-          // surface here even if the staff pre-filled a past
-          // due_date. Likewise COMPLETED / REJECTED are not
-          // active borrows.
+          // COMPLETED transactions are not active borrows.
           status: 'ACTIVE',
           OR: [
             {

@@ -149,29 +149,6 @@ export default function BorrowingTransactionsPage() {
     }
   }, [transactionsResponse])
 
-  // Mutation hooks
-  const { execute: approveTransaction, loading: approveLoading } = useApi({
-    onSuccess: (data) => {
-      notify.success('Success', data.message || 'Transaction approved successfully')
-      refreshTransactions()
-      invalidateBookData()
-    },
-    onError: (error) => {
-      notify.error('Error', error || 'Failed to approve transaction')
-    }
-  })
-
-  const { execute: rejectTransaction, loading: rejectLoading } = useApi({
-    onSuccess: (data) => {
-      notify.success('Success', data.message || 'Transaction rejected successfully')
-      refreshTransactions()
-      invalidateBookData()
-    },
-    onError: (error) => {
-      notify.error('Error', error || 'Failed to reject transaction')
-    }
-  })
-
   // Authentication check
   useEffect(() => {
     const checkAuth = async () => {
@@ -269,16 +246,12 @@ export default function BorrowingTransactionsPage() {
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
-      case 'PENDING_APPROVAL':
-        return 'bg-yellow-100 text-yellow-800'
       case 'ACTIVE':
         return 'bg-blue-100 text-blue-800'
       case 'COMPLETED':
         return 'bg-green-100 text-green-800'
       case 'OVERDUE':
         return 'bg-red-100 text-red-800'
-      case 'REJECTED':
-        return 'bg-gray-100 text-gray-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -286,8 +259,6 @@ export default function BorrowingTransactionsPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'PENDING_APPROVAL':
-        return 'fa-clock text-yellow-600'
       case 'ACTIVE':
         return 'fa-book-reader text-blue-600'
       case 'COMPLETED':
@@ -403,11 +374,9 @@ export default function BorrowingTransactionsPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">All Status</option>
-                  <option value="PENDING_APPROVAL">Pending Approval</option>
                   <option value="ACTIVE">Active</option>
                   <option value="COMPLETED">Completed</option>
                   <option value="OVERDUE">Overdue</option>
-                  <option value="REJECTED">Rejected</option>
                 </select>
               </div>
 
@@ -614,11 +583,6 @@ export default function BorrowingTransactionsPage() {
                             {transaction.notes && (
                               <div>
                                 <span className="font-medium">Notes:</span> {transaction.notes}
-                              </div>
-                            )}
-                            {transaction.requestedBy && (
-                              <div className="text-xs">
-                                <span className="font-medium">Requested by:</span> {transaction.requestedBy.username}
                               </div>
                             )}
                           </div>

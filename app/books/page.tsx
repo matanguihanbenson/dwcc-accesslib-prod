@@ -43,7 +43,7 @@ interface BorrowTransaction {
     user_type: string
     status: string
   }
-  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE'
+  status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE'
 }
 
 export default function BooksPage() {
@@ -51,11 +51,10 @@ export default function BooksPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [books, setBooks] = useState<Book[]>([])
-  const [pendingTransactions, setPendingTransactions] = useState<BorrowTransaction[]>([])
   const [borrowedBooks, setBorrowedBooks] = useState<BorrowTransaction[]>([])
   const [loading, setLoading] = useState(true)
   const [authReady, setAuthReady] = useState(false)
-  const [activeTab, setActiveTab] = useState<'books' | 'pending' | 'borrowed' | 'returns'>('books')
+  const [activeTab, setActiveTab] = useState<'books' | 'borrowed' | 'returns'>('books')
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -88,28 +87,12 @@ export default function BooksPage() {
     return Array.from(unique).sort((a, b) => a.localeCompare(b))
   }, [books])
 
-  // SWR for real-time pending transactions
-  const { 
-    data: pendingTransactionsData, 
-    error: pendingError, 
-    isLoading: pendingLoading,
-    mutate: refreshPendingTransactions 
-  } = useApiSWR<any>(
-    authReady ? '/api/borrowing-transactions?status=PENDING_APPROVAL' : null,
-    {
-      refreshInterval: 3000, // Refresh every 3 seconds for real-time updates
-      revalidateOnFocus: true,
-      revalidateOnReconnect: true,
-      dedupingInterval: 1000,
-    }
-  )
-
   // SWR for real-time borrowed books
-  const { 
-    data: borrowedBooksData, 
-    error: borrowedError, 
+  const {
+    data: borrowedBooksData,
+    error: borrowedError,
     isLoading: borrowedLoading,
-    mutate: refreshBorrowedBooks 
+    mutate: refreshBorrowedBooks
   } = useApiSWR<any>(
     authReady ? '/api/borrowing-transactions?status=ACTIVE' : null,
     {
@@ -119,24 +102,6 @@ export default function BooksPage() {
       dedupingInterval: 1000,
     }
   )
-
-  // Use SWR data or fallback to manual state with proper error handling
-  const effectivePendingTransactions = React.useMemo(() => {
-    if (!pendingTransactionsData) return pendingTransactions
-    
-    // Handle different API response formats
-    if (Array.isArray(pendingTransactionsData)) {
-      return pendingTransactionsData
-    }
-    
-    // Check for nested data structures
-    const transactions = pendingTransactionsData.transactions || 
-                        pendingTransactionsData.data?.transactions || 
-                        pendingTransactionsData.data || 
-                        []
-    
-    return Array.isArray(transactions) ? transactions : []
-  }, [pendingTransactionsData, pendingTransactions])
 
   const effectiveBorrowedBooks = React.useMemo(() => {
     if (!borrowedBooksData) return borrowedBooks
@@ -158,7 +123,7 @@ export default function BooksPage() {
   // Handle tab parameter from URL (for notifications)
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab === 'pending' || tab === 'borrowed') {
+    if (tab === 'borrowed' || tab === 'returns') {
       setActiveTab(tab)
     }
   }, [searchParams])
@@ -242,7 +207,6 @@ export default function BooksPage() {
   useEffect(() => {
     if (authReady) {
       fetchBooks()
-      fetchPendingTransactions()
       fetchBorrowedBooks()
     }
   }, [authReady])
@@ -297,29 +261,6 @@ export default function BooksPage() {
       notify.error('Error', 'Network error occurred while fetching books')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const fetchPendingTransactions = async () => {
-    try {
-      // Add cache busting parameter to ensure fresh data
-      const cacheBuster = `?status=PENDING_APPROVAL&_t=${Date.now()}`
-      const response = await fetch(`/api/borrowing-transactions${cacheBuster}`, {
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        },
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        const list = Array.isArray(data) ? data : (data.data?.data || data.data || data.transactions || [])
-        setPendingTransactions(Array.isArray(list) ? list : [])
-      }
-    } catch (error) {
     }
   }
 
@@ -427,46 +368,6 @@ export default function BooksPage() {
     }
   }
 
-  const handleApproveTransaction = async (transactionId: number, action: 'approve' | 'reject') => {
-    const result = await Swal.fire({
-      title: `${action.charAt(0).toUpperCase() + action.slice(1)} Transaction`,
-      text: `Are you sure you want to ${action} this borrowing request?`,
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonText: `Yes, ${action} it!`,
-      cancelButtonText: 'Cancel'
-    })
-
-    if (result.isConfirmed) {
-      try {
-        const response = await fetch(`/api/borrowing-transactions/${transactionId}/${action}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: action === 'reject' ? JSON.stringify({ reason: '' }) : undefined,
-        })
-
-        if (response.ok) {
-          notify.success('Success', `Transaction ${action}d successfully`)
-          // Add a small delay to ensure database transaction is committed
-          setTimeout(async () => {
-            await fetchPendingTransactions()
-            await fetchBorrowedBooks()
-            await fetchBooks()
-          }, 500)
-        } else {
-          const errorData = await response.json().catch(() => ({}))
-          const errorMessage = errorData.error || errorData.details || `Failed to ${action} transaction`
-          notify.error('Error', errorMessage)
-        }
-      } catch (error) {
-        notify.error('Error', 'Network error occurred')
-      }
-    }
-  }
-
   const handleApproveReturn = async (transactionId: number) => {
     const result = await Swal.fire({
       title: 'Approve Return',
@@ -489,8 +390,7 @@ export default function BooksPage() {
 
         if (response.ok) {
           notify.success('Success', 'Return approved successfully')
-          // Refresh SWR data for real-time updates
-          refreshPendingTransactions()
+          // Refresh data for real-time updates
           refreshBorrowedBooks()
           await fetchBooks()
         } else {
@@ -499,32 +399,6 @@ export default function BooksPage() {
       } catch (error) {
         notify.error('Error', 'Network error occurred')
       }
-    }
-  }
-
-  const handleNotifyAdmin = async (transactionId: number) => {
-    try {
-      const response = await fetch('/api/notifications/notify-admins', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          transactionId,
-          type: 'PENDING_BORROW_APPROVAL',
-          message: 'A pending borrow request needs your approval'
-        })
-      })
-
-      if (response.ok) {
-        notify.success('Success', 'Admin notification sent successfully')
-      } else {
-        const errorData = await response.json().catch(() => ({}))
-        notify.error('Error', errorData.error || 'Failed to send notification')
-      }
-    } catch (error) {
-      notify.error('Error', 'Network error occurred')
     }
   }
 
@@ -719,22 +593,6 @@ export default function BooksPage() {
             >
               <i className="fas fa-book mr-2"></i>
               Books ({filteredBooks.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('pending')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm relative ${
-                activeTab === 'pending'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <i className="fas fa-clock mr-2"></i>
-              Pending Approval ({effectivePendingTransactions.length})
-              {effectivePendingTransactions.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                  {effectivePendingTransactions.length}
-                </span>
-              )}
             </button>
             <button
               onClick={() => setActiveTab('borrowed')}
@@ -1077,142 +935,6 @@ export default function BooksPage() {
                 </div>
               </div>
             )}
-          </>
-        ) : activeTab === 'pending' ? (
-          <>
-            {/* Pending Transactions */}
-            <div className="bg-white shadow-md rounded-lg overflow-hidden">
-              <div className="px-6 py-4 bg-gray-50 border-b">
-                <h3 className="text-lg font-medium text-gray-900">Pending Approval</h3>
-                <p className="text-sm text-gray-600 mt-1">Review and approve borrowing requests waiting for approval</p>
-              </div>
-              
-              {effectivePendingTransactions.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
-                  <i className="fas fa-clipboard-check text-4xl mb-4 text-gray-300"></i>
-                  <div>No pending transactions</div>
-                  <div className="text-sm mt-1">All transactions have been processed</div>
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-200">
-                  {effectivePendingTransactions.map((transaction) => (
-                    <div key={transaction.transaction_id} className="p-6 hover:bg-gray-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center mb-2">
-                            <div className="flex-shrink-0 h-12 w-12">
-                              <div className="h-12 w-12 rounded bg-blue-500 flex items-center justify-center">
-                                <i className="fas fa-book text-white"></i>
-                              </div>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-lg font-medium text-gray-900">
-                                {transaction.book.title}
-                              </div>
-                              <div className="text-sm text-gray-600">
-                                by {transaction.book.book_author} • {transaction.book.category?.name}
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-gray-600">Borrower:</span>
-                              {transaction.user ? (
-                                <>
-                                  <div className="font-medium">{transaction.user.full_name}</div>
-                                  <div className="text-gray-500">{transaction.user.account_id} • {transaction.user.user_type}</div>
-                                </>
-                              ) : transaction.department ? (
-                                <>
-                                  <div className="font-medium">{transaction.department.name}</div>
-                                  <div className="text-gray-500">
-                                    {transaction.department.code} • Department
-                                    {transaction.borrower_representative && ` • Rep: ${transaction.borrower_representative}`}
-                                  </div>
-                                </>
-                              ) : transaction.office ? (
-                                <>
-                                  <div className="font-medium">{transaction.office.name}</div>
-                                  <div className="text-gray-500">
-                                    {transaction.office.code} • Office
-                                    {transaction.borrower_representative && ` • Rep: ${transaction.borrower_representative}`}
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="font-medium text-gray-400">N/A</div>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-gray-600">Dates:</span>
-                              <div className="font-medium">Borrow: {transaction.borrow_date ? new Date(transaction.borrow_date).toLocaleDateString() : 'Not set'}</div>
-                              <div className="text-gray-500">Due: {new Date(transaction.due_date).toLocaleDateString()}</div>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex flex-col gap-2 ml-6">
-                          {transaction.status === 'PENDING_APPROVAL' && (
-                            <>
-                              {(session?.user?.role === 'ADMIN' || session?.user?.role === 'SUPER_ADMIN') ? (
-                                <>
-                                  <button
-                                    onClick={() => handleApproveTransaction(transaction.transaction_id, 'approve')}
-                                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                                  >
-                                    <i className="fas fa-check mr-2"></i>
-                                    Approve Borrow
-                                  </button>
-                                  <button
-                                    onClick={() => handleApproveTransaction(transaction.transaction_id, 'reject')}
-                                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                                  >
-                                    <i className="fas fa-times mr-2"></i>
-                                    Reject
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-md text-sm font-medium text-center">
-                                    <i className="fas fa-clock mr-2"></i>
-                                    Waiting for Approval
-                                  </div>
-                                  <button
-                                    onClick={() => handleNotifyAdmin(transaction.transaction_id)}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                                  >
-                                    <i className="fas fa-bell mr-2"></i>
-                                    Notify Admin
-                                  </button>
-                                </>
-                              )}
-                            </>
-                          )}
-                          {transaction.return_date && !transaction.status.includes('RETURNED') && session?.user?.role !== 'ADMIN' && (
-                            <button
-                              onClick={() => handleApproveReturn(transaction.transaction_id)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                            >
-                              <i className="fas fa-undo mr-2"></i>
-                              Approve Return
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {transaction.penalty > 0 && (
-                        <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-md">
-                          <div className="text-sm">
-                            <i className="fas fa-exclamation-triangle text-orange-600 mr-2"></i>
-                            <span className="text-orange-800">Penalty: ${Number(transaction.penalty || 0).toFixed(2)}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </>
         ) : (
           <>

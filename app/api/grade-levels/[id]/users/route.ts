@@ -16,16 +16,22 @@ export async function GET(
       )
     }
 
-    // Fetch users in this grade level (excluding admin/staff accounts)
+    // Fetch users in this grade level. We do NOT hardcode
+    // a role filter here — the client-side filter modal
+    // decides which `user_type`s to include.
     const users = await prisma.user.findMany({
       where: {
-        grade_level_id: gradeLevelId,
-        OR: [
-          { user_account: null },
-          { user_account: { role: 'USER' } }
-        ]
+        grade_level_id: gradeLevelId
       },
-      include: {
+      select: {
+        user_id: true,
+        account_id: true,
+        full_name: true,
+        email: true,
+        contact_number: true,
+        user_type: true,
+        year_level: true,
+        status: true,
         section: {
           select: {
             name: true

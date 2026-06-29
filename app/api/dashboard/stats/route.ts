@@ -71,7 +71,6 @@ export async function GET(request: NextRequest) {
           totalBooks,
           availableBooks,
           borrowedBooks,
-          pendingBooks,
           lockerUsage,
           totalLockers,
           overdueBreakdown
@@ -124,11 +123,6 @@ export async function GET(request: NextRequest) {
               status: 'ACTIVE'
             }
           }),
-          prisma.bookTransaction.count({
-            where: { 
-              status: 'PENDING_APPROVAL'
-            }
-          }),
           // Locker statistics
           prisma.lockerTransaction.count({
             where: { return_time: null }
@@ -161,7 +155,6 @@ export async function GET(request: NextRequest) {
           totalBooks,
           availableBooks,
           borrowedBooks,
-          pendingBooks,
           lockerUsage,
           totalLockers,
           lockerUtilization: totalLockers > 0 ? Math.round((lockerUsage / totalLockers) * 100) : 0,
@@ -175,7 +168,6 @@ export async function GET(request: NextRequest) {
         const [
           activeLockers,
           borrowedBooksStaff,
-          pendingBooksStaff,
           todayEntriesStaff,
           overdueItemsStaff
         ] = await Promise.all([
@@ -222,7 +214,6 @@ export async function GET(request: NextRequest) {
         stats = {
           activeLockers,
           borrowedBooks: borrowedBooksStaff,
-          pendingBooks: pendingBooksStaff,
           todayEntries: todayEntriesStaff,
           overdueItems: overdueItemsStaff
         }

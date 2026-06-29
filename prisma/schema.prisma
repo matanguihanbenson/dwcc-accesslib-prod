@@ -7,6 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+ 
+
 model User {
   user_id             Int                 @id @default(autoincrement())
   account_id          String              @unique @db.VarChar(20)
@@ -286,8 +289,6 @@ model BookTransaction {
   department_id           Int?
   office_id               Int?
   borrower_representative String?           @db.VarChar(100)
-  requested_by            Int?
-  approved_by             Int?
   returned_by             Int?
   notes                   String?           @db.Text
   created_at              DateTime          @default(now()) @db.Timestamp(0)

@@ -348,7 +348,7 @@ export async function DELETE(
 
     // Check if user has active transactions or recent activity
     const activeTransactions = existingUser.book_transactions.filter(
-      t => t.status === 'ACTIVE' || t.status === 'PENDING_APPROVAL'
+      t => t.status === 'ACTIVE'
     )
 
     if (activeTransactions.length > 0) {

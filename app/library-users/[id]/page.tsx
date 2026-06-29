@@ -425,10 +425,9 @@ export default function LibraryUserViewPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={
-                          transaction.status === 'ACTIVE' ? 'primary' : 
-                          transaction.status === 'COMPLETED' ? 'success' : 
-                          transaction.status === 'OVERDUE' ? 'error' :
-                          transaction.status === 'PENDING_APPROVAL' ? 'warning' : 'outline'
+                          transaction.status === 'ACTIVE' ? 'primary' :
+                          transaction.status === 'COMPLETED' ? 'success' :
+                          transaction.status === 'OVERDUE' ? 'error' : 'outline'
                         }>
                           {transaction.status.replace('_', ' ')}
                         </Badge>

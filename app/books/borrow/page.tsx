@@ -621,10 +621,44 @@ export default function BorrowBooksPage() {
       const result = await response.json()
 
       if (response.ok) {
+        // Build a friendly success summary that names the
+        // book + borrower so the staff member can confirm at
+        // a glance.
+        const tx = result?.data || result
+        const bookTitle = tx?.book?.title || (selectedBook as any)?.title || 'the book'
+        const authorName =
+          tx?.book?.authors?.[0]?.name ||
+          (selectedBook as any)?.authors?.[0]?.name ||
+          (selectedBook as any)?.book_author ||
+          ''
+        const dueDateLabel = tx?.due_date
+          ? new Date(tx.due_date).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            })
+          : dueDate
+          ? new Date(dueDate).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            })
+          : null
+        const borrowerName =
+          tx?.user?.full_name ||
+          selectedUser?.full_name ||
+          (departmentId
+            ? `Department #${departmentId}`
+            : officeId
+            ? `Office #${officeId}`
+            : 'borrower')
+
+        const authorSuffix = authorName ? ` by ${authorName}` : ''
+        const dueSuffix = dueDateLabel ? `\nDue: ${dueDateLabel}` : ''
         await Swal.fire({
           icon: 'success',
-          title: 'Request Submitted',
-          text: 'Borrow request has been submitted for approval',
+          title: 'Book Borrowed',
+          text: `"${bookTitle}"${authorSuffix} has been borrowed by ${borrowerName}.${dueSuffix}`,
           confirmButtonColor: '#10b981'
         })
         
@@ -663,10 +697,26 @@ export default function BorrowBooksPage() {
           setDueDate(formattedDate)
         }
       } else {
+        // Map common error codes to a friendlier title / icon
+        // so the staff member gets actionable feedback.
+        const code = (result && (result.code || result.error_code)) || ''
+        const message = result?.error || 'Failed to process the borrow request'
+        let icon: 'warning' | 'error' | 'info' = 'error'
+        let title = 'Borrow Failed'
+        if (code === 'COPY_NOT_AVAILABLE' || code === 'BOOK_NOT_AVAILABLE') {
+          icon = 'warning'
+          title = 'Book Unavailable'
+        } else if (code === 'USER_INACTIVE') {
+          icon = 'warning'
+          title = 'User Inactive'
+        } else if (code === 'DEPARTMENT_NOT_FOUND' || code === 'OFFICE_NOT_FOUND') {
+          icon = 'warning'
+          title = 'Department / Office Not Found'
+        }
         await Swal.fire({
-          icon: 'error',
-          title: 'Request Failed',
-          text: result.error || 'Failed to submit borrow request',
+          icon,
+          title,
+          text: message,
           confirmButtonColor: '#ef4444'
         })
       }
@@ -674,7 +724,7 @@ export default function BorrowBooksPage() {
       await Swal.fire({
         icon: 'error',
         title: 'Network Error',
-        text: 'Failed to submit request. Please try again.',
+        text: 'Failed to process the request. Please try again.',
         confirmButtonColor: '#ef4444'
       })
     } finally {

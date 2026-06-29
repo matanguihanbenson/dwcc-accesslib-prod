@@ -1,12 +1,13 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import useSWR from 'swr'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import ExportFilterModal, { ExportFormat } from '@/components/forms/ExportFilterModal'
 
 const fetcher = (url: string) => fetch(url, { credentials: 'include' }).then(r => r.json())
 
@@ -14,6 +15,11 @@ export default function StudentCategoriesPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('sections')
+  // Export modal state. The index page lets the user
+  // export the entire members of the currently-shown
+  // category type. The modal captures the filter and
+  // format (Excel / PDF) the user picks.
+  const [exportFormat, setExportFormat] = useState<ExportFormat | null>(null)
 
   // Fetch all category data
   const { data: sections, error: sectionsError } = useSWR('/api/student-sections?limit=500', fetcher)
@@ -89,7 +95,7 @@ export default function StudentCategoriesPage() {
             <div>
               <h1 className="text-xl font-semibold text-gray-800">Student Categories</h1>
               <nav className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
-                <button 
+                <button
                   onClick={() => router.push('/library-users')}
                   className="hover:text-gray-700"
                 >
@@ -99,10 +105,32 @@ export default function StudentCategoriesPage() {
                 <span className="text-gray-900 font-medium">Categories</span>
               </nav>
             </div>
-            <Button variant="outline" onClick={() => router.push('/library-users')} className='px-4 py-5 bg-primary-600 hover:bg-primary-700 text-white'>
-              <i className="fas fa-arrow-left mr-2"></i>
-              Back to Users
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => setExportFormat('excel')}
+                className='px-4 py-5 bg-green-600 hover:bg-green-700 text-white'
+                title="Export the current category type's members to Excel"
+              >
+                <i className="fas fa-file-excel mr-2"></i>
+                Export to Excel
+              </Button>
+              <Button
+                onClick={() => setExportFormat('pdf')}
+                className='px-4 py-5 bg-red-600 hover:bg-red-700 text-white'
+                title="Export the current category type's members to PDF"
+              >
+                <i className="fas fa-file-pdf mr-2"></i>
+                Export to PDF
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push('/library-users')}
+                className='px-4 py-5 bg-primary-600 hover:bg-primary-700 text-white'
+              >
+                <i className="fas fa-arrow-left mr-2"></i>
+                Back to Users
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -593,6 +621,176 @@ export default function StudentCategoriesPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Export modal — the index page lets the user
+          export the entire roster of the currently-shown
+          category type. The header buttons set the format
+          (Excel / PDF) and open the modal. The modal fetches
+          every member, applies the filter, and writes the
+          file. */}
+      <IndexExportModal
+        format={exportFormat}
+        activeTab={activeTab}
+        onClose={() => setExportFormat(null)}
+      />
     </>
+  )
+}
+
+// ============================================================================
+// IndexExportModal — powers the "Export to Excel" /
+// "Export to PDF" buttons in the categories index header.
+// Resolves the current tab → category type, fetches every
+// member of every category in that type, then hands them
+// to `ExportFilterModal` for filtering + file writing.
+// ============================================================================
+function IndexExportModal({
+  format,
+  activeTab,
+  onClose
+}: {
+  format: ExportFormat | null
+  activeTab: string
+  onClose: () => void
+}) {
+  const [users, setUsers] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+
+  // Map active tab → category type + label + endpoint that
+  // returns the members of a single category.
+  const tabMeta: Record<
+    string,
+    {
+      type: string
+      label: string
+      listPath: string
+      detailPath: (id: number) => string
+    }
+  > = {
+    sections: {
+      type: 'section',
+      label: 'Sections',
+      listPath: '/api/student-sections?limit=500',
+      detailPath: (id) => `/api/student-sections/${id}/users`
+    },
+    programs: {
+      type: 'program',
+      label: 'Programs',
+      listPath: '/api/programs?limit=500',
+      detailPath: (id) => `/api/programs/${id}/users`
+    },
+    departments: {
+      type: 'department',
+      label: 'Departments',
+      listPath: '/api/departments?limit=500',
+      detailPath: (id) => `/api/departments/${id}/users`
+    },
+    gradeLevels: {
+      type: 'grade-level',
+      label: 'Grade Levels',
+      listPath: '/api/grade-levels?limit=500',
+      detailPath: (id) => `/api/grade-levels/${id}/users`
+    },
+    strands: {
+      type: 'strand',
+      label: 'Strands',
+      listPath: '/api/strands?limit=500',
+      detailPath: (id) => `/api/strands/${id}/users`
+    }
+  }
+
+  // Reset the user list whenever the active tab or the
+  // chosen format changes. The parent only re-opens the
+  // modal when `format` is non-null, so this fires once
+  // per click.
+  useEffect(() => {
+    if (!format) {
+      setUsers([])
+      return
+    }
+    const meta = tabMeta[activeTab]
+    if (!meta) return
+
+    const controller = new AbortController()
+    const load = async () => {
+      setLoading(true)
+      try {
+        // 1) Pull every category of this type so we know
+        //    which IDs to fetch users for.
+        const listRes = await fetch(meta.listPath, {
+          signal: controller.signal,
+          credentials: 'include'
+        })
+        if (!listRes.ok) throw new Error('Failed to load categories')
+        const listJson = await listRes.json()
+        const list: any[] = Array.isArray(listJson)
+          ? listJson
+          : (listJson?.data || [])
+
+        // Each list endpoint returns a slightly different
+        // id key; normalize it.
+        const idOf = (row: any): number | null => {
+          if (typeof row.section_id === 'number') return row.section_id
+          if (typeof row.program_id === 'number') return row.program_id
+          if (typeof row.department_id === 'number') return row.department_id
+          if (typeof row.grade_level_id === 'number')
+            return row.grade_level_id
+          if (typeof row.strand_id === 'number') return row.strand_id
+          return null
+        }
+
+        // 2) Fetch the members of each category in
+        //    parallel. Failures are silently dropped (the
+        //    user sees a smaller count in the preview).
+        const results = await Promise.all(
+          list
+            .map((row) => idOf(row))
+            .filter((id): id is number => id !== null)
+            .map(async (id) => {
+              try {
+                const res = await fetch(meta.detailPath(id), {
+                  signal: controller.signal,
+                  credentials: 'include'
+                })
+                if (!res.ok) return []
+                const data = await res.json()
+                return Array.isArray(data) ? data : (data?.data || [])
+              } catch {
+                return []
+              }
+            })
+        )
+        setUsers(results.flat())
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          // Surface as a console warning — the modal still
+          // opens with whatever we have so the user can at
+          // least try.
+          console.error('Failed to load export data', err)
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+    return () => controller.abort()
+  }, [format, activeTab])
+
+  if (!format) return null
+  const meta = tabMeta[activeTab]
+
+  return (
+    <ExportFilterModal
+      open={!!format}
+      onClose={onClose}
+      users={users}
+      format={format}
+      title={`${meta?.label || 'Category'} Members`}
+      subtitle="All members across every category of this type"
+      filename={`${meta?.type || 'category'}_members_${
+        new Date().toISOString().split('T')[0]
+      }`}
+      showStatus
+    />
   )
 }

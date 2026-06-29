@@ -63,6 +63,18 @@ export function bookHref(book: { book_id: number; title?: string | null }): stri
   return slug ? `/books/${slug}-${id}` : `/books/${id}`
 }
 
+/**
+ * Build the canonical URL for a person (author or
+ * contributor) on the public catalogue. The slug is
+ * appended so the page can recover the original (spaced)
+ * name from the URL parameter.
+ */
+export function authorHref(name: string | null | undefined): string {
+  if (!name) return '/authors'
+  const slug = slugify(name)
+  return slug ? `/authors/${slug}` : '/authors'
+}
+
 export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
   return d.toLocaleDateString('en-US', {

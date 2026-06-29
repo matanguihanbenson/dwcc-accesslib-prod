@@ -1,9 +1,8 @@
 import { NextRequest } from 'next/server'
-import { UserRole, UserType, NotificationType } from '@/types'
+import { UserRole, UserType } from '@/types'
 import { withAuth, createSuccessResponse, getSearchParams, createErrorResponse, getUserIdFromSession } from '@/lib/api-utils'
 import { bookService } from '@/lib/services/book.service'
 import { prisma } from '@/lib/prisma'
-import { NotificationService } from '@/lib/services/notification.service'
 import BookStatusManager from '@/lib/book-status-manager'
 import { withDuplicatePreventionByBody, withDatabaseDuplicateCheck } from '@/lib/duplicate-prevention'
 
@@ -71,9 +70,7 @@ export const POST = withAuth(
         const existingCopyTransaction = await prisma.bookTransaction.findFirst({
           where: {
             copy_id: bookCopy.copy_id,
-            status: {
-              in: ['PENDING_APPROVAL', 'ACTIVE']
-            }
+            status: 'ACTIVE'
           }
         })
 
@@ -83,12 +80,10 @@ export const POST = withAuth(
 
         const book = bookCopy.book
 
-        // Check for existing pending or active transaction for this borrower and this book title
+        // Check for existing active transaction for this borrower and this book title
         const existingWhere: any = {
           book_id: book.book_id,
-          status: {
-            in: ['PENDING_APPROVAL', 'ACTIVE']
-          }
+          status: 'ACTIVE'
         }
 
         if (user_id) {
@@ -161,18 +156,21 @@ export const POST = withAuth(
 
         // Get the correct user_id from session
         const requestedByUserId = await getUserIdFromSession(session)
-        
+
         if (!requestedByUserId) {
           return createErrorResponse('Unable to identify user from session', 401, 'SESSION_ERROR')
         }
 
-        // Create pending approval transaction
+        // Staff processes the borrow immediately — no approval
+        // round-trip. The transaction is created in ACTIVE
+        // status with the current timestamp as the borrow
+        // date, and the specific copy is marked BORROWED.
         const transactionData: any = {
           book_id: book.book_id,
           copy_id: bookCopy.copy_id,
+          borrow_date: new Date(),
           due_date: due_date ? new Date(due_date) : null,
-          status: 'PENDING_APPROVAL',
-          requested_by: requestedByUserId,
+          status: 'ACTIVE',
           condition_on_borrow: condition_on_borrow || null,
           notes: notes || null,
         }
@@ -190,105 +188,57 @@ export const POST = withAuth(
           transactionData.borrower_representative = borrower_representative
         }
 
-        const transaction = await prisma.bookTransaction.create({
-          data: transactionData,
-          include: {
-            book: {
-              select: {
-                title: true,
-                authors: {
-                  select: { name: true },
-                  orderBy: { display_order: 'asc' },
-                  take: 1
-                }
-              }
-            },
-            user: user_id ? {
-              select: {
-                full_name: true,
-                account_id: true
-              }
-            } : undefined,
-            department: department_id ? {
-              select: {
-                name: true,
-                code: true
-              }
-            } : undefined,
-            office: office_id ? {
-              select: {
-                name: true,
-                code: true
-              }
-            } : undefined
-          }
-        })
-
-        // Send notifications to ADMIN users only. SUPER_ADMIN
-        // oversees the whole system and doesn't approve book
-        // borrows, so they are intentionally excluded.
-        try {
-          const adminUsers = await prisma.userAccount.findMany({
-            where: {
-              role: 'ADMIN',
-              is_active: true
-            },
-            include: {
-              user: {
-                select: {
-                  user_id: true
-                }
-              }
-            }
+        const transaction = await prisma.$transaction(async (tx) => {
+          // 1. Flip the copy to BORROWED so the return page
+          //    sees it immediately and other staff can't
+          //    double-issue the same accession number.
+          await tx.bookCopy.update({
+            where: { copy_id: bookCopy.copy_id },
+            data: { status: 'BORROWED' }
           })
 
-          if (adminUsers.length > 0) {
-            // Determine borrower info for notification
-            let borrowerName = ''
-            let borrowerIdentifier = ''
-            
-            if (transaction.user) {
-              borrowerName = transaction.user.full_name || 'Unknown'
-              borrowerIdentifier = transaction.user.account_id || 'N/A'
-            } else if (transaction.department) {
-              borrowerName = transaction.department.name
-              borrowerIdentifier = transaction.department.code
-              if (transaction.borrower_representative) {
-                borrowerName += ` (Rep: ${transaction.borrower_representative})`
-              }
-            } else if (transaction.office) {
-              borrowerName = transaction.office.name
-              borrowerIdentifier = transaction.office.code
-              if (transaction.borrower_representative) {
-                borrowerName += ` (Rep: ${transaction.borrower_representative})`
-              }
+          // 2. Decrement the book's available-copy count
+          //    using the status manager so derived counts
+          //    stay in sync.
+          await BookStatusManager.updateBookStatusAfterBorrow(book.book_id, tx)
+
+          // 3. Persist the transaction itself.
+          return tx.bookTransaction.create({
+            data: transactionData,
+            include: {
+              book: {
+                select: {
+                  title: true,
+                  authors: {
+                    select: { name: true },
+                    orderBy: { display_order: 'asc' },
+                    take: 1
+                  }
+                }
+              },
+              user: user_id ? {
+                select: {
+                  full_name: true,
+                  account_id: true
+                }
+              } : undefined,
+              department: department_id ? {
+                select: {
+                  name: true,
+                  code: true
+                }
+              } : undefined,
+              office: office_id ? {
+                select: {
+                  name: true,
+                  code: true
+                }
+              } : undefined
             }
+          })
+        })
 
-            const notifications = adminUsers.map(admin => ({
-              user_id: admin.user.user_id,
-              type: NotificationType.PENDING_APPROVAL,
-              title: 'New Borrow Request',
-              message: `${borrowerName} (${borrowerIdentifier}) has requested to borrow "${transaction.book.title}"${transaction.book.authors && transaction.book.authors.length > 0 ? ` by ${transaction.book.authors[0].name}` : ''}. Click to review and approve.`,
-              metadata: {
-                transactionId: transaction.transaction_id,
-                bookTitle: transaction.book.title,
-                borrowerName: borrowerName,
-                borrowerIdentifier: borrowerIdentifier,
-                redirectUrl: '/books?tab=pending'
-              }
-            }))
-
-            const result = await NotificationService.createBulkNotifications(notifications)
-            console.log('Admin notifications result:', result)
-          } else {
-            console.log('No admin users found to notify')
-          }
-        } catch (notifError) {
-          // Log notification error but don't fail the transaction
-          console.error('Failed to send admin notifications:', notifError)
-        }
-
-        return createSuccessResponse(transaction, 'Borrow request created')
+        return createSuccessResponse(transaction, 'Book borrowed successfully')
       } catch (error: any) {
         return createErrorResponse(error?.message || 'Failed to create borrow request', 500, 'INTERNAL_ERROR')
       }

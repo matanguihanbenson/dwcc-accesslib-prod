@@ -26,14 +26,21 @@ const PUBLIC_ROUTES = [
 // sidebar layout.
 const PUBLIC_BOOK_DETAIL_RE = /^\/books\/(?!add$|borrow$|return$|transactions$|archived-copies$|categories$|sections$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i
 
+// Public author / contributor works page at
+// /authors/[slug]. Always public — anyone visiting the
+// catalogue can click a name to see all the books that
+// credit the person.
+const PUBLIC_AUTHOR_RE = /^\/authors\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i
+
 export function ConditionalLayout({ children }: ConditionalLayoutProps) {
   const pathname = usePathname()
 
-  // Public routes and public book detail pages render
-  // without the sidebar layout.
+  // Public routes and public book detail / author pages
+  // render without the sidebar layout.
   const isPublicRoute =
     PUBLIC_ROUTES.includes(pathname) ||
-    PUBLIC_BOOK_DETAIL_RE.test(pathname)
+    PUBLIC_BOOK_DETAIL_RE.test(pathname) ||
+    PUBLIC_AUTHOR_RE.test(pathname)
 
   if (isPublicRoute) {
     return <>{children}</>

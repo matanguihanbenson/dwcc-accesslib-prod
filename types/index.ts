@@ -328,8 +328,6 @@ export interface BookTransaction {
   status: TransactionStatus
   book_id: number
   user_id: number
-  requested_by?: number
-  approved_by?: number
   returned_by?: number
   notes?: string
   condition_on_borrow?: BookCondition

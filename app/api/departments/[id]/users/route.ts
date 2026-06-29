@@ -16,16 +16,22 @@ export async function GET(
       )
     }
 
-    // Fetch users in this department (excluding admin/staff accounts)
+    // Fetch users in this department. We do NOT hardcode
+    // a role filter here — the client-side filter modal
+    // decides which `user_type`s to include.
     const users = await prisma.user.findMany({
       where: {
-        department_id: departmentId,
-        OR: [
-          { user_account: null },
-          { user_account: { role: 'USER' } }
-        ]
+        department_id: departmentId
       },
-      include: {
+      select: {
+        user_id: true,
+        account_id: true,
+        full_name: true,
+        email: true,
+        contact_number: true,
+        user_type: true,
+        year_level: true,
+        status: true,
         section: {
           select: {
             name: true
