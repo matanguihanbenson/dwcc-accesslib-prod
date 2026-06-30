@@ -96,18 +96,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
         roles: [USER_ROLES.ADMIN, USER_ROLES.STAFF]
       },
       {
-        name: 'Manage Categories',
-        href: '/books/categories',
-        icon: 'fa-tags',
-        roles: [USER_ROLES.ADMIN]
-      },
-      {
-        name: 'Manage Sections',
-        href: '/books/sections',
-        icon: 'fa-layer-group',
-        roles: [USER_ROLES.ADMIN]
-      },
-      {
         name: 'Borrow Books',
         href: '/books/borrow',
         icon: 'fa-hand-holding',
@@ -132,6 +120,12 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
         roles: [USER_ROLES.ADMIN, USER_ROLES.STAFF]
       }
     ]
+  },
+  {
+    name: 'Cataloging Setup',
+    href: '/cataloging-setup',
+    icon: 'fa-sitemap',
+    roles: [USER_ROLES.ADMIN]
   },
   {
     name: 'Lockers',

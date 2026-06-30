@@ -264,6 +264,7 @@ export default function BasicEducationPage() {
         </div>
       </div>
 
+      {/*  */}
       {/* Content */}
       <div className="py-4">
         <Tabs value={activeTab} onValueChange={setActiveTab}>

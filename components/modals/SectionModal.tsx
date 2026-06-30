@@ -292,7 +292,7 @@ export default function SectionModal({
             <Button
               type="submit"
               disabled={processing || loadingData}
-              className="flex-1 bg-primary-600 px-4 py-5 text-white hover:bg-primary-700"
+              className="flex-1 bg-primary-600 px-4 py-5 text-white hover:bg-primary-700bg-primary-600 px-4 py-5 text-white hover:bg-primary-700"
             >
               {processing ? 'Saving...' : isEditMode ? 'Update' : 'Create'}
             </Button>
