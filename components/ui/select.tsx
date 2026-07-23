@@ -12,6 +12,12 @@ interface SelectContextValue {
   triggerRef: React.MutableRefObject<HTMLButtonElement | null>
 
   side: 'top' | 'bottom'
+  // Map of item value -> rendered label. Populated by
+  // every mounted SelectItem so SelectValue can look
+  // up the human-readable name (e.g. "Main Library")
+  // instead of rendering the raw value ("3").
+  itemLabels: Map<string, React.ReactNode>
+  registerItem: (value: string, label: React.ReactNode) => void
 }
 
 const SelectContext = React.createContext<SelectContextValue | null>(null)
@@ -38,6 +44,18 @@ const Select = ({ value = "", onValueChange, children, side = 'bottom' }: Select
   // it. Required because the dropdown is portalled out of the trigger's
   // overflow container.
   const triggerRef = React.useRef<HTMLButtonElement | null>(null)
+  // Map of every SelectItem's value to its rendered
+  // label. Re-created on every render so the latest
+  // children prop wins (so a refetched list with
+  // updated labels shows up immediately).
+  const itemLabels = React.useMemo(() => new Map<string, React.ReactNode>(), [])
+
+  const registerItem = React.useCallback(
+    (itemValue: string, label: React.ReactNode) => {
+      itemLabels.set(itemValue, label)
+    },
+    [itemLabels]
+  )
 
   const handleValueChange = React.useCallback((newValue: string) => {
     setInternalValue(newValue)
@@ -60,6 +78,8 @@ const Select = ({ value = "", onValueChange, children, side = 'bottom' }: Select
         onOpenChange: setOpen,
         triggerRef,
         side,
+        itemLabels,
+        registerItem,
       }}
     >
       {children}
@@ -110,11 +130,20 @@ interface SelectValueProps {
 }
 
 const SelectValue = ({ placeholder, className }: SelectValueProps) => {
-  const { value } = useSelect()
+  const { value, itemLabels } = useSelect()
+
+  // Prefer the registered label of the selected item
+  // (e.g. "Main Library") over the raw value (e.g.
+  // "3"). Falls back to the raw value when the item
+  // hasn't registered yet (e.g. just-mounted list
+  // before the first effect), and to the placeholder
+  // when nothing is selected.
+  const label = value && itemLabels.has(value) ? itemLabels.get(value) : value
+  const display = label || placeholder
 
   return (
     <span className={className}>
-      {value || placeholder}
+      {display}
     </span>
   )
 }
@@ -227,7 +256,15 @@ interface SelectItemProps {
 }
 
 const SelectItem = ({ value, children, className }: SelectItemProps) => {
-  const { onValueChange, value: selectedValue } = useSelect()
+  const { onValueChange, value: selectedValue, registerItem } = useSelect()
+
+  // Register this item's display label so SelectValue
+  // can render the name instead of the raw value.
+  // Re-runs whenever the children change (e.g. when
+  // a list re-fetches with updated names).
+  React.useEffect(() => {
+    registerItem(value, children)
+  }, [value, children, registerItem])
 
   return (
     <div

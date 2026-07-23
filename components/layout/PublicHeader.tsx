@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useSession, signOut } from 'next-auth/react'
+import { mutate } from 'swr'
 
 interface PublicHeaderProps {
   showSubtitle?: boolean
@@ -59,7 +60,7 @@ export function PublicHeader({ showSubtitle = false, subtitle, showBrowseLink = 
                     Dashboard
                   </Link>
                   <button
-                    onClick={() => signOut({ callbackUrl: '/' })}
+                    onClick={() => { mutate(() => true, undefined, { revalidate: false }); signOut({ callbackUrl: '/' }) }}
                     className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center"
                   >
                     <i className="fas fa-sign-out-alt mr-2"></i>

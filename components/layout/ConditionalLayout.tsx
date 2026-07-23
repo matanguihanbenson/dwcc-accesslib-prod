@@ -14,7 +14,8 @@ const PUBLIC_ROUTES = [
   '/contact',
   '/browse',
   '/search',
-  '/login'
+  '/login',
+  '/setup'
 ]
 
 // Public book detail pages. Accepts:

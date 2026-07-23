@@ -105,9 +105,19 @@ export async function GET(request: NextRequest) {
 
       const overdueBooks = await prisma.bookTransaction.findMany({
         where: {
-          // Only ACTIVE transactions are considered "overdue".
-          // COMPLETED transactions are not active borrows.
-          status: 'ACTIVE',
+          // A book is reportable here when it is either (a) still
+          // actively checked out and past its due date, or (b) has
+          // already been returned but still carries an outstanding
+          // fine (an `overdueSettlement` row in PENDING/PARTIAL).
+          // The second OR clause is the only thing that surfaces
+          // returned books with a pending fine, so the outer status
+          // filter has to allow COMPLETED too — otherwise the AND
+          // short-circuits the OR and the row vanishes the moment
+          // the staff clicks "Return" on /books/return. OVERDUE is
+          // included for safety; PENDING_APPROVAL / REJECTED /
+          // CANCELLED borrows are excluded by virtue of not being
+          // in the allowed set.
+          status: { in: ['ACTIVE', 'COMPLETED', 'OVERDUE'] },
           OR: [
             {
               due_date: { lt: currentDate },

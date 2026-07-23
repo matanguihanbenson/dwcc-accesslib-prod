@@ -183,22 +183,69 @@ export default function AddBookPage() {
     fountasPinnell: ['Any Level', 'Level A', 'Level B', 'Level C', 'Level D', 'Level Z']
   })
 
-  // Read the form's local option lists so the page can show
-  // them in the quick-action modal's right column. We mirror
-  // them on the page via `localOptions` and keep them in sync
-  // by reading from the form on first mount. The form's
-  // imperative handle also exposes `addOption` so we can
-  // append new values without a full round-trip.
+  // Pull the live catalog values from the
+  // `book_catalog_value` table so the quick-action modal's
+  // right column also shows everything the admin can pick
+  // from. We keep the page's local mirror in sync with the
+  // form's option lists so the user sees the full set on
+  // the first open and any subsequent additions.
   useEffect(() => {
-    // The form's initial options are these defaults; the
-    // hook's `addOption` keeps the form's state updated.
-    // No need to read from the form on mount — we just need
-    // to keep `localOptions` in sync with the form when we
-    // add via the quick action modal. The `AddOptionModal`
-    // already appends the new value to its own visible list;
-    // the page also appends it to `localOptions` via the
-    // `onAdded` callback below so the next open of the modal
-    // for the same kind shows the updated list.
+    let cancelled = false
+    const merge = (current: string[], next: string[]) => {
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const v of current) {
+        if (!seen.has(v)) {
+          seen.add(v)
+          out.push(v)
+        }
+      }
+      for (const v of next) {
+        if (!seen.has(v)) {
+          seen.add(v)
+          out.push(v)
+        }
+      }
+      return out
+    }
+    const types: Array<{
+      api: 'MATERIAL_TYPE' | 'SUBTYPE' | 'INTEREST_LEVEL' | 'LEXILE' | 'FOUNTAS_PINNELL'
+      kind: OptionKind
+    }> = [
+      { api: 'MATERIAL_TYPE', kind: 'materialType' },
+      { api: 'SUBTYPE', kind: 'subtype' },
+      { api: 'INTEREST_LEVEL', kind: 'interestLevel' },
+      { api: 'LEXILE', kind: 'lexile' },
+      { api: 'FOUNTAS_PINNELL', kind: 'fountasPinnell' }
+    ]
+    Promise.all(
+      types.map((t) =>
+        fetch(`/api/book-catalog-values?type=${t.api}&all=true`, {
+          credentials: 'include',
+          cache: 'no-store'
+        })
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => [])
+      )
+    ).then((results) => {
+      if (cancelled) return
+      setLocalOptions((prev) => {
+        const next = { ...prev }
+        types.forEach((t, i) => {
+          const list: any[] = Array.isArray(results[i])
+            ? results[i]
+            : (results[i] as any)?.data || []
+          const values = list
+            .filter((v: any) => v && v.value && v.is_active !== false)
+            .map((v: any) => String(v.value))
+          next[t.kind] = merge(prev[t.kind] || [], values)
+        })
+        return next
+      })
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const openQuickAdd = (action: QuickAction) => setQuickAdd(action)

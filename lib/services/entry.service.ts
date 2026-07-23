@@ -35,14 +35,24 @@ export class EntryService extends BaseService {
     }
   }
 
-  async recordEntry(userId: number, rfidCode?: string, purpose?: string, verifiedBy?: number): Promise<ServiceResult<EntryLog>> {
+  async recordEntry(userId: number, rfidCode?: string, purpose?: string, verifiedBy?: number, entranceId?: number | null): Promise<ServiceResult<EntryLog>> {
     try {
       const validatedUserId = this.validateId(userId, 'User ID')
 
+      // Fetch the user *with* the lookup-table relations so
+      // we can snapshot the denormalised name columns
+      // (department / program / grade level) at write time.
+      // Without this we'd be re-fetching the lookups on
+      // every report, and a renamed lookup would still
+      // shift historical data.
       const user = await this.findUnique(
         prisma.user,
         { user_id: validatedUserId },
-        null,
+        {
+          department_ref: { select: { name: true } },
+          program: { select: { name: true } },
+          grade_level: { select: { name: true, code: true } }
+        },
         'User not found'
       ) as any
 
@@ -63,11 +73,16 @@ export class EntryService extends BaseService {
       // returns. Without this the admin view's optimistic prepend rendered
       // "N/A" for the department, and exit events had no user info at all.
       //
+      // Also includes the `entrance` relation so the live broadcast
+      // payload already carries the entrance name (the SSE handler
+      // just relays the payload as-is). The staff view renders
+      // the entrance on every recent-entry card.
+      //
       // Every field of `LibraryUser` that is required (not optional)
       // must be selected here -- otherwise the inferred Prisma return
       // type won't match `EntryLog.user` and `handleSuccess<EntryLog>`
       // will fail to compile.
-      const userInclude = {
+      const entryInclude = {
         user: {
           select: {
             user_id: true,
@@ -83,8 +98,21 @@ export class EntryService extends BaseService {
             updated_at: true,
             department_ref: { select: { name: true } },
             program: { select: { name: true } },
+            // Basic-Education students don't have a
+            // `year_level` string — their "year" lives on
+            // `grade_level_id` and the human-readable name
+            // is on the joined `grade_level` row. Pull the
+            // name so the realtime card + optimistic
+            // prepend render "Grade 5" instead of "N/A" for
+            // those users. Falls back to `year_level` for
+            // college students / staff who have no
+            // `grade_level_id`.
+            grade_level: {
+              select: { grade_level_id: true, name: true, code: true }
+            }
           },
         },
+        entrance: { select: { entrance_id: true, name: true, campus: true } },
       }
 
       if (existingActiveEntry) {
@@ -98,7 +126,7 @@ export class EntryService extends BaseService {
 
         const updatedEntry = await prisma.entryLog.findUnique({
           where: { entry_id: existingActiveEntry.entry_id },
-          include: userInclude,
+          include: entryInclude,
         })
 
         if (verifiedBy) {
@@ -124,6 +152,28 @@ export class EntryService extends BaseService {
       } else {
         const verifierCampus = await this.resolveVerifierCampus(verifiedBy)
 
+        // Snapshot the user attributes that can change
+        // over time. Without this, a "last year" report
+        // would show the user's CURRENT year level /
+        // program / department, not the state at the
+        // moment of the entry. Same pattern the row
+        // already uses for `campus`, `entrance_id`, and
+        // `purpose` -- immutable per-entry, which is why
+        // reports from last year still read them correctly.
+        const userSnapshot = {
+          user_year_level:       user.year_level ?? null,
+          user_grade_level_id:   user.grade_level_id ?? null,
+          user_program_id:       user.program_id ?? null,
+          user_department_id:    user.department_id ?? null,
+          user_office_id:        user.office_id ?? null,
+          user_user_type:        user.user_type,
+          user_education_level:  ['KINDERGARTEN','ELEMENTARY','JUNIOR_HIGH','SENIOR_HIGH','COLLEGE','GRADUATE_SCHOOL'].includes(user.education_level as string) ? user.education_level : null,
+          user_full_name:        user.full_name ?? null,
+          user_department_name:  user.department_ref?.name ?? null,
+          user_program_name:     user.program?.name ?? null,
+          user_grade_level_name: user.grade_level?.name ?? null
+        }
+
         const entryLog = await this.create<EntryLog>(prisma.entryLog, {
           user_id: validatedUserId,
           entry_time: new Date(),
@@ -131,7 +181,13 @@ export class EntryService extends BaseService {
           purpose: purpose,
           verified_by: verifiedBy,
           campus: verifierCampus,
-        }, userInclude)
+          // Stamped at write time so the row records which
+          // entrance the staff was operating from. Falls
+          // back to null when no entrance is selected, which
+          // is safe because the column is nullable.
+          entrance_id: entranceId ?? null,
+          ...userSnapshot
+        }, entryInclude)
 
         if (verifiedBy) {
           await AuditService.logAction(
@@ -149,16 +205,22 @@ export class EntryService extends BaseService {
     }
   }
 
-  async recordEntryByRFID(rfidCode: string, purpose?: string, verifiedBy?: number): Promise<ServiceResult<EntryLog>> {
+  async recordEntryByRFID(rfidCode: string, purpose?: string, verifiedBy?: number, entranceId?: number | null): Promise<ServiceResult<EntryLog>> {
     try {
+      // Same snapshot relations as `recordEntry` so the
+      // RFID-driven path is consistent.
       const user = await this.findUnique(
         prisma.user,
         { rfid_code: rfidCode },
-        null,
+        {
+          department_ref: { select: { name: true } },
+          program: { select: { name: true } },
+          grade_level: { select: { name: true, code: true } }
+        },
         'User not found with this RFID code'
       ) as any
 
-      return await this.recordEntry(user.user_id, rfidCode, purpose, verifiedBy)
+      return await this.recordEntry(user.user_id, rfidCode, purpose, verifiedBy, entranceId)
     } catch (error) {
       return this.handleError(error, 'EntryService.recordEntryByRFID')
     }
@@ -172,7 +234,7 @@ export class EntryService extends BaseService {
       const include_user = filters.include_user === true || filters.include_user === 'true'
       console.log('include_user flag:', include_user) // Debug log
       
-      const includeClause = include_user ? {
+      const includeClause: any = include_user ? {
         user: {
           select: {
             user_id: true,
@@ -195,10 +257,33 @@ export class EntryService extends BaseService {
               select: {
                 name: true
               }
+            },
+            // Basic-Education students don't have a
+            // `year_level` string — their "year" lives on
+            // `grade_level_id` and the human-readable name
+            // is on the joined `grade_level` row. Pull the
+            // name so the realtime table can render "Grade
+            // 5" instead of "N/A" for those users. Falls
+            // back to `year_level` for college students /
+            // staff who have no `grade_level_id`.
+            grade_level: {
+              select: {
+                grade_level_id: true,
+                name: true,
+                code: true
+              }
             }
           }
         }
       } : {}
+      // The `entrance` relation is small (just id + name +
+      // campus) and the staff view renders the entrance
+      // name on every recent-entry card, so we always
+      // include it regardless of `include_user`. Cheap
+      // because it's a left-join on the indexed FK.
+      includeClause.entrance = {
+        select: { entrance_id: true, name: true, campus: true }
+      }
       // `campus` is a top-level column on entrylog so it is always
       // available regardless of the include above.
 
@@ -518,6 +603,25 @@ export class EntryService extends BaseService {
     // Campus filter — column directly on entrylog, no relation join needed.
     if (filters.campus) {
       where.campus = filters.campus
+    }
+
+    // Entrance filter — column directly on entrylog, no relation join needed.
+    // Accept either a number (or numeric string) for a single
+    // entrance, or a list (e.g. "1,2,3") for a multi-select. The
+    // caller decides which by how it builds the query.
+    if (filters.entrance_id !== undefined && filters.entrance_id !== null && filters.entrance_id !== '') {
+      if (Array.isArray(filters.entrance_id)) {
+        const ids = filters.entrance_id
+          .map((v: any) => parseInt(String(v)))
+          .filter((n: number) => Number.isFinite(n) && n > 0)
+        if (ids.length === 1) where.entrance_id = ids[0]
+        else if (ids.length > 1) where.entrance_id = { in: ids }
+      } else {
+        const n = parseInt(String(filters.entrance_id))
+        if (Number.isFinite(n) && n > 0) {
+          where.entrance_id = n
+        }
+      }
     }
     
     // Date range filters

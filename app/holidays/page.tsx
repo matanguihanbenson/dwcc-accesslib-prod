@@ -378,13 +378,13 @@ export default function HolidaysPage() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           {holiday.start_time || holiday.end_time ? (
                             <div className="text-sm text-gray-900">
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                              <span className="inline-flex items-center px-4 py-2 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
                                 <i className="fas fa-clock mr-1"></i>
                                 {holiday.start_time && formatTime(holiday.start_time)} - {holiday.end_time && formatTime(holiday.end_time)}
                               </span>
                             </div>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <span className="inline-flex items-center px-4 py-2 rounded-full text-xs font-medium bg-red-100 text-red-800">
                               <i className="fas fa-ban mr-1"></i>
                               Full Day Closed
                             </span>
@@ -392,12 +392,12 @@ export default function HolidaysPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           {holiday.is_recurring ? (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                            <span className="inline-flex items-center px-4 py-2 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                               <i className="fas fa-sync mr-1"></i>
                               Recurring
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            <span className="inline-flex items-center px-4 py-2 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                               One-time
                             </span>
                           )}

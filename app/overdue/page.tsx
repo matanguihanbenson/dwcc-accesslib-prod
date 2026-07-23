@@ -211,7 +211,7 @@ export default function OverdueManagementPage() {
           'Pragma': 'no-cache'
         }
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         setPaymentHistory(data.settlements || [])
@@ -222,6 +222,20 @@ export default function OverdueManagementPage() {
       setLoadingHistory(false)
     }
   }, [])
+
+  // Payment history is needed to render the Total/Paid/Remaining
+  // cards above the tabs as well as the row counts in the tab
+  // nav. Previously it was only loaded when the user clicked the
+  // "Payment History" tab, which left the cards stuck at ₱0 paid
+  // / full balance on initial page load and after a return /
+  // payment was processed. Pulling it on initial mount (and on
+  // every `handleRefresh`, see below) keeps the cards in sync
+  // without forcing the user to round-trip through the tab.
+  useEffect(() => {
+    if (authReady) {
+      fetchPaymentHistory()
+    }
+  }, [authReady, fetchPaymentHistory])
 
   // Fetch the list of voided overdue penalties. The "View Voided"
   // button on the page header opens a modal that calls this. We
@@ -282,13 +296,15 @@ export default function OverdueManagementPage() {
   }, [authReady])
 
   useEffect(() => {
-    if (authReady && activeTab === 'history') {
-      fetchPaymentHistory()
-    }
+    // Payment history is loaded once on initial mount (see the
+    // dedicated effect above) and refetched on every handleRefresh,
+    // so the tab switch doesn't need to trigger a redundant call.
+    // The settings tab still needs its own kick because it loads
+    // a different resource (`/api/system-settings`).
     if (authReady && activeTab === 'settings' && session?.user?.role === UserRole.ADMIN) {
       fetchFineSettings()
     }
-  }, [authReady, activeTab, fetchPaymentHistory, session])
+  }, [authReady, activeTab, session])
 
   const fetchFineSettings = async () => {
     try {
@@ -339,9 +355,13 @@ export default function OverdueManagementPage() {
 
   const handleRefresh = () => {
     fetchOverdueData()
-    if (activeTab === 'history') {
-      fetchPaymentHistory()
-    }
+    // Always refetch payment history too, not only on the
+    // history tab. The "Paid" and "Remaining Unpaid" cards
+    // above the tabs depend on it, and they need to reflect a
+    // payment that was just processed on the books/lockers
+    // table without making the user click over to the
+    // Payment History tab first.
+    fetchPaymentHistory()
   }
 
   const filteredBooks = overdueData?.overdue_books?.filter(book => {
@@ -661,7 +681,7 @@ export default function OverdueManagementPage() {
                 trigger the void action on the history page. */}
             <button
               onClick={() => setShowVoidedModal(true)}
-              className="mb-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 text-xs font-medium transition-colors"
+              className="mb-2 inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 text-xs font-medium transition-colors"
               title="View all voided overdue penalties"
             >
               <i className="fas fa-ban"></i>

@@ -3,6 +3,12 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { UserRole } from '@/types'
+import {
+  TIMEZONE,
+  getDayBucketsInTz,
+  getTodayRangeInTz,
+  getHourInTz,
+} from '@/lib/timezone'
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,33 +25,21 @@ export async function GET(request: NextRequest) {
 
     const now = new Date()
 
-    // Calculate date ranges for the last 7 days
-    const last7Days = []
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date()
-      date.setDate(date.getDate() - i)
-      date.setHours(0, 0, 0, 0)
-      
-      const nextDay = new Date(date)
-      nextDay.setDate(date.getDate() + 1)
-      
-      last7Days.push({
-        date: date,
-        nextDay: nextDay,
-        name: date.toLocaleDateString('en-US', { weekday: 'short' })
-      })
-    }
+    // Last 7 day buckets, each anchored to Asia/Manila wall-clock
+    // days so a 9:15am PH entry shows up on "today", not "yesterday",
+    // regardless of whether the Node process is in UTC or PH time.
+    const last7Days = getDayBucketsInTz(7, now, TIMEZONE)
 
     // Fetch real data for the last 7 days
     const usageChartData = await Promise.all(
-      last7Days.map(async ({ date, nextDay, name }) => {
+      last7Days.map(async ({ start, end, name }) => {
         const [entries, books, lockers] = await Promise.all([
           // Library entries for this day
           prisma.entryLog.count({
             where: {
               entry_time: {
-                gte: date,
-                lt: nextDay
+                gte: start,
+                lte: end
               }
             }
           }),
@@ -53,8 +47,8 @@ export async function GET(request: NextRequest) {
           prisma.bookTransaction.count({
             where: {
               borrow_date: {
-                gte: date,
-                lt: nextDay
+                gte: start,
+                lte: end
               }
             }
           }),
@@ -62,8 +56,8 @@ export async function GET(request: NextRequest) {
           prisma.lockerTransaction.count({
             where: {
               borrow_time: {
-                gte: date,
-                lt: nextDay
+                gte: start,
+                lte: end
               }
             }
           })
@@ -78,11 +72,8 @@ export async function GET(request: NextRequest) {
       })
     )
 
-    // Get today's statistics for comparison
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
+    // Today's range, anchored to the PH wall-clock day.
+    const { start: today, end: tomorrow } = getTodayRangeInTz(TIMEZONE)
 
     const [
       todayEntries,
@@ -92,17 +83,17 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       prisma.entryLog.count({
         where: {
-          entry_time: { gte: today, lt: tomorrow }
+          entry_time: { gte: today, lte: tomorrow }
         }
       }),
       prisma.bookTransaction.count({
         where: {
-          borrow_date: { gte: today, lt: tomorrow }
+          borrow_date: { gte: today, lte: tomorrow }
         }
       }),
       prisma.lockerTransaction.count({
         where: {
-          borrow_time: { gte: today, lt: tomorrow }
+          borrow_time: { gte: today, lte: tomorrow }
         }
       }),
       // Calculate weekly averages
@@ -129,7 +120,7 @@ export async function GET(request: NextRequest) {
     // Get peak activity times for today
     const hourlyActivity = await prisma.entryLog.findMany({
       where: {
-        entry_time: { gte: today, lt: tomorrow }
+        entry_time: { gte: today, lte: tomorrow }
       },
       select: {
         entry_time: true
@@ -138,7 +129,11 @@ export async function GET(request: NextRequest) {
 
     const hourCounts: { [hour: string]: number } = {}
     hourlyActivity.forEach(entry => {
-      const hour = entry.entry_time.getHours()
+      // Use the PH wall-clock hour, not the server's local hour
+      // (Date#getHours() returns the Node process's timezone, which
+      // is usually UTC on hosted servers and would shift the peak
+      // hour 8h off from what the staff see on the dashboard).
+      const hour = getHourInTz(entry.entry_time, TIMEZONE)
       const hourKey = `${hour}:00`
       hourCounts[hourKey] = (hourCounts[hourKey] || 0) + 1
     })
@@ -183,18 +178,16 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error fetching staff analytics:', error)
     
-    // Return fallback data instead of error to prevent dashboard crashes
+    // Return fallback data instead of error to prevent dashboard crashes.
+    // The bucket labels are anchored to PH weekdays so they line up
+    // with whatever the real branch returned when the request succeeds.
     const fallbackData = {
-      usageChartData: Array.from({ length: 7 }, (_, i) => {
-        const date = new Date()
-        date.setDate(date.getDate() - (6 - i))
-        return {
-          name: date.toLocaleDateString('en-US', { weekday: 'short' }),
-          entries: 0,
-          books: 0,
-          lockers: 0
-        }
-      }),
+      usageChartData: getDayBucketsInTz(7, new Date(), TIMEZONE).map((b) => ({
+        name: b.name,
+        entries: 0,
+        books: 0,
+        lockers: 0
+      })),
       todayStats: { entries: 0, books: 0, lockers: 0, peakHour: '8:00' },
       weeklyAverages: { entries: 0, books: 0, lockers: 0 },
       trends: { entries: 'stable', books: 'stable', lockers: 'stable' },

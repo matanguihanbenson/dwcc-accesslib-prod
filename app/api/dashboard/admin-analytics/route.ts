@@ -3,6 +3,16 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { UserRole } from '@/types'
+import {
+  TIMEZONE,
+  getDayBucketsInTz,
+  getMonthBucketsInTz,
+  getTodayRangeInTz,
+  getHourInTz,
+  startOfMonthInTz,
+  startOfWeekInTz,
+  startOfYearInTz,
+} from '@/lib/timezone'
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,15 +28,38 @@ export async function GET(request: NextRequest) {
     }
 
     const now = new Date()
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    
-    const weekStart = new Date(today)
-    weekStart.setDate(today.getDate() - today.getDay())
-    
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+    // Today / this week / this month / this year are all anchored to
+    // the Asia/Manila wall-clock day so the totals on the analytics
+    // tab match what the staff see, regardless of the server's local
+    // timezone.
+    const { start: today, end: tomorrow } = getTodayRangeInTz(TIMEZONE)
+    const weekStart = startOfWeekInTz(now, TIMEZONE)
+    const monthStart = startOfMonthInTz(now, TIMEZONE)
+    const yearStart = startOfYearInTz(now, TIMEZONE)
+    // Pre-compute the three longer-range bucket lists so each
+    // Promise.all arm can just await its own slice.
+    const dayBuckets30 = getDayBucketsInTz(30, now, TIMEZONE)
+    const monthBuckets12 = getMonthBucketsInTz(12, now, TIMEZONE)
+
+    // Optional entrance filter from the user-entry tab. When set
+    // (e.g. `?entranceId=3`) every entry-log query below is scoped
+    // to that single entrance, so the cards, hourly peak, and the
+    // four chart series all reflect just that library. Undefined /
+    // NaN / non-positive values are ignored so the dashboard still
+    // works the moment the page loads with no filter applied.
+    const entranceIdParam = request.nextUrl.searchParams.get('entranceId')
+    const entranceIdParsed = entranceIdParam ? parseInt(entranceIdParam, 10) : NaN
+    const entranceFilter: number | null =
+      Number.isFinite(entranceIdParsed) && entranceIdParsed > 0
+        ? entranceIdParsed
+        : null
+    // Helper that ANDs the entrance filter onto an existing
+    // `where: { entry_time: { ... } }` clause. Returns the same
+    // shape when no filter is set so the call sites stay terse.
+    const withEntrance = <T extends { entry_time?: { gte?: Date; lte?: Date } }>(where: T): T & { entrance_id?: number } =>
+      entranceFilter === null
+        ? (where as T & { entrance_id?: number })
+        : ({ ...where, entrance_id: entranceFilter } as T & { entrance_id?: number })
 
     // Parallel data fetching for better performance
     const [
@@ -34,9 +67,11 @@ export async function GET(request: NextRequest) {
       totalTodayEntries,
       totalWeekEntries,
       totalMonthEntries,
+      totalYearEntries,
       uniqueUsersToday,
       uniqueUsersWeek,
       uniqueUsersMonth,
+      uniqueUsersYear,
       hourlyTrends,
       
       // Locker Analytics
@@ -56,43 +91,66 @@ export async function GET(request: NextRequest) {
       overdueBooks,
       overdueLockers,
       
-      // Weekly chart data
-      weeklyEntryData
+      // Weekly chart data (last 7 days) — anchored to PH wall-clock
+      // days so the X-axis labels line up with the day buckets used
+      // by the rest of the dashboard.
+      weeklyEntryData,
+
+      // Monthly chart data (last 30 days) — daily buckets so the
+      // "This Month" period shows one point per day, not just a
+      // copy of the weekly series.
+      monthlyEntryData,
+
+      // Yearly chart data (last 12 months) — one bucket per month
+      // so the "This Year" period shows monthly totals.
+      yearlyEntryData
     ] = await Promise.all([
       // User Entry Queries
       prisma.entryLog.count({
-        where: { entry_time: { gte: today, lt: tomorrow } }
+        where: withEntrance({ entry_time: { gte: today, lte: tomorrow } })
       }),
       prisma.entryLog.count({
-        where: { entry_time: { gte: weekStart } }
+        where: withEntrance({ entry_time: { gte: weekStart } })
       }),
       prisma.entryLog.count({
-        where: { entry_time: { gte: monthStart } }
+        where: withEntrance({ entry_time: { gte: monthStart } })
+      }),
+      prisma.entryLog.count({
+        where: withEntrance({ entry_time: { gte: yearStart } })
       }),
       prisma.entryLog.groupBy({
         by: ['user_id'],
-        where: { entry_time: { gte: today, lt: tomorrow } },
+        where: withEntrance({ entry_time: { gte: today, lte: tomorrow } }),
         _count: { user_id: true }
       }).then(result => result.length),
       prisma.entryLog.groupBy({
         by: ['user_id'],
-        where: { entry_time: { gte: weekStart } },
+        where: withEntrance({ entry_time: { gte: weekStart } }),
         _count: { user_id: true }
       }).then(result => result.length),
       prisma.entryLog.groupBy({
         by: ['user_id'],
-        where: { entry_time: { gte: monthStart } },
+        where: withEntrance({ entry_time: { gte: monthStart } }),
+        _count: { user_id: true }
+      }).then(result => result.length),
+      prisma.entryLog.groupBy({
+        by: ['user_id'],
+        where: withEntrance({ entry_time: { gte: yearStart } }),
         _count: { user_id: true }
       }).then(result => result.length),
       
       // Hourly trends for today
       prisma.entryLog.findMany({
-        where: { entry_time: { gte: today, lt: tomorrow } },
+        where: withEntrance({ entry_time: { gte: today, lte: tomorrow } }),
         select: { entry_time: true }
       }).then(logs => {
         const hourCounts: { [hour: string]: number } = {}
         logs.forEach(log => {
-          const hour = log.entry_time.getHours()
+          // Use the PH wall-clock hour, not the server's local hour
+          // (Date#getHours() returns the Node process's timezone, which
+          // is usually UTC on hosted servers and would shift the peak
+          // hour 8h off from what admins see on the analytics tab).
+          const hour = getHourInTz(log.entry_time, TIMEZONE)
           hourCounts[hour] = (hourCounts[hour] || 0) + 1
         })
         return Object.entries(hourCounts).map(([hour, count]) => ({
@@ -122,7 +180,7 @@ export async function GET(request: NextRequest) {
       // Book Queries
       prisma.bookTransaction.count({
         where: {
-          borrow_date: { gte: today, lt: tomorrow }
+          borrow_date: { gte: today, lte: tomorrow }
         }
       }),
       prisma.bookTransaction.count({
@@ -181,30 +239,70 @@ export async function GET(request: NextRequest) {
         }
       }),
       
-      // Weekly chart data (last 7 days)
       Promise.all(
-        Array.from({ length: 7 }, (_, i) => {
-          const date = new Date()
-          date.setDate(date.getDate() - (6 - i))
-          date.setHours(0, 0, 0, 0)
-          const nextDay = new Date(date)
-          nextDay.setDate(date.getDate() + 1)
-          
-          return Promise.all([
+        getDayBucketsInTz(7, now, TIMEZONE).map(({ start, end, name }) =>
+          Promise.all([
             prisma.entryLog.count({
-              where: { entry_time: { gte: date, lt: nextDay } }
+              where: withEntrance({ entry_time: { gte: start, lte: end } })
             }),
             prisma.entryLog.groupBy({
               by: ['user_id'],
-              where: { entry_time: { gte: date, lt: nextDay } },
+              where: withEntrance({ entry_time: { gte: start, lte: end } }),
               _count: { user_id: true }
-            }).then(result => result.length)
+            }).then((result) => result.length)
           ]).then(([entries, unique]) => ({
-            name: date.toLocaleDateString('en-US', { weekday: 'short' }),
+            name,
             entries,
             unique
           }))
-        })
+        )
+      ),
+
+      // 30-day daily buckets for the "This Month" period. Each
+      // bucket gets its own count + distinct-user count so the
+      // chart shows real per-day data instead of a copy of the
+      // weekly series.
+      Promise.all(
+        dayBuckets30.map(({ start, end, name, key }) =>
+          Promise.all([
+            prisma.entryLog.count({
+              where: withEntrance({ entry_time: { gte: start, lte: end } })
+            }),
+            prisma.entryLog.groupBy({
+              by: ['user_id'],
+              where: withEntrance({ entry_time: { gte: start, lte: end } }),
+              _count: { user_id: true }
+            }).then((result) => result.length)
+          ]).then(([entries, unique]) => ({
+            name,
+            key,
+            entries,
+            unique
+          }))
+        )
+      ),
+
+      // 12 monthly buckets for the "This Year" period. Each
+      // bucket's `name` is the short month label (e.g. "Jan")
+      // and the X-axis shows the same label the bucket used.
+      Promise.all(
+        monthBuckets12.map(({ start, end, name, key }) =>
+          Promise.all([
+            prisma.entryLog.count({
+              where: withEntrance({ entry_time: { gte: start, lte: end } })
+            }),
+            prisma.entryLog.groupBy({
+              by: ['user_id'],
+              where: withEntrance({ entry_time: { gte: start, lte: end } }),
+              _count: { user_id: true }
+            }).then((result) => result.length)
+          ]).then(([entries, unique]) => ({
+            name,
+            key,
+            entries,
+            unique
+          }))
+        )
       )
     ])
 
@@ -305,9 +403,11 @@ export async function GET(request: NextRequest) {
         totalToday: totalTodayEntries,
         totalThisWeek: totalWeekEntries,
         totalThisMonth: totalMonthEntries,
+        totalThisYear: totalYearEntries,
         uniqueUsersToday: uniqueUsersToday,
         uniqueUsersWeek: uniqueUsersWeek,
         uniqueUsersMonth: uniqueUsersMonth,
+        uniqueUsersYear: uniqueUsersYear,
         peakHour: `${peakHour}:00`,
         trend: totalTodayEntries > (totalWeekEntries / 7) ? 'up' : 
                totalTodayEntries < (totalWeekEntries / 7) ? 'down' : 'stable'
@@ -339,8 +439,8 @@ export async function GET(request: NextRequest) {
       chartData: {
         day: hourlyChartData,
         week: weeklyEntryData,
-        month: weeklyEntryData, // Could be expanded to monthly data
-        year: weeklyEntryData   // Could be expanded to yearly data
+        month: monthlyEntryData,
+        year: yearlyEntryData
       }
     }
 
@@ -355,9 +455,11 @@ export async function GET(request: NextRequest) {
         totalToday: 0,
         totalThisWeek: 0,
         totalThisMonth: 0,
+        totalThisYear: 0,
         uniqueUsersToday: 0,
         uniqueUsersWeek: 0,
         uniqueUsersMonth: 0,
+        uniqueUsersYear: 0,
         peakHour: '8:00',
         trend: 'stable'
       },

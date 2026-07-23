@@ -1,6 +1,7 @@
 "use client"
 import React, { useState, useMemo, useEffect } from 'react'
 import { notify } from '@/lib/notification'
+import { Pagination } from '@/components/ui/pagination'
 
 type Campus = 'COLLEGE' | 'BASIC_EDUCATION'
 
@@ -33,6 +34,15 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
   const [specificDate, setSpecificDate] = useState('')
+
+  // Usage-records pagination. `currentPage` resets to 1
+  // whenever any of the filters below change (see the
+  // filter `onChange` handlers) so the user always lands
+  // on the first page when the filtered list shrinks or
+  // grows. `itemsPerPage` defaults to 25 to match the
+  // library-users / entry-monitoring pagination defaults.
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(25)
   
   // Debug logging
   console.log('AdminView - Lockers count:', lockers.length)
@@ -150,6 +160,10 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
       campus: (locker.campus as Campus) || 'COLLEGE',
       status: locker.status
     })
+    // Open the update modal. Without this the Edit button sets
+    // the form state in the background but never surfaces the
+    // modal, so it looks like nothing happened.
+    setShowUpdateLockerModal(true)
   }
 
   const handleSubmitAddLocker = async (e: React.FormEvent) => {
@@ -499,6 +513,52 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
       return matchesSearch && matchesDate
     })
   }, [transactions, searchTerm, dateFilterType, customStartDate, customEndDate, specificDate])
+
+  // Any change to the usage-tab filters (search, date
+  // range, etc.) shrinks or grows the filtered list, so
+  // reset to page 1. The initial mount doesn't trigger
+  // this because `currentPage` already starts at 1.
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [
+    searchTerm,
+    statusFilter,
+    dateFilterType,
+    customStartDate,
+    customEndDate,
+    specificDate
+  ])
+
+  // Slice the filtered list into the visible page. We
+  // re-derive the slice whenever the filter set, page,
+  // or page size changes — never on its own (a re-render
+  // that only changes the row hover state shouldn't
+  // re-slice).
+  const paginatedTransactions = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage
+    return filteredTransactions.slice(start, start + itemsPerPage)
+  }, [filteredTransactions, currentPage, itemsPerPage])
+
+  // Clamp the page number when the filter set shrinks
+  // (e.g. user picks a smaller per-page, or the date
+  // range now has fewer rows). Without this the table
+  // would briefly show a blank "Page 3" view.
+  const handlePageChange = (page: number) => {
+    const totalPages = Math.max(
+      1,
+      Math.ceil(filteredTransactions.length / itemsPerPage)
+    )
+    setCurrentPage(Math.min(Math.max(1, page), totalPages))
+  }
+
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage)
+    // Always reset to the first page when the page size
+    // changes — otherwise the user could be stranded on
+    // a now-empty page (e.g. switching from 10 → 100
+    // while on page 7 with only 30 rows).
+    setCurrentPage(1)
+  }
 
   // Calculate statistics for summary cards
   const stats = useMemo(() => {
@@ -990,6 +1050,28 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
 
       {/* Enhanced Usage Records Table */}
       <div className="bg-white shadow-sm rounded-lg overflow-hidden border border-gray-200">
+        {/* Top pagination — same per-page + nav controls as
+            the bottom so the user doesn't have to scroll to
+            the bottom to change page size or jump pages on a
+            long list. Hidden when there are no rows so an
+            empty state doesn't render a useless empty
+            pagination bar. */}
+        {filteredTransactions.length > 0 && (
+          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={Math.max(
+                1,
+                Math.ceil(filteredTransactions.length / itemsPerPage)
+              )}
+              totalItems={filteredTransactions.length}
+              itemsPerPage={itemsPerPage}
+              onPageChange={handlePageChange}
+              onItemsPerPageChange={handleItemsPerPageChange}
+              countLabel="usage records"
+            />
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
@@ -1028,7 +1110,7 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                   </td>
                 </tr>
               ) : (
-                filteredTransactions.map((tx) => (
+                paginatedTransactions.map((tx) => (
                   <tr key={tx.transaction_id} className="hover:bg-blue-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm font-bold text-gray-900 bg-gray-100 px-3 py-1.5 rounded-md">
@@ -1101,6 +1183,25 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
             </tbody>
           </table>
         </div>
+        {/* Bottom pagination — same controls as the top
+            bar. Hidden when the table is empty so the
+            empty state stands alone. */}
+        {filteredTransactions.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={Math.max(
+                1,
+                Math.ceil(filteredTransactions.length / itemsPerPage)
+              )}
+              totalItems={filteredTransactions.length}
+              itemsPerPage={itemsPerPage}
+              onPageChange={handlePageChange}
+              onItemsPerPageChange={handleItemsPerPageChange}
+              countLabel="usage records"
+            />
+          </div>
+        )}
       </div>
     </div>
   )

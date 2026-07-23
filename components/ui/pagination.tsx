@@ -7,7 +7,20 @@ interface PaginationProps {
   itemsPerPage: number
   onPageChange: (page: number) => void
   className?: string
+  // Optional per-page selector. When provided alongside
+  // `itemsPerPageOptions`, renders a "Per page: [n]" select
+  // alongside the count + page nav, so callers can use a
+  // single component at both the top and bottom of a table
+  // without also reaching for `<PaginationControls>`.
+  onItemsPerPageChange?: (itemsPerPage: number) => void
+  itemsPerPageOptions?: number[]
+  // Optional label suffix for the count line (e.g. "users",
+  // "books"). Defaults to "items" to preserve the original
+  // wording callers were already showing.
+  countLabel?: string
 }
+
+const DEFAULT_ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100]
 
 export const Pagination: React.FC<PaginationProps> = ({
   currentPage,
@@ -15,12 +28,16 @@ export const Pagination: React.FC<PaginationProps> = ({
   totalItems,
   itemsPerPage,
   onPageChange,
-  className = ''
+  className = '',
+  onItemsPerPageChange,
+  itemsPerPageOptions = DEFAULT_ITEMS_PER_PAGE_OPTIONS,
+  countLabel = 'items'
 }) => {
-  if (totalPages <= 1) return null
+  if (totalPages <= 1 && !onItemsPerPageChange) return null
 
   const startIndex = (currentPage - 1) * itemsPerPage
   const endIndex = Math.min(startIndex + itemsPerPage, totalItems)
+  const showPerPageSelect = typeof onItemsPerPageChange === 'function'
 
   // Generate page numbers with smart ellipsis (1, 2, 3, ..., 48, 49, 50)
   const getPageNumbers = () => {
@@ -64,76 +81,107 @@ export const Pagination: React.FC<PaginationProps> = ({
   const pageNumbers = getPageNumbers()
 
   return (
-    <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${className}`}>
-      {/* Items count */}
-      <div className="text-sm text-gray-600">
-        Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
-        <span className="font-medium">{endIndex}</span> of{' '}
-        <span className="font-medium">{totalItems}</span> items
+    <div className={`flex flex-col gap-2 ${className}`}>
+      {/* Top row: per-page selector (left) + page nav (right).
+          Per-page only renders when the caller wired the
+          optional handler; page nav only renders when there's
+          more than one page (or always when a per-page
+          selector is present, so the user can still change
+          the page size on a single-page list). */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {showPerPageSelect ? (
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700">Per page:</label>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => onItemsPerPageChange!(Number(e.target.value))}
+              className="px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+            >
+              {itemsPerPageOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <span />
+        )}
+
+        {(totalPages > 1 || showPerPageSelect) && (
+          <div className="flex items-center space-x-2">
+            {/* First button */}
+            <button
+              onClick={() => onPageChange(1)}
+              disabled={currentPage === 1}
+              className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="First Page"
+            >
+              <i className="fas fa-angle-double-left"></i>
+            </button>
+
+            {/* Previous button */}
+            <button
+              onClick={() => onPageChange(Math.max(currentPage - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+
+            {/* Page numbers */}
+            <div className="flex items-center space-x-1">
+              {pageNumbers.map((pageNumber, index) =>
+                typeof pageNumber === 'string' ? (
+                  <span key={`ellipsis-${index}`} className="px-2 text-gray-500">
+                    {pageNumber}
+                  </span>
+                ) : (
+                  <button
+                    key={pageNumber}
+                    onClick={() => onPageChange(pageNumber)}
+                    className={`px-3 py-1 text-sm font-medium border rounded-md ${
+                      currentPage === pageNumber
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {pageNumber}
+                  </button>
+                )
+              )}
+            </div>
+
+            {/* Next button */}
+            <button
+              onClick={() => onPageChange(Math.min(currentPage + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+
+            {/* Last button */}
+            <button
+              onClick={() => onPageChange(totalPages)}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Last Page"
+            >
+              <i className="fas fa-angle-double-right"></i>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Pagination controls */}
-      <div className="flex items-center space-x-2">
-        {/* First button */}
-        <button
-          onClick={() => onPageChange(1)}
-          disabled={currentPage === 1}
-          className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="First Page"
-        >
-          <i className="fas fa-angle-double-left"></i>
-        </button>
-
-        {/* Previous button */}
-        <button
-          onClick={() => onPageChange(Math.max(currentPage - 1, 1))}
-          disabled={currentPage === 1}
-          className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Previous
-        </button>
-
-        {/* Page numbers */}
-        <div className="flex items-center space-x-1">
-          {pageNumbers.map((pageNumber, index) => 
-            typeof pageNumber === 'string' ? (
-              <span key={`ellipsis-${index}`} className="px-2 text-gray-500">
-                {pageNumber}
-              </span>
-            ) : (
-              <button
-                key={pageNumber}
-                onClick={() => onPageChange(pageNumber)}
-                className={`px-3 py-1 text-sm font-medium border rounded-md ${
-                  currentPage === pageNumber
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                {pageNumber}
-              </button>
-            )
-          )}
-        </div>
-
-        {/* Next button */}
-        <button
-          onClick={() => onPageChange(Math.min(currentPage + 1, totalPages))}
-          disabled={currentPage === totalPages}
-          className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Next
-        </button>
-
-        {/* Last button */}
-        <button
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage === totalPages}
-          className="px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Last Page"
-        >
-          <i className="fas fa-angle-double-right"></i>
-        </button>
+      {/* Bottom row: "Showing X to Y of Z items" indicator,
+          right-aligned, on its own line so it doesn't fight
+          for space with the per-page selector on narrow
+          viewports. */}
+      <div className="text-sm text-gray-600 text-right">
+        Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
+        <span className="font-medium">{endIndex}</span> of{' '}
+        <span className="font-medium">{totalItems}</span> {countLabel}
       </div>
     </div>
   )

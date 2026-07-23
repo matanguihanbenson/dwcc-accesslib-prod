@@ -306,6 +306,34 @@ export function buildSearchQuery(filters: SearchFilters) {
 export function buildOrderBy(sortBy?: string, sortOrder?: 'asc' | 'desc') {
   if (!sortBy) return { created_at: 'desc' }
   
+  // Whitelist of fields that can be sorted on the user
+  // list, so a hand-crafted `?sortBy=password` doesn't
+  // blow up the query. Anything not in this list falls
+  // back to the default `created_at DESC` order.
+  const ALLOWED_SORT_FIELDS = new Set([
+    'full_name',
+    'last_name',
+    'first_name',
+    'account_id',
+    'user_type',
+    'status',
+    'created_at',
+    'updated_at'
+  ])
+  if (!ALLOWED_SORT_FIELDS.has(sortBy)) {
+    return { created_at: 'desc' }
+  }
+  
+  // "Name" sorts by the conventional last-name → first-name
+  // order so a-Z pages through the table the way a person
+  // would expect (Surnames A→Z, ties broken by given name).
+  if (sortBy === 'full_name') {
+    return [
+      { last_name: sortOrder || 'asc' },
+      { first_name: sortOrder || 'asc' }
+    ] as any
+  }
+  
   return {
     [sortBy]: sortOrder || 'asc'
   }
@@ -415,6 +443,21 @@ export function omit<T extends Record<string, any>, K extends keyof T>(
 export function categorizeUserForEntranceExit(user: {
   role?: string
   user_type?: string
+  // The Prisma `EducationLevel` enum has 5 values;
+  // any of {KINDERGARTEN, ELEMENTARY, JUNIOR_HIGH, SENIOR_HIGH}
+  // counts as Basic Ed, COLLEGE counts as College. We type
+  // it as a string union here so the function can be
+  // called from a plain `string` without importing the
+  // Prisma client, while still giving the caller the
+  // benefit of a typo-checked call site.
+  education_level?:
+    | 'KINDERGARTEN'
+    | 'ELEMENTARY'
+    | 'JUNIOR_HIGH'
+    | 'SENIOR_HIGH'
+    | 'COLLEGE'
+    | 'GRADUATE_SCHOOL'
+    | null
   grade_level_id?: number | null
   section_id?: number | null
   department_id?: number | null
@@ -424,41 +467,64 @@ export function categorizeUserForEntranceExit(user: {
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
     return 'ADMIN'
   }
-  
+
   if (user.role === 'FACULTY') {
     return 'FACULTY'
   }
-  
+
   // Check user type
   if (user.user_type === 'EMPLOYEE') {
     return 'EMPLOYEE'
   }
-  
+
   if (user.user_type === 'GUEST') {
     return 'GUEST'
   }
-  
+
   if (user.user_type === 'ALUMNI') {
     return 'ALUMNI'
   }
-  
-  // For students, distinguish between basic education and college
+
+  // For students, prefer the direct `education_level`
+  // enum column on the user row. It's the most reliable
+  // signal because it doesn't depend on the cascading
+  // presence of either `grade_level_id` (Basic Ed) or
+  // `department_id` (College) — exactly the failure mode
+  // the previous FK-based check had when a college
+  // student happened to have a stale `grade_level_id`
+  // set, which would push them into the Basic Ed bucket.
   if (user.user_type === 'STUDENT') {
-    // Basic education students have grade_level_id and/or section_id
-    // College students have department_id and/or program_id
-    if (user.grade_level_id || user.section_id) {
+    if (user.education_level === 'COLLEGE' || user.education_level === 'GRADUATE_SCHOOL') {
+      return 'COLLEGE_STUDENTS'
+    }
+    if (
+      user.education_level === 'KINDERGARTEN' ||
+      user.education_level === 'ELEMENTARY' ||
+      user.education_level === 'JUNIOR_HIGH' ||
+      user.education_level === 'SENIOR_HIGH'
+    ) {
       return 'BASIC_EDUCATION'
     }
-    
-    // College students have department_id or program_id
+
+    // Fallback for older rows that pre-date the
+    // `education_level` column, or for users where the
+    // value was never set. Order matters: check
+    // college FIRST so a college student with a stale
+    // `grade_level_id` from a data-migration / form-bug
+    // doesn't get misclassified as Basic Ed. The order is
+    // the reverse of the previous implementation, which is
+    // the actual bug fix.
     if (user.department_id || user.program_id) {
       return 'COLLEGE_STUDENTS'
     }
-    
+    if (user.grade_level_id || user.section_id) {
+      return 'BASIC_EDUCATION'
+    }
+
     // Default to college students if no clear indicator
     return 'COLLEGE_STUDENTS'
   }
-  
+
   // Default to college students for unclassified
   return 'COLLEGE_STUDENTS'
 }

@@ -53,6 +53,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
   const [showLocationModal, setShowLocationModal] = useState(false)
   const [showArchiveModal, setShowArchiveModal] = useState(false)
   const [showBulkEditModal, setShowBulkEditModal] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [selectedCopy, setSelectedCopy] = useState<BookCopy | null>(null)
   const [addingCopies, setAddingCopies] = useState(false)
   const [authReady, setAuthReady] = useState(false)
@@ -478,7 +479,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
               {archivedCount > 0 && (
                 <Button
                   onClick={() => router.push(`/books/${bookId}/copies/archived`)}
-                  className="bg-gray-600 hover:bg-gray-700"
+                  className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-5"
                 >
                   <i className="fas fa-archive mr-2"></i>
                   View Archived ({archivedCount})
@@ -567,7 +568,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     onClick={() => setShowBulkEditModal(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-sm py-1.5"
+                    className="bg-blue-600 hover:bg-blue-700 text-sm px-4 py-5 text-white"
                   >
                     <i className="fas fa-pen-to-square mr-1.5"></i>
                     Bulk edit ({selectedCopyIds.length})
@@ -674,7 +675,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                                 setSelectedCopy(copy)
                                 setShowStatusModal(true)
                               }}
-                              className="inline-flex items-center justify-center w-8 h-8 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                              className="inline-flex items-center justify-center w-9 h-9 text-blue-600 bg-blue-100 hover:bg-blue-50 rounded-md transition-colors"
                               title="Update Status"
                               disabled={copy.status === 'BORROWED'}
                             >
@@ -685,7 +686,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                                 setSelectedCopy(copy)
                                 setShowConditionModal(true)
                               }}
-                              className="inline-flex items-center justify-center w-8 h-8 text-orange-600 hover:bg-orange-50 rounded-md transition-colors"
+                              className="inline-flex items-center justify-center w-9 h-9 bg-orange-100 text-orange-600 hover:bg-orange-50 rounded-md transition-colors"
                               title="Update Condition"
                               disabled={copy.status === 'BORROWED'}
                             >
@@ -696,7 +697,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                                 setSelectedCopy(copy)
                                 setShowLocationModal(true)
                               }}
-                              className="inline-flex items-center justify-center w-8 h-8 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
+                              className="inline-flex items-center justify-center w-9 h-9 bg-green-100 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
                               title="Edit Location"
                             >
                               <i className="fas fa-map-marker-alt"></i>
@@ -704,9 +705,19 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                             <button
                               onClick={() => {
                                 setSelectedCopy(copy)
+                                setShowHistoryModal(true)
+                              }}
+                              className="inline-flex items-center justify-center w-9 h-9 bg-purple-100 text-purple-600 hover:bg-purple-50 rounded-md transition-colors"
+                              title="View Borrowing History"
+                            >
+                              <i className="fas fa-clock-rotate-left"></i>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedCopy(copy)
                                 setShowArchiveModal(true)
                               }}
-                              className="inline-flex items-center justify-center w-8 h-8 text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                              className="inline-flex items-center justify-center w-9 h-9 bg-red-100 text-red-600 hover:bg-red-50 rounded-md transition-colors"
                               title="Archive Copy"
                               disabled={copy.status === 'BORROWED'}
                             >
@@ -934,6 +945,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                   setShowStatusModal(false)
                   setSelectedCopy(null)
                 }}
+                className='bg-gray-200 px-4 py-5'
               >
                 Cancel
               </Button>
@@ -1112,6 +1124,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                   setShowConditionModal(false)
                   setSelectedCopy(null)
                 }}
+                className='bg-gray-200 px-4 py-5'
               >
                 Cancel
               </Button>
@@ -1154,12 +1167,13 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                   setShowArchiveModal(false)
                   setSelectedCopy(null)
                 }}
+                className='px-4 py-5 bg-gray-200'
               >
                 Cancel
               </Button>
               <Button
                 onClick={() => handleArchiveCopy(selectedCopy.copy_id)}
-                className="bg-red-600 hover:bg-red-700"
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-5"
               >
                 <i className="fas fa-archive mr-2"></i>
                 Archive Copy
@@ -1199,6 +1213,21 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
           onArchive={() => {
             setShowBulkEditModal(false)
             handleBulkArchive()
+          }}
+        />
+      )}
+
+      {/* Borrowing history modal — every transaction tied
+          to one physical copy, paginated 10 per page,
+          most-recent-first. Opened from the new history
+          action in the copies table. */}
+      {showHistoryModal && selectedCopy && (
+        <BorrowingHistoryModal
+          bookId={bookId}
+          copy={selectedCopy}
+          onClose={() => {
+            setShowHistoryModal(false)
+            setSelectedCopy(null)
           }}
         />
       )}
@@ -1271,12 +1300,12 @@ function LocationEditModal({
           </div>
         </div>
 
-        <div className="px-5 py-3 border-t bg-gray-50 flex items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
+        <div className="px-4 py-5 border-t bg-gray-50 flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className='bg-gray-200 px-4 py-5'>
             Cancel
           </Button>
           <Button
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 text-white px-4 py-5 hover:bg-emerald-700"
             onClick={() => onSave(value.trim())}
           >
             <i className="fas fa-save mr-1.5"></i>
@@ -1466,12 +1495,12 @@ function BulkEditModal({
         </div>
 
         <div className="px-5 py-3 border-t bg-gray-50 flex items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} className='bg-gray-200 px-4 py-5'>
             Cancel
           </Button>
           {op === 'status' && (
             <Button
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-5"
               onClick={() => onStatus(newStatus)}
               disabled={!newStatus}
             >
@@ -1481,7 +1510,7 @@ function BulkEditModal({
           )}
           {op === 'location' && (
             <Button
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-5"
               onClick={() => onLocation(clearingLocation ? '' : newLocation)}
               disabled={!clearingLocation && !newLocation.trim()}
             >
@@ -1491,7 +1520,7 @@ function BulkEditModal({
           )}
           {op === 'archive' && (
             <Button
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-red-600 text-white px-4 py-5 hover:bg-red-700"
               onClick={onArchive}
             >
               <i className="fas fa-archive mr-1.5"></i>
@@ -1564,5 +1593,338 @@ function OpButton({
         {sublabel}
       </span>
     </button>
+  )
+}
+
+// ============================================================
+// Borrowing history modal (per-copy)
+// ============================================================
+//
+// Shows every `bookTransaction` row tied to a single physical
+// copy, paginated 10 per page, ordered most-recent-first. The
+// modal owns its own fetch + pagination state so opening it
+// for a different copy (e.g. via the previous "next" /
+// "previous" arrows if they were ever added) starts from a
+// clean page 1.
+interface BorrowHistoryTransaction {
+  transaction_id: number
+  borrow_date: string | null
+  return_date: string | null
+  due_date: string | null
+  status: string
+  penalty: number | string
+  user: {
+    user_id: number
+    full_name: string | null
+    account_id: string
+    user_type: string
+  } | null
+}
+
+interface BorrowHistoryPagination {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  PENDING_APPROVAL: 'bg-yellow-100 text-yellow-800',
+  ACTIVE: 'bg-blue-100 text-blue-800',
+  COMPLETED: 'bg-green-100 text-green-800',
+  OVERDUE: 'bg-red-100 text-red-800',
+  REJECTED: 'bg-gray-100 text-gray-800',
+  CANCELLED: 'bg-gray-100 text-gray-800',
+}
+
+function BorrowingHistoryModal({
+  bookId,
+  copy,
+  onClose
+}: {
+  bookId: number
+  copy: BookCopy
+  onClose: () => void
+}) {
+  const [page, setPage] = useState(1)
+  const [transactions, setTransactions] = useState<BorrowHistoryTransaction[]>([])
+  const [pagination, setPagination] = useState<BorrowHistoryPagination>({
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 1
+  })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Refetch whenever the page changes. The modal resets `page`
+  // back to 1 every time it opens (see the useEffect below),
+  // so we don't need to depend on `copy` here — a re-open
+  // triggers a fresh fetch on page 1.
+  useEffect(() => {
+    let cancelled = false
+    const fetchHistory = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const response = await fetch(
+          `/api/books/${bookId}/copies/${copy.copy_id}?page=${page}&limit=10`,
+          { credentials: 'include' }
+        )
+        if (cancelled) return
+        if (!response.ok) {
+          throw new Error(`Failed to load history (${response.status})`)
+        }
+        const body = await response.json()
+        if (cancelled) return
+        // `createSuccessResponse` wraps the payload under `data`,
+        // so the pagination block sits at `body.data.pagination`.
+        const data = body?.data || {}
+        setTransactions(Array.isArray(data.transactions) ? data.transactions : [])
+        setPagination(
+          data.pagination || { page: 1, limit: 10, total: 0, totalPages: 1 }
+        )
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load history')
+          setTransactions([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    fetchHistory()
+    return () => {
+      cancelled = true
+    }
+  }, [bookId, copy.copy_id, page])
+
+  // Reset to page 1 every time the modal opens with a new copy,
+  // so we never land on a stale page index that doesn't exist
+  // for the freshly-loaded copy.
+  useEffect(() => {
+    setPage(1)
+  }, [copy.copy_id])
+
+  const formatDate = (value: string | null | undefined) => {
+    if (!value) return '—'
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) return '—'
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  const formatCurrency = (value: number | string | null | undefined) => {
+    const n = Number(value || 0)
+    return `₱${n.toFixed(2)}`
+  }
+
+  const startIndex = (pagination.page - 1) * pagination.limit
+  const endIndex = Math.min(startIndex + pagination.limit, pagination.total)
+  const showPagination = pagination.totalPages > 1
+
+  // Compact page-number strip (1 ... 4 5 6 ... 10). Avoids the
+  // wider Pagination component from /components/ui/pagination
+  // because the modal header already has its own close button
+  // and the row count line — a small inline control reads
+  // better here.
+  const pageNumbers = (() => {
+    const pages: (number | '…')[] = []
+    const total = pagination.totalPages
+    const cur = pagination.page
+    if (total <= 7) {
+      for (let i = 1; i <= total; i++) pages.push(i)
+      return pages
+    }
+    pages.push(1)
+    if (cur > 4) pages.push('…')
+    const start = Math.max(2, cur - 1)
+    const end = Math.min(total - 1, cur + 1)
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (cur < total - 3) pages.push('…')
+    pages.push(total)
+    return pages
+  })()
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between p-5 border-b border-gray-200">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              <i className="fas fa-clock-rotate-left text-purple-600 mr-2"></i>
+              Borrowing History
+            </h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Accession <span className="font-medium">{copy.accession_number}</span>
+              {copy.location ? (
+                <>
+                  {' · '}
+                  <span className="text-gray-500">{copy.location}</span>
+                </>
+              ) : null}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            title="Close"
+          >
+            <i className="fas fa-times text-lg"></i>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="p-10 text-center text-sm text-gray-500">
+              <i className="fas fa-spinner fa-spin mr-2 text-purple-600"></i>
+              Loading borrowing history...
+            </div>
+          ) : error ? (
+            <div className="p-10 text-center text-sm text-red-600">
+              <i className="fas fa-exclamation-triangle mr-2"></i>
+              {error}
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="p-10 text-center text-sm text-gray-500">
+              <i className="fas fa-book text-3xl text-gray-300 mb-3"></i>
+              <p>No borrowing history yet for this copy.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Once a borrower checks out this copy, their transaction will appear here.
+              </p>
+            </div>
+          ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Borrower
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Borrowed
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Due
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Returned
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Penalty
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {transactions.map((tx) => (
+                  <tr key={tx.transaction_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm">
+                      <div className="font-medium text-gray-900">
+                        {tx.user?.full_name || 'Unknown borrower'}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {tx.user?.account_id || '—'}
+                        {tx.user?.user_type ? ` · ${tx.user.user_type}` : ''}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {formatDate(tx.borrow_date)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {formatDate(tx.due_date)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {formatDate(tx.return_date)}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <span
+                        className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                          STATUS_BADGE[tx.status] || 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {tx.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
+                      {formatCurrency(tx.penalty)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="text-sm text-gray-600">
+            {pagination.total > 0 ? (
+              <>
+                Showing <span className="font-medium">{startIndex + 1}</span>–
+                <span className="font-medium">{endIndex}</span> of{' '}
+                <span className="font-medium">{pagination.total}</span>{' '}
+                {pagination.total === 1 ? 'transaction' : 'transactions'}
+              </>
+            ) : (
+              'No transactions'
+            )}
+          </div>
+          {showPagination && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={pagination.page === 1}
+                className="px-2 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Previous page"
+              >
+                <i className="fas fa-chevron-left"></i>
+              </button>
+              {pageNumbers.map((p, idx) =>
+                p === '…' ? (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className="px-2 text-gray-400 text-sm"
+                  >
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`px-3 py-1 text-sm border rounded-md ${
+                      pagination.page === p
+                        ? 'bg-purple-600 text-white border-purple-600'
+                        : 'border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+              <button
+                onClick={() =>
+                  setPage((p) => Math.min(pagination.totalPages, p + 1))
+                }
+                disabled={pagination.page === pagination.totalPages}
+                className="px-2 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Next page"
+              >
+                <i className="fas fa-chevron-right"></i>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

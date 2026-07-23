@@ -25,7 +25,6 @@ const EMPTY_FORM = {
   grade_level_id: '',
   section_id: '',
   strand_id: '',
-  year_level: '',
   contact_number: '',
   rfid_code: '',
   purpose: '',
@@ -41,6 +40,7 @@ export default function AddLibraryUserPage() {
   const [programs, setPrograms] = useState<any[]>([])
   const [offices, setOffices] = useState<any[]>([])
   const [gradeLevels, setGradeLevels] = useState<any[]>([])
+  const [collegeGradeLevels, setCollegeGradeLevels] = useState<any[]>([])
   const [sections, setSections] = useState<any[]>([])
   const [strands, setStrands] = useState<any[]>([])
   const [authReady, setAuthReady] = useState(false)
@@ -70,7 +70,7 @@ export default function AddLibraryUserPage() {
         return (
           formData.department_id?.toString().trim() !== '' &&
           formData.program_id?.toString().trim() !== '' &&
-          formData.year_level.trim() !== ''
+          formData.grade_level_id?.toString().trim() !== ''
         )
       }
 
@@ -145,6 +145,7 @@ export default function AddLibraryUserPage() {
     if (authReady) {
       fetchDepartments()
       fetchOffices()
+      fetchCollegeGradeLevels()
     }
   }, [authReady])
 
@@ -184,6 +185,25 @@ export default function AddLibraryUserPage() {
     }
   }
 
+  const fetchCollegeGradeLevels = async () => {
+    try {
+      const response = await fetch('/api/grade-levels?education_level=COLLEGE', {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        const grades = Array.isArray(result) ? result : (result.data || [])
+        setCollegeGradeLevels(grades)
+      }
+    } catch (error) {
+      console.error('Error fetching college grade levels:', error)
+    }
+  }
+
   const fetchPrograms = async (departmentId: string) => {
     try {
       const response = await fetch(`/api/programs?departmentId=${departmentId}`, {
@@ -215,10 +235,12 @@ export default function AddLibraryUserPage() {
         const result = await response.json()
         const grades = Array.isArray(result) ? result : (result.data || [])
         setGradeLevels(grades)
+        return grades
       }
     } catch (error) {
       console.error('Error fetching grade levels:', error)
     }
+    return []
   }
 
   const fetchStrands = async () => {
@@ -327,7 +349,6 @@ export default function AddLibraryUserPage() {
         newData.grade_level_id = ''
         newData.section_id = ''
         newData.strand_id = ''
-        newData.year_level = ''
       }
 
       if (field === 'student_category') {
@@ -337,7 +358,6 @@ export default function AddLibraryUserPage() {
         newData.grade_level_id = ''
         newData.section_id = ''
         newData.strand_id = ''
-        newData.year_level = ''
       }
 
       if (field === 'basic_ed_level') {
@@ -430,11 +450,51 @@ export default function AddLibraryUserPage() {
     }
   }, [formData.grade_level_id, formData.strand_id, gradeLevels])
 
-  const populateFromUser = (user: any) => {
+  const populateFromUser = async (user: any) => {
     const isStudent = user.user_type === 'STUDENT'
     const isBasicEd = isStudent && user.education_level && user.education_level !== 'COLLEGE' && user.education_level !== 'GRADUATE_SCHOOL'
     const isCollege = isStudent && (user.education_level === 'COLLEGE' || user.education_level === 'GRADUATE_SCHOOL' || (!user.education_level && (user.program_id || user.department_id)))
 
+    // Pre-fetch the lookup-table lists BEFORE setting formData
+    // so the cascading selects have data available when effects fire.
+    if (user.department_id) {
+      await fetchPrograms(user.department_id.toString())
+    }
+
+    // Load college grade levels for year level dropdown
+    if (isCollege) {
+      await fetchCollegeGradeLevels()
+    }
+
+    // Load grade levels first for basic education students
+    let fetchedGrades = gradeLevels
+    if (isBasicEd && user.education_level) {
+      fetchedGrades = await fetchGradeLevels(user.education_level) || []
+    }
+
+    // Now load strands and sections after grade levels are available
+    if (user.grade_level_id) {
+      const gradeIdStr = user.grade_level_id.toString()
+      const selectedGrade = fetchedGrades.find(g => g.grade_level_id.toString() === gradeIdStr)
+      
+      // Determine education level from grade levels data or user
+      const edLevel = selectedGrade?.education_level || user.education_level
+      
+      if (edLevel === 'SENIOR_HIGH') {
+        // For senior high, load strands first, then sections with strand
+        await fetchStrands()
+        if (user.strand_id) {
+          await fetchSections(gradeIdStr, user.strand_id.toString())
+        } else {
+          await fetchSections(gradeIdStr)
+        }
+      } else if (edLevel === 'JUNIOR_HIGH' || edLevel === 'ELEMENTARY' || edLevel === 'KINDERGARTEN') {
+        // For other basic ed levels, load sections by grade level only
+        await fetchSections(gradeIdStr)
+      }
+    }
+
+    // NOW set formData - effects will fire with data already loaded
     setFormData({
       first_name: user.first_name || '',
       last_name: user.last_name || '',
@@ -451,7 +511,6 @@ export default function AddLibraryUserPage() {
       grade_level_id: user.grade_level_id ? user.grade_level_id.toString() : '',
       section_id: user.section_id ? user.section_id.toString() : '',
       strand_id: user.strand_id ? user.strand_id.toString() : '',
-      year_level: user.year_level || '',
       contact_number: user.contact_number || '',
       rfid_code: user.rfid_code || '',
       purpose: user.purpose || '',
@@ -474,28 +533,11 @@ export default function AddLibraryUserPage() {
       grade_level_id: user.grade_level_id ? user.grade_level_id.toString() : '',
       section_id: user.section_id ? user.section_id.toString() : '',
       strand_id: user.strand_id ? user.strand_id.toString() : '',
-      year_level: user.year_level || '',
       contact_number: user.contact_number || '',
       rfid_code: user.rfid_code || '',
       purpose: user.purpose || '',
       status: (user.status || 'ACTIVE') as UserStatus
     })
-
-    if (isBasicEd && user.education_level) {
-      fetchGradeLevels(user.education_level)
-    }
-    if (user.grade_level_id) {
-      const gradeIdStr = user.grade_level_id.toString()
-      const timer = setTimeout(() => {
-        const selectedGrade = gradeLevels.find(g => g.grade_level_id.toString() === gradeIdStr)
-        if (selectedGrade && selectedGrade.education_level === 'SENIOR_HIGH' && user.strand_id) {
-          fetchSections(gradeIdStr, user.strand_id.toString())
-        } else if (selectedGrade) {
-          fetchSections(gradeIdStr)
-        }
-      }, 200)
-      return () => clearTimeout(timer)
-    }
   }
 
   const handleRetrieve = async () => {
@@ -1001,21 +1043,16 @@ export default function AddLibraryUserPage() {
                         </label>
                         <select 
                           className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                          value={formData.year_level}
-                          onChange={(e) => handleInputChange('year_level', e.target.value)}
+                          value={formData.grade_level_id}
+                          onChange={(e) => handleInputChange('grade_level_id', e.target.value)}
                           required
                         >
                           <option value="">Select Year Level</option>
-                          <option value="1st Year">1st Year</option>
-                          <option value="2nd Year">2nd Year</option>
-                          <option value="3rd Year">3rd Year</option>
-                          <option value="4th Year">4th Year</option>
-                          <option value="5th Year">5th Year</option>
-                          <option value="1st Year Graduate">1st Year Graduate</option>
-                          <option value="2nd Year Graduate">2nd Year Graduate</option>
-                          <option value="3rd Year Graduate">3rd Year Graduate</option>
-                          <option value="Thesis Writing">Thesis Writing</option>
-                          <option value="Dissertation Writing">Dissertation Writing</option>
+                          {collegeGradeLevels.map((grade) => (
+                            <option key={grade.grade_level_id} value={grade.grade_level_id}>
+                              {grade.name}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -1049,19 +1086,38 @@ export default function AddLibraryUserPage() {
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Grade Level <span className="text-red-500">*</span>
                             </label>
-                            <select 
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                              value={formData.grade_level_id}
-                              onChange={(e) => handleInputChange('grade_level_id', e.target.value)}
-                              required
-                            >
-                              <option value="">Select Grade Level</option>
-                              {gradeLevels.map((grade) => (
-                                <option key={grade.grade_level_id} value={grade.grade_level_id}>
-                                  {grade.name} ({grade.code})
-                                </option>
-                              ))}
-                            </select>
+                            {gradeLevels.length === 0 ? (
+                              // The fetch returned an empty list
+                              // for this education level. Rather
+                              // than render a dead-end `<select>`
+                              // with only the placeholder option,
+                              // show a disabled input with a
+                              // hint pointing the admin at the seed
+                              // script (or the cataloging setup if
+                              // they add grade-level management
+                              // there later).
+                              <div className="w-full px-3 py-2 border border-amber-200 bg-amber-50 rounded-md text-sm text-amber-800 flex items-start gap-2">
+                                <i className="fas fa-info-circle mt-0.5"></i>
+                                <div>
+                                  <div className="font-medium">No grade levels configured for this education level.</div>
+                                  {/*  */}
+                                </div>
+                              </div>
+                            ) : (
+                              <select
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                value={formData.grade_level_id}
+                                onChange={(e) => handleInputChange('grade_level_id', e.target.value)}
+                                required
+                              >
+                                <option value="">Select Grade Level</option>
+                                {gradeLevels.map((grade) => (
+                                  <option key={grade.grade_level_id} value={grade.grade_level_id}>
+                                    {grade.name} ({grade.code})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </div>
 
                           {formData.grade_level_id && gradeLevels.find(g => g.grade_level_id.toString() === formData.grade_level_id.toString())?.education_level === 'SENIOR_HIGH' && (

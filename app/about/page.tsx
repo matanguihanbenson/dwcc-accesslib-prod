@@ -3,7 +3,7 @@ import Link from 'next/link'
 export default function About() {
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+        {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
@@ -12,7 +12,7 @@ export default function About() {
                 DWCC AccessLib
               </Link>
             </div>
-            <div className="flex space-x-4">
+            <div className="flex space-x-4 items-center">
               <Link 
                 href="/" 
                 className="text-gray-600 hover:text-gray-900 transition-colors"
@@ -173,7 +173,7 @@ export default function About() {
       <footer className="bg-white border-t mt-16">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center text-gray-500 text-sm">
-            <p>&copy; 2025 DWCC AccessLib. All rights reserved.</p>
+            <p>&copy; 2026 DWCC AccessLib. All rights reserved.</p>
             <div className="mt-4 flex justify-center space-x-4">
               <Link href="/" className="hover:text-green-600 transition-colors">
                 Home

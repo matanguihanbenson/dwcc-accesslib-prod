@@ -1,6 +1,7 @@
 'use client'
 
 import { signOut } from 'next-auth/react'
+import { mutate } from 'swr'
 import { Button } from './button'
 
 interface SignOutButtonProps {
@@ -9,6 +10,7 @@ interface SignOutButtonProps {
 
 export function SignOutButton({ collapsed = false }: SignOutButtonProps) {
   const handleSignOut = () => {
+    mutate(() => true, undefined, { revalidate: false })
     signOut({ callbackUrl: '/login' })
   }
 
@@ -16,7 +18,7 @@ export function SignOutButton({ collapsed = false }: SignOutButtonProps) {
     <Button
       onClick={handleSignOut}
       variant="outline"
-      className="w-full bg-gray-50 h-[50px] hover:bg-gray-100 !border-gray-400"
+      className="w-full bg-gray-50 h-[50px] text-red-600 hover:bg-gray-100 !border-red-600"
       title={collapsed ? "Sign Out" : undefined}
     >
       <i className="fas fa-sign-out-alt" aria-hidden="true" suppressHydrationWarning />

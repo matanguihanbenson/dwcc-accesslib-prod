@@ -154,6 +154,13 @@ export function getSearchParams(req: NextRequest) {
     yearLevel: searchParams.get('yearLevel') || '',
     user_id: searchParams.get('user_id') || '',
     department: searchParams.get('department') || '',
+    // Department / program / office codes (string). The
+    // user-list table filters by these instead of by
+    // numeric id, so the service needs to see them as
+    // plain strings.
+    department_code: searchParams.get('department_code') || '',
+    program_code: searchParams.get('program_code') || '',
+    office_code: searchParams.get('office_code') || '',
     year_level: searchParams.get('year_level') || '',
     campus: searchParams.get('campus') || '',
     date_from: searchParams.get('date_from') || '',
@@ -170,6 +177,28 @@ export function getSearchParams(req: NextRequest) {
     office_id: searchParams.get('office_id') || '',
     program_id: searchParams.get('program_id') || '',
     department_id: searchParams.get('department_id') || '',
+    // "Has RFID" filter. Sent by the user-list table so
+    // admins can find users with / without a bound RFID
+    // in one click. Allowed values: '', 'yes', 'no'.
+    has_rfid: searchParams.get('has_rfid') || '',
+    // Sorting. Allowed sortBy values: 'full_name',
+    // 'account_id', 'user_type', 'status', 'created_at',
+    // 'updated_at'. Allowed sortOrder: 'asc' | 'desc'.
+    // The empty-string fallback is normalised to
+    // `undefined` so the `SearchFilters` type (which is
+    // `'asc' | 'desc' | undefined`) accepts it without a
+    // type assertion.
+    sortBy: searchParams.get('sortBy') || '',
+    sortOrder: ((): 'asc' | 'desc' | undefined => {
+      const raw = (searchParams.get('sortOrder') || '').toLowerCase()
+      if (raw === 'asc' || raw === 'desc') return raw
+      return undefined
+    })(),
+    // Entrance filter. Pass-through: the service parses
+    // it as either a single number or a comma-separated
+    // list. Empty string is treated as "no filter" by
+    // the service.
+    entrance_id: searchParams.get('entrance_id') || '',
   }
 }
 

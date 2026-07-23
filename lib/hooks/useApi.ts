@@ -100,7 +100,7 @@ export function useApi<T = any>(options: UseApiOptions = {}) {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
+  
   const execute = useCallback(async (
     url: string,
     requestOptions: RequestInit = {}

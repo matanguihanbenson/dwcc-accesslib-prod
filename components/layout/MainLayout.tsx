@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { mutate } from 'swr'
 import { Sidebar } from './Sidebar'
-import { NotificationDropdown } from './NotificationDropdown'
 import { EditProfileModal } from '@/components/modals/EditProfileModal'
 import { ChangePasswordModal } from '@/components/modals/ChangePasswordModal'
 import { cn } from '@/lib/utils'
@@ -96,6 +96,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   }
   const handleSignOut = () => {
     setProfileMenuOpen(false)
+    mutate(() => true, undefined, { revalidate: false })
     signOut({ callbackUrl: '/login' })
   }
 
@@ -178,10 +179,8 @@ export function MainLayout({ children }: MainLayoutProps) {
               </div>
             )}
 
-            {/* Right cluster — notifications + profile dropdown */}
+            {/* Right cluster — profile dropdown */}
             <div className="flex items-center gap-2">
-              <NotificationDropdown userId={session?.user?.id} />
-
               {session?.user && (
                 <div className="relative" ref={profileMenuRef}>
                   <button

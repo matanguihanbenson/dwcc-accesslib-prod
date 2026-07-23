@@ -16,9 +16,11 @@ type UserEntryData = {
   totalToday: number
   totalThisWeek: number
   totalThisMonth: number
+  totalThisYear: number
   uniqueUsersToday: number
   uniqueUsersWeek: number
   uniqueUsersMonth: number
+  uniqueUsersYear: number
   peakHour: string
   trend: 'up' | 'down' | 'stable'
 }
@@ -57,18 +59,31 @@ type ChartData = {
   year: Array<{ name: string; entries: number; unique: number }>
 }
 
+type Entrance = {
+  entrance_id: number
+  name: string
+  campus: 'COLLEGE' | 'BASIC_EDUCATION' | null
+  is_active: boolean
+}
+
 function AdminView({ className, userEmail }: AdminViewProps): React.ReactElement {
   const [activeTab, setActiveTab] = useState<'userEntry' | 'lockerUsage' | 'bookBorrowed' | 'overdues'>('userEntry')
   const [loading, setLoading] = useState(false) // Changed to false for immediate display
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  // User-entry entrance filter. Empty string = "All entrances",
+  // otherwise the numeric id of the chosen library / entrance.
+  // Changing it triggers a refetch of the analytics payload.
+  const [selectedEntranceId, setSelectedEntranceId] = useState<string>('')
   const [userEntryData, setUserEntryData] = useState<UserEntryData>({
     totalToday: 0,
     totalThisWeek: 0,
     totalThisMonth: 0,
+    totalThisYear: 0,
     uniqueUsersToday: 0,
     uniqueUsersWeek: 0,
     uniqueUsersMonth: 0,
+    uniqueUsersYear: 0,
     peakHour: 'Loading...',
     trend: 'stable'
   })
@@ -107,8 +122,14 @@ function AdminView({ className, userEmail }: AdminViewProps): React.ReactElement
     year: []
   })
 
+  // All entrances available to the user, used to populate the
+  // "Library / Entrance" select on the user-entry tab. Fetched
+  // once on mount and then refreshed alongside the analytics.
+  const [entrances, setEntrances] = useState<Entrance[]>([])
+
   useEffect(() => {
     fetchAnalytics()
+    fetchEntrances()
     
     // Auto-refresh every 5 minutes for real-time updates
     const refreshInterval = setInterval(fetchAnalytics, 5 * 60 * 1000)
@@ -116,13 +137,53 @@ function AdminView({ className, userEmail }: AdminViewProps): React.ReactElement
     return () => clearInterval(refreshInterval)
   }, [])
 
+  // Refetch analytics whenever the user-entry entrance filter
+  // changes. The interval-based auto-refresh above uses the
+  // current `selectedEntranceId` value via the closure so it
+  // stays in sync with this dependency.
+  useEffect(() => {
+    fetchAnalytics()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEntranceId])
+
+  const fetchEntrances = async () => {
+    try {
+      const response = await fetch('/api/entrances?include_archived=false', {
+        credentials: 'include'
+      })
+      if (response.ok) {
+        const payload = await response.json()
+        const list: Entrance[] = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : []
+        setEntrances(list)
+      } else {
+        console.error('Failed to fetch entrances:', response.status, response.statusText)
+      }
+    } catch (error) {
+      console.error('Error fetching entrances:', error)
+    }
+  }
+
   const fetchAnalytics = async (showRefreshIndicator = false) => {
     try {
       if (showRefreshIndicator) setIsRefreshing(true)
       else setLoading(true)
       
+      // Forward the currently-selected entrance to the server so
+      // the cards, peak hour, and chart series all reflect just
+      // that library. Empty string means "all entrances".
+      const params = new URLSearchParams()
+      if (selectedEntranceId) params.append('entranceId', selectedEntranceId)
+      const qs = params.toString()
+      const url = qs
+        ? `/api/dashboard/admin-analytics?${qs}`
+        : '/api/dashboard/admin-analytics'
+
       // Fetch comprehensive analytics from the admin analytics endpoint
-      const response = await fetch('/api/dashboard/admin-analytics', {
+      const response = await fetch(url, {
         credentials: 'include',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -140,9 +201,11 @@ function AdminView({ className, userEmail }: AdminViewProps): React.ReactElement
           totalToday: analytics.userEntry?.totalToday || 0,
           totalThisWeek: analytics.userEntry?.totalThisWeek || 0,
           totalThisMonth: analytics.userEntry?.totalThisMonth || 0,
+          totalThisYear: analytics.userEntry?.totalThisYear || 0,
           uniqueUsersToday: analytics.userEntry?.uniqueUsersToday || 0,
           uniqueUsersWeek: analytics.userEntry?.uniqueUsersWeek || 0,
           uniqueUsersMonth: analytics.userEntry?.uniqueUsersMonth || 0,
+          uniqueUsersYear: analytics.userEntry?.uniqueUsersYear || 0,
           peakHour: analytics.userEntry?.peakHour || 'N/A',
           trend: analytics.userEntry?.trend || 'stable'
         })
@@ -295,7 +358,13 @@ function AdminView({ className, userEmail }: AdminViewProps): React.ReactElement
 
         <div className="p-4">
           {activeTab === 'userEntry' && (
-            <UserEntryTab userEntryData={userEntryData} chartData={chartData} />
+            <UserEntryTab
+              userEntryData={userEntryData}
+              chartData={chartData}
+              entrances={entrances}
+              selectedEntranceId={selectedEntranceId}
+              onEntranceChange={setSelectedEntranceId}
+            />
           )}
 
           {activeTab === 'lockerUsage' && (

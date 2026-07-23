@@ -273,15 +273,13 @@ export default function UserPenaltiesPage() {
               </button>
               <h1 className="text-xl font-semibold text-gray-800">User Penalty Summary</h1>
             </div>
-            <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
-              {session?.user?.role}
-            </span>
+            
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-4 max-w-5xl">
+      <div className="container mx-auto py-4">
         {/* Search Section */}
         <div className="bg-white rounded border shadow-sm p-4 mb-4">
           <form onSubmit={handleSearch} className="flex gap-2">

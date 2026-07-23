@@ -10,9 +10,9 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { LoadingScreen } from '@/components/ui/loading-spinner'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { PaginationControls } from '@/components/ui/pagination'
+import { Pagination } from '@/components/ui/pagination'
 import { UserRole, LibraryUser, UserType, UserStatus } from '@/types'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatCurrency } from '@/lib/utils'
 import { notify } from '@/lib/notification'
 import { useApiSWR, useApi, API_ENDPOINTS } from '@/lib/hooks/useApi'
 import { useCacheManager } from '@/lib/hooks/useCacheManager'
@@ -28,6 +28,18 @@ export default function LibraryUsersPage() {
   const [showUserModal, setShowUserModal] = useState(false)
   const [showRfidBindModal, setShowRfidBindModal] = useState(false)
   const [showArchivedUsersModal, setShowArchivedUsersModal] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [historyUser, setHistoryUser] = useState<{
+    user_id: number
+    full_name: string
+    account_id: string
+  } | null>(null)
+  const [showFinesModal, setShowFinesModal] = useState(false)
+  const [finesUser, setFinesUser] = useState<{
+    user_id: number
+    full_name: string
+    account_id: string
+  } | null>(null)
   const [rfidBindUser, setRfidBindUser] = useState<{id: number, name: string, currentRfid: string | null} | null>(null)
   const [rfidInput, setRfidInput] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
@@ -43,6 +55,27 @@ export default function LibraryUsersPage() {
   const [departmentFilter, setDepartmentFilter] = useState<string>('')
   const [programFilter, setProgramFilter] = useState<string>('')
   const [yearLevelFilter, setYearLevelFilter] = useState<string>('')
+  // New table-level filters (all sent to the server so
+  // pagination stays accurate):
+  //   - officeFilter  → `?office_code=…` (string code)
+  //   - sectionFilter → `?section_id=…` (numeric id)
+  //   - gradeLevelFilter → `?grade_level_id=…` (numeric id)
+  //   - strandFilter  → `?strand_id=…` (numeric id)
+  //   - hasRfidFilter → `?has_rfid=yes|no`
+  //   - registeredFrom / registeredTo → ISO date strings
+  //     for the `created_at` range filter.
+  const [officeFilter, setOfficeFilter] = useState<string>('')
+  const [sectionFilter, setSectionFilter] = useState<string>('')
+  const [gradeLevelFilter, setGradeLevelFilter] = useState<string>('')
+  const [strandFilter, setStrandFilter] = useState<string>('')
+  const [hasRfidFilter, setHasRfidFilter] = useState<string>('')
+  const [registeredFrom, setRegisteredFrom] = useState<string>('')
+  const [registeredTo, setRegisteredTo] = useState<string>('')
+  // Sort controls. Default sort is the server's "newest
+  // first" so we keep the existing UX until the user
+  // picks something different.
+  const [sortBy, setSortBy] = useState<string>('created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
 
   // Parse URL filters
@@ -56,11 +89,35 @@ export default function LibraryUsersPage() {
   // Cache management
   const { invalidateUserData } = useCacheManager()
 
-  // Build query parameters for SWR key
+  // Build query parameters for SWR key. The endpoint is
+  // server-paginated (see `paginate` in
+  // `lib/services/user.service.ts`), so the page-level
+  // `page` / `limit` controls get forwarded here along
+  // with every filter (including the table-level ones
+  // that used to be applied client-side). This is the
+  // fix for "selecting 50/100 per page only shows 25":
+  // without forwarding `limit` the server caps the
+  // response at 25 (its own default) and the client
+  // can't show more.
   const queryParams = useMemo(() => {
     const params = new URLSearchParams()
+    params.append('page', String(currentPage))
+    params.append('limit', String(itemsPerPage))
     if (searchQuery) params.append('query', searchQuery)
     if (userTypeFilter) params.append('userType', userTypeFilter)
+    if (statusFilter) params.append('status', statusFilter)
+    if (departmentFilter) params.append('department_code', departmentFilter)
+    if (programFilter) params.append('program_code', programFilter)
+    if (officeFilter) params.append('office_code', officeFilter)
+    if (yearLevelFilter) params.append('year_level', yearLevelFilter)
+    if (sectionFilter) params.append('section_id', sectionFilter)
+    if (gradeLevelFilter) params.append('grade_level_id', gradeLevelFilter)
+    if (strandFilter) params.append('strand_id', strandFilter)
+    if (hasRfidFilter) params.append('has_rfid', hasRfidFilter)
+    if (registeredFrom) params.append('dateFrom', registeredFrom)
+    if (registeredTo) params.append('dateTo', registeredTo)
+    if (sortBy) params.append('sortBy', sortBy)
+    if (sortOrder) params.append('sortOrder', sortOrder)
     if (sectionIdFilter) params.append('section_id', sectionIdFilter)
     if (programIdFilter) params.append('program_id', programIdFilter)
     if (departmentIdFilter) params.append('department_id', departmentIdFilter)
@@ -68,15 +125,48 @@ export default function LibraryUsersPage() {
     if (strandIdFilter) params.append('strand_id', strandIdFilter)
     if (gradeLevelIdFilter) params.append('grade_level_id', gradeLevelIdFilter)
     return params.toString()
-  }, [searchQuery, userTypeFilter, sectionIdFilter, programIdFilter, departmentIdFilter, officeIdFilter, strandIdFilter, gradeLevelIdFilter])
+  }, [
+    currentPage,
+    itemsPerPage,
+    searchQuery,
+    userTypeFilter,
+    statusFilter,
+    departmentFilter,
+    programFilter,
+    officeFilter,
+    yearLevelFilter,
+    sectionFilter,
+    gradeLevelFilter,
+    strandFilter,
+    hasRfidFilter,
+    registeredFrom,
+    registeredTo,
+    sortBy,
+    sortOrder,
+    sectionIdFilter,
+    programIdFilter,
+    departmentIdFilter,
+    officeIdFilter,
+    strandIdFilter,
+    gradeLevelIdFilter
+  ])
 
-  // Use SWR for real-time data fetching
+  // Use SWR for real-time data fetching. The endpoint
+  // returns the canonical paginated shape
+  // `{ data: LibraryUser[], pagination: { page, limit,
+  // total, totalPages } }` (see `createPaginationResponse`
+  // in `lib/utils.ts`); we read both so the UI's
+  // page-number buttons and per-page selector stay in
+  // lockstep with the server's count.
   const { 
     data: usersResponse, 
     error, 
     isLoading,
     mutate: refreshUsers 
-  } = useApiSWR<{ data: LibraryUser[] }>(
+  } = useApiSWR<{
+    data: LibraryUser[]
+    pagination?: { page: number; limit: number; total: number; totalPages: number }
+  }>(
     session ? `${API_ENDPOINTS.LIBRARY_USERS}?${queryParams}&_ts=${refreshCounter}` : null,
     {
       revalidateOnFocus: true, // Refresh when window gains focus
@@ -96,6 +186,25 @@ export default function LibraryUsersPage() {
     session ? '/api/programs' : null,
     { dedupingInterval: 60_000 }
   )
+  // Offices, sections, grade-levels and strands feed the
+  // new table-level filter selects below. Same long
+  // deduping window as the other reference-data fetches.
+  const { data: officesData } = useApiSWR<{ data: any[] }>(
+    session ? '/api/offices?include_archived=false' : null,
+    { dedupingInterval: 60_000 }
+  )
+  const { data: sectionsData } = useApiSWR<{ data: any[] }>(
+    session ? '/api/student-sections?limit=500' : null,
+    { dedupingInterval: 60_000 }
+  )
+  const { data: gradeLevelsData } = useApiSWR<{ data: any[] }>(
+    session ? '/api/grade-levels?limit=500' : null,
+    { dedupingInterval: 60_000 }
+  )
+  const { data: strandsData } = useApiSWR<{ data: any[] }>(
+    session ? '/api/strands?limit=500' : null,
+    { dedupingInterval: 60_000 }
+  )
 
   const departmentOptions: { code: string; name: string }[] = useMemo(() => {
     const list: any[] = (departmentsData as any)?.data ?? []
@@ -110,6 +219,34 @@ export default function LibraryUsersPage() {
       .filter((p: any) => p?.code)
       .map((p: any) => ({ code: p.code, name: p.name }))
   }, [programsData])
+
+  const officeOptions: { code: string; name: string }[] = useMemo(() => {
+    const list: any[] = (officesData as any)?.data ?? []
+    return list
+      .filter((o: any) => o?.code)
+      .map((o: any) => ({ code: o.code, name: o.name }))
+  }, [officesData])
+
+  const sectionOptions: { id: number; name: string }[] = useMemo(() => {
+    const list: any[] = (sectionsData as any)?.data ?? []
+    return list
+      .filter((s: any) => s?.section_id != null)
+      .map((s: any) => ({ id: s.section_id, name: s.name || `Section #${s.section_id}` }))
+  }, [sectionsData])
+
+  const gradeLevelOptions: { id: number; name: string }[] = useMemo(() => {
+    const list: any[] = (gradeLevelsData as any)?.data ?? []
+    return list
+      .filter((g: any) => g?.grade_level_id != null)
+      .map((g: any) => ({ id: g.grade_level_id, name: g.name || `Grade #${g.grade_level_id}` }))
+  }, [gradeLevelsData])
+
+  const strandOptions: { id: number; name: string }[] = useMemo(() => {
+    const list: any[] = (strandsData as any)?.data ?? []
+    return list
+      .filter((s: any) => s?.strand_id != null)
+      .map((s: any) => ({ id: s.strand_id, name: s.name || `Strand #${s.strand_id}` }))
+  }, [strandsData])
 
   // Mutation hook for status changes
   const { execute: toggleUserStatus } = useApi({
@@ -138,6 +275,20 @@ export default function LibraryUsersPage() {
   })
 
   const users = usersResponse?.data || []
+  // Server-side pagination metadata. The endpoint wraps
+  // the array in `{ data, pagination: { page, limit,
+  // total, totalPages } }`; fall back to client-computed
+  // defaults so older callers (or a missing metadata
+  // block) don't crash the page.
+  const serverPagination = (usersResponse as any)?.pagination as
+    | { page: number; limit: number; total: number; totalPages: number }
+    | undefined
+  const serverTotal: number = serverPagination?.total ?? users.length
+  // When the response is fully populated, `total` is the
+  // server's filtered count (post-filters), which is what
+  // the page count should be derived from. When the
+  // metadata is missing we fall back to the count of the
+  // items we actually have so the UI is still usable.
   // Handle user status toggle with real-time updates
   const handleToggleStatus = async (userId: number, currentStatus: UserStatus) => {
     const action = currentStatus === 'ACTIVE' ? 'deactivate' : 'activate'
@@ -173,6 +324,34 @@ export default function LibraryUsersPage() {
     setRfidBindUser({ id: userId, name: fullName, currentRfid })
     setRfidInput('')
     setShowRfidBindModal(true)
+  }
+
+  // Borrowing-history handler — opens the modal pre-loaded
+  // with the selected user. The modal does its own SWR
+  // fetch on `/api/borrowing-transactions?user_id=…`, so
+  // we only need to stash the user identity here.
+  const handleOpenHistoryModal = (userId: number, fullName: string, accountId: string) => {
+    setHistoryUser({ user_id: userId, full_name: fullName, account_id: accountId })
+    setShowHistoryModal(true)
+  }
+
+  const handleCloseHistoryModal = () => {
+    setShowHistoryModal(false)
+    setHistoryUser(null)
+  }
+
+  // Fines quick-view handler — opens a modal pre-loaded
+  // with the selected user. The modal does its own SWR
+  // fetch on `/api/overdue/user-summary/[user_id]`, so
+  // we only need to stash the user identity here.
+  const handleOpenFinesModal = (userId: number, fullName: string, accountId: string) => {
+    setFinesUser({ user_id: userId, full_name: fullName, account_id: accountId })
+    setShowFinesModal(true)
+  }
+
+  const handleCloseFinesModal = () => {
+    setShowFinesModal(false)
+    setFinesUser(null)
   }
 
   const handleCloseRfidBindModal = () => {
@@ -256,69 +435,33 @@ export default function LibraryUsersPage() {
     }
   }
 
-  // Client-side filtering and pagination (for better performance with real-time updates)
-  const filteredUsers = useMemo(() => {
-    return users.filter(user => {
-      // Exclude archived users from main view
-      if (user.status === 'ARCHIVED') return false
-
-      const q = searchQuery.toLowerCase()
-      const matchesSearch = searchQuery === '' || (
-        (user.full_name?.toLowerCase().includes(q) || false) ||
-        user.account_id.toLowerCase().includes(q) ||
-        (user.email?.toLowerCase().includes(q) || false) ||
-        // `user.department` / `user.course` are the compact
-        // codes (see UserService.getLibraryUsers).
-        (user.department?.toLowerCase().includes(q) || false) ||
-        (user.course?.toLowerCase().includes(q) || false) ||
-        // Also match the long names on the relation so the
-        // user can still search by "Computer Studies" or
-        // "BSIT" — the column shows the code but search is
-        // permissive.
-        ((user as any).department_ref?.name?.toLowerCase().includes(q) || false) ||
-        ((user as any).program?.name?.toLowerCase().includes(q) || false)
-      )
-
-      const matchesType = !userTypeFilter || user.user_type === userTypeFilter
-      const matchesStatus = !statusFilter || user.status === statusFilter
-      const matchesDepartment =
-        !departmentFilter || user.department === departmentFilter
-      const matchesProgram =
-        !programFilter || user.course === programFilter
-      const matchesYearLevel =
-        !yearLevelFilter || user.year_level === yearLevelFilter
-
-      return (
-        matchesSearch &&
-        matchesType &&
-        matchesStatus &&
-        matchesDepartment &&
-        matchesProgram &&
-        matchesYearLevel
-      )
-    })
-  }, [
-    users,
-    searchQuery,
-    userTypeFilter,
-    statusFilter,
-    departmentFilter,
-    programFilter,
-    yearLevelFilter
-  ])
-
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage)
-  const startIndex = (currentPage - 1) * itemsPerPage
-  const endIndex = startIndex + itemsPerPage
-  const paginatedUsers = filteredUsers.slice(startIndex, endIndex)
+  // Pagination is fully server-side now. `users` is
+  // already the (filtered + paginated) page slice returned
+  // by `/api/library-users`, and `serverTotal` is the
+  // total count after filters so the page-number buttons
+  // match the real number of pages.
+  const totalPages = Math.max(1, Math.ceil(serverTotal / itemsPerPage))
+  // Expose the same `paginatedUsers` name downstream so the
+  // table render code below doesn't need to change. It's
+  // just an alias for the (already paginated) `users`
+  // array now.
+  const paginatedUsers = users
 
   const handlePageChange = (page: number) => {
-    setCurrentPage(page)
+    // Clamp to a valid page so a stale state (e.g. the
+    // user shrunk `itemsPerPage` and the old page number
+    // is now beyond the last page) never strands the UI on
+    // a blank screen.
+    const safePage = Math.min(Math.max(1, page), totalPages)
+    setCurrentPage(safePage)
   }
 
   const handleItemsPerPageChange = (newItemsPerPage: number) => {
     setItemsPerPage(newItemsPerPage)
+    // Always reset to the first page when the page size
+    // changes — otherwise the user could end up on page 4
+    // of an 8-page list and then pick 100 per page, which
+    // would leave them on a now-empty page.
     setCurrentPage(1)
   }
 
@@ -350,13 +493,22 @@ export default function LibraryUsersPage() {
   const hasActiveFilters = sectionIdFilter || programIdFilter || departmentIdFilter || officeIdFilter || strandIdFilter || gradeLevelIdFilter
   // Count of client-side table filters that are non-empty
   // (used to badge the "Filters" toggle button and the
-  // "Clear all" affordance).
+  // "Clear all" affordance). Sort is intentionally not
+  // counted — it's a different shape of control, not a
+  // filter.
   const activeFilterCount =
     (userTypeFilter ? 1 : 0) +
     (statusFilter ? 1 : 0) +
     (departmentFilter ? 1 : 0) +
     (programFilter ? 1 : 0) +
+    (officeFilter ? 1 : 0) +
     (yearLevelFilter ? 1 : 0) +
+    (sectionFilter ? 1 : 0) +
+    (gradeLevelFilter ? 1 : 0) +
+    (strandFilter ? 1 : 0) +
+    (hasRfidFilter ? 1 : 0) +
+    (registeredFrom ? 1 : 0) +
+    (registeredTo ? 1 : 0) +
     (searchQuery ? 1 : 0)
 
   if (status === 'loading') {
@@ -548,61 +700,86 @@ export default function LibraryUsersPage() {
 
       <Card>
         <CardHeader className="pb-3 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <CardTitle className="text-lg">Users</CardTitle>
-            <div className="flex items-center space-x-3 flex-wrap">
-              <Input
-                placeholder="Search by name, ID, email, dept code…"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value)
-                  setCurrentPage(1)
-                }}
-                className="w-64"
-                icon={<i className="fas fa-search" />}
-              />
+          {/* Title on its own row, then the filter row, then
+              the pagination row — so the filters sit on top
+              of the pagination per the latest UX request. */}
+          <CardTitle className="text-lg">Users</CardTitle>
+          <div className="flex items-center flex-wrap gap-3">
+            <Input
+              placeholder="Search by name, ID, email, dept code…"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+                setCurrentPage(1)
+              }}
+              className="w-64"
+              icon={<i className="fas fa-search" />}
+            />
+            <select
+              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              value={userTypeFilter}
+              onChange={(e) => {
+                setUserTypeFilter(e.target.value)
+                setCurrentPage(1)
+              }}
+            >
+              <option value="">All Types</option>
+              <option value="STUDENT">Students</option>
+              <option value="EMPLOYEE">Employees</option>
+              <option value="ALUMNI">Alumni</option>
+              <option value="GUEST">Guests</option>
+            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-gray-600">Sort by:</label>
               <select
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                value={userTypeFilter}
+                className="px-2.5 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                value={`${sortBy}:${sortOrder}`}
                 onChange={(e) => {
-                  setUserTypeFilter(e.target.value)
+                  const [nextSortBy, nextSortOrder] = e.target.value.split(':')
+                  setSortBy(nextSortBy)
+                  setSortOrder((nextSortOrder as 'asc' | 'desc') || 'asc')
                   setCurrentPage(1)
                 }}
               >
-                <option value="">All Types</option>
-                <option value="STUDENT">Students</option>
-                <option value="EMPLOYEE">Employees</option>
-                <option value="ALUMNI">Alumni</option>
-                <option value="GUEST">Guests</option>
+                <option value="created_at:desc">Newest registered</option>
+                <option value="created_at:asc">Oldest registered</option>
+                <option value="updated_at:desc">Recently updated</option>
+                <option value="updated_at:asc">Least recently updated</option>
+                <option value="full_name:asc">Name (A → Z)</option>
+                <option value="full_name:desc">Name (Z → A)</option>
+                <option value="account_id:asc">Account ID (A → Z)</option>
+                <option value="account_id:desc">Account ID (Z → A)</option>
               </select>
-              <button
-                type="button"
-                onClick={() => setShowAdvancedFilters((v) => !v)}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm border rounded-md transition-colors ${
-                  showAdvancedFilters
-                    ? 'bg-blue-50 text-blue-700 border-blue-300'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Toggle advanced filters"
-                aria-expanded={showAdvancedFilters}
-              >
-                <i className="fas fa-sliders text-xs"></i>
-                Filters
-                {activeFilterCount > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-blue-600 text-white">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-              <PaginationControls
-                currentPage={currentPage}
-                totalPages={totalPages}
-                itemsPerPage={itemsPerPage}
-                onPageChange={handlePageChange}
-                onItemsPerPageChange={handleItemsPerPageChange}
-              />
             </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvancedFilters((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm border rounded-md transition-colors ${
+                showAdvancedFilters
+                  ? 'bg-blue-50 text-blue-700 border-blue-300'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
+              title="Toggle advanced filters"
+              aria-expanded={showAdvancedFilters}
+            >
+              <i className="fas fa-sliders text-xs"></i>
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-blue-600 text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={serverTotal}
+            itemsPerPage={itemsPerPage}
+            onPageChange={handlePageChange}
+            onItemsPerPageChange={handleItemsPerPageChange}
+            countLabel="users"
+          />
 
           {showAdvancedFilters && (
             <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-3">
@@ -689,6 +866,143 @@ export default function LibraryUsersPage() {
                     <option value="N/A">N/A</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    Office
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    value={officeFilter}
+                    onChange={(e) => {
+                      setOfficeFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  >
+                    <option value="">All Offices</option>
+                    {officeOptions.map((o) => (
+                      <option key={o.code} value={o.code}>
+                        {o.code} — {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    Section
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    value={sectionFilter}
+                    onChange={(e) => {
+                      setSectionFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  >
+                    <option value="">All Sections</option>
+                    {sectionOptions.map((s) => (
+                      <option key={s.id} value={String(s.id)}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    Grade Level
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    value={gradeLevelFilter}
+                    onChange={(e) => {
+                      setGradeLevelFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  >
+                    <option value="">All Grade Levels</option>
+                    {gradeLevelOptions.map((g) => (
+                      <option key={g.id} value={String(g.id)}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    Strand
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    value={strandFilter}
+                    onChange={(e) => {
+                      setStrandFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  >
+                    <option value="">All Strands</option>
+                    {strandOptions.map((s) => (
+                      <option key={s.id} value={String(s.id)}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    RFID
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    value={hasRfidFilter}
+                    onChange={(e) => {
+                      setHasRfidFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  >
+                    <option value="">Any</option>
+                    <option value="yes">Has RFID</option>
+                    <option value="no">No RFID</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Registered between — kept on its own row so
+                  the two date inputs don't crowd the 4-col
+                  filter grid on narrow screens. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    Registered from
+                  </label>
+                  <Input
+                    type="date"
+                    value={registeredFrom}
+                    onChange={(e) => {
+                      setRegisteredFrom(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                    Registered to
+                  </label>
+                  <Input
+                    type="date"
+                    value={registeredTo}
+                    onChange={(e) => {
+                      setRegisteredTo(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    className="w-full"
+                    min={registeredFrom || undefined}
+                  />
+                </div>
               </div>
 
               {activeFilterCount > 0 && (
@@ -704,7 +1018,14 @@ export default function LibraryUsersPage() {
                       setStatusFilter('')
                       setDepartmentFilter('')
                       setProgramFilter('')
+                      setOfficeFilter('')
                       setYearLevelFilter('')
+                      setSectionFilter('')
+                      setGradeLevelFilter('')
+                      setStrandFilter('')
+                      setHasRfidFilter('')
+                      setRegisteredFrom('')
+                      setRegisteredTo('')
                       setUserTypeFilter('')
                       setCurrentPage(1)
                     }}
@@ -790,10 +1111,46 @@ export default function LibraryUsersPage() {
                           </div>
                         </TableCell>
                         <TableCell className="py-2 font-mono text-xs text-gray-700">
-                          {user.department || '-'}
+                          {user.user_type === 'STUDENT' &&
+                          user.education_level &&
+                          user.education_level !== 'COLLEGE' &&
+                          user.education_level !== 'GRADUATE_SCHOOL' ? (
+                            // Basic-Ed student: show the
+                            // grade (e.g. "Grade 5") the same
+                            // way a College user sees the
+                            // department code ("CS"). Falls
+                            // back to the FK if the joined
+                            // name didn't come back.
+                            user.grade_level_name ||
+                              (user.grade_level_id
+                                ? `Grade #${user.grade_level_id}`
+                                : '-')
+                          ) : (
+                            // College / Graduate /
+                            // non-student: existing
+                            // department-code display.
+                            user.department || '-'
+                          )}
                         </TableCell>
                         <TableCell className="py-2 font-mono text-xs text-gray-700">
-                          {user.course || '-'}
+                          {user.user_type === 'STUDENT' &&
+                          user.education_level &&
+                          user.education_level !== 'COLLEGE' &&
+                          user.education_level !== 'GRADUATE_SCHOOL' ? (
+                            // Basic-Ed student: show the
+                            // section (e.g. "Section
+                            // Rizal"). College students
+                            // still see the program code
+                            // here.
+                            user.section_name ||
+                              (user.section_id
+                                ? `Section #${user.section_id}`
+                                : '-')
+                          ) : (
+                            // College / non-student:
+                            // existing program-code display.
+                            user.course || '-'
+                          )}
                         </TableCell>
                         <TableCell className="py-2">{getStatusBadge(user.status)}</TableCell>
                         <TableCell className="py-2 text-sm">{formatDate(user.created_at)}</TableCell>
@@ -860,6 +1217,38 @@ export default function LibraryUsersPage() {
                             >
                               <i className="fas fa-id-card text-xs" />
                             </Button>
+                            {/*
+                              Borrowing history — opens a modal
+                              listing every book this user has
+                              borrowed/returned (10 per page,
+                              most recent first). Visible to all
+                              roles that can view the list.
+                            */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenHistoryModal(user.user_id, user.full_name || 'User', user.account_id)}
+                              className="py-4 px-2 text-indigo-600 hover:text-indigo-900 !border-indigo-600 hover:bg-indigo-50"
+                              title="View Borrowing History"
+                            >
+                              <i className="fas fa-history text-xs" />
+                            </Button>
+                            {/*
+                              Fines quick-view — opens a modal with
+                              two tabs: a Summary tab that aggregates
+                              outstanding book and locker fines, and
+                              a History tab that lists every
+                              settlement row, most recent first.
+                            */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenFinesModal(user.user_id, user.full_name || 'User', user.account_id)}
+                              className="py-4 px-2 text-rose-600 hover:text-rose-900 !border-rose-600 hover:bg-rose-50"
+                              title="View Fines"
+                            >
+                              <i className="fas fa-receipt text-xs" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -871,123 +1260,20 @@ export default function LibraryUsersPage() {
           </CardContent>
         </Card>
 
-        {/* Pagination — Google-style Prev / 1 2 3 … #last / Next */}
-        {!isLoading && filteredUsers.length > 0 && (
-          <div className="mt-4 px-4 py-3 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <p className="text-sm text-gray-600">
-              Showing{' '}
-              <span className="font-semibold text-gray-900">
-                {startIndex + 1}
-              </span>
-              –
-              <span className="font-semibold text-gray-900">
-                {Math.min(endIndex, filteredUsers.length)}
-              </span>{' '}
-              of{' '}
-              <span className="font-semibold text-gray-900">
-                {filteredUsers.length}
-              </span>{' '}
-              users · Page{' '}
-              <span className="font-semibold text-gray-900">{currentPage}</span>{' '}
-              of{' '}
-              <span className="font-semibold text-gray-900">{totalPages}</span>
-            </p>
-            {totalPages > 1 && (
-              <nav
-                className="flex items-center gap-1 flex-wrap"
-                aria-label="Pagination"
-              >
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(1)}
-                  disabled={currentPage === 1}
-                  className="px-2.5 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="First page"
-                >
-                  <i className="fas fa-angles-left"></i>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCurrentPage((p) => Math.max(1, p - 1))
-                  }
-                  disabled={currentPage === 1}
-                  className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
-                >
-                  <i className="fas fa-chevron-left text-xs"></i>
-                  Prev
-                </button>
-                {(() => {
-                  // Build the page-number list with smart
-                  // ellipsis: 1, 2, 3, …, 8, 9, 10.
-                  const pages: (number | '…')[] = []
-                  const window = 1
-                  const first = 1
-                  const last = totalPages
-                  const left = Math.max(first + 1, currentPage - window)
-                  const right = Math.min(last - 1, currentPage + window)
-                  if (first < left - 1) {
-                    pages.push(first, '…')
-                  } else if (first === left - 1) {
-                    pages.push(first)
-                  } else {
-                    pages.push(first)
-                  }
-                  for (let i = left; i <= right; i++) pages.push(i)
-                  if (right < last - 1) {
-                    pages.push('…', last)
-                  } else if (right === last - 1) {
-                    pages.push(last)
-                  } else if (!pages.includes(last)) {
-                    pages.push(last)
-                  }
-                  return pages.map((p, idx) =>
-                    p === '…' ? (
-                      <span
-                        key={`gap-${idx}`}
-                        className="px-2 text-gray-400 select-none"
-                      >
-                        …
-                      </span>
-                    ) : (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setCurrentPage(p)}
-                        aria-current={p === currentPage ? 'page' : undefined}
-                        className={`min-w-[36px] h-[34px] px-2 text-sm font-semibold rounded transition-colors ${
-                          p === currentPage
-                            ? 'bg-blue-600 text-white border border-blue-600 hover:bg-blue-700'
-                            : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    )
-                  )
-                })()}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
-                >
-                  Next
-                  <i className="fas fa-chevron-right text-xs"></i>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(totalPages)}
-                  disabled={currentPage === totalPages}
-                  className="px-2.5 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Last page"
-                >
-                  <i className="fas fa-angles-right"></i>
-                </button>
-              </nav>
-            )}
+        {/* Pagination — same full control (per-page + count + nav)
+            rendered at the bottom as well, so the user can paginate
+            from either end of the table without scrolling back up. */}
+        {!isLoading && serverTotal > 0 && (
+          <div className="mt-4 px-4 py-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={serverTotal}
+              itemsPerPage={itemsPerPage}
+              onPageChange={handlePageChange}
+              onItemsPerPageChange={handleItemsPerPageChange}
+              countLabel="users"
+            />
           </div>
         )}
 
@@ -1249,6 +1535,29 @@ export default function LibraryUsersPage() {
             // restoring a row to keep counts current.
             setRefreshCounter((c) => c + 1)
           }}
+        />
+      )}
+
+      {/* Borrowing History Modal — opens from the per-row
+          "history" action button. Server-side pagination
+          (10 per page, most recent first) so the modal
+          stays cheap regardless of how long a user's
+          borrowing history is. */}
+      {showHistoryModal && historyUser && (
+        <BorrowingHistoryModal
+          user={historyUser}
+          onClose={handleCloseHistoryModal}
+        />
+      )}
+
+      {/* Fines Quick-View Modal — opens from the per-row
+          "fines" action button. Two tabs: Summary (book +
+          locker aggregates) and History (per-transaction
+          settlement list, most recent first). */}
+      {showFinesModal && finesUser && (
+        <FinesQuickViewModal
+          user={finesUser}
+          onClose={handleCloseFinesModal}
         />
       )}
 
@@ -1585,5 +1894,915 @@ function ArchivedUsersModal({
       </div>
     </div>,
     document.body
+  )
+}
+
+// ============================================================
+// Borrowing History Modal
+// ------------------------------------------------------------
+// Self-contained modal: fetches its own data, owns its
+// pagination state. Renders a 4-column table (Accession #,
+// Borrowed, Returned, Status) with 10 rows per page, most
+// recent first. Closes via the X / Close button.
+// ============================================================
+function BorrowingHistoryModal({
+  user,
+  onClose
+}: {
+  user: { user_id: number; full_name: string; account_id: string }
+  onClose: () => void
+}) {
+  // Server-side pagination: 10 per page, sorted by
+  // created_at DESC (the API default — see
+  // `getUserBookTransactions` and `buildOrderBy`). Bumping
+  // `refreshCounter` forces SWR to re-fetch on demand
+  // without producing a new key on every render.
+  const [page, setPage] = useState(1)
+  const itemsPerPage = 10
+  const [refreshCounter, setRefreshCounter] = useState(0)
+
+  // API key is stable per page; the cache-buster only
+  // changes when the user explicitly refreshes.
+  const apiKey = useMemo(
+    () =>
+      `${API_ENDPOINTS.BORROWING_TRANSACTIONS}?user_id=${user.user_id}` +
+      `&page=${page}&limit=${itemsPerPage}&_ts=${refreshCounter}`,
+    [user.user_id, page, refreshCounter]
+  )
+
+  const { data, isLoading, error, mutate: refresh } = useApiSWR<any>(apiKey, {
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    dedupingInterval: 1000
+  })
+
+  // Normalise the response shape. The service layer wraps
+  // rows in `data` and adds a sibling `pagination` object,
+  // but older callers have been seen returning a bare
+  // array, so we accept both.
+  const rows: any[] = useMemo(() => {
+    if (!data) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data.data)) return data.data
+    if (Array.isArray(data.transactions)) return data.transactions
+    return []
+  }, [data])
+
+  const pagination = data?.pagination
+  const totalRows: number =
+    typeof pagination?.total === 'number' ? pagination.total : rows.length
+  const totalServerPages: number =
+    typeof pagination?.totalPages === 'number'
+      ? pagination.totalPages
+      : Math.max(1, Math.ceil(totalRows / itemsPerPage))
+
+  // Status pill — same colour mapping used by the
+  // `borrowing-transactions` page so the modal feels
+  // consistent with the rest of the app.
+  const getStatusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      ACTIVE: 'bg-blue-100 text-blue-800',
+      COMPLETED: 'bg-green-100 text-green-800',
+      OVERDUE: 'bg-red-100 text-red-800',
+      PENDING_APPROVAL: 'bg-yellow-100 text-yellow-800',
+      REJECTED: 'bg-gray-100 text-gray-800',
+      CANCELLED: 'bg-gray-100 text-gray-800'
+    }
+    const label = (status || '').replace(/_/g, ' ')
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+          map[status] || 'bg-gray-100 text-gray-800'
+        }`}
+      >
+        {label}
+      </span>
+    )
+  }
+
+  // Render via portal at the document body level so the
+  // overlay is never clipped or constrained by an ancestor
+  // (transform / filter / overflow / perspective can all
+  // turn `position: fixed` into a non-viewport-relative
+  // box, which leaves a visible gap at the top).
+  if (typeof document === 'undefined') return null
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1000] w-screen h-screen m-0 p-0 bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="flex items-center justify-center min-h-screen w-full p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="relative bg-white rounded-lg shadow-xl w-full max-w-4xl flex flex-col max-h-[90vh] min-h-[600px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <div className="flex items-center gap-2 min-w-0">
+            <i className="fas fa-history text-indigo-600"></i>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-gray-900 truncate">
+                Borrowing History
+              </h2>
+              <p className="text-xs text-gray-500 truncate">
+                {user.full_name} ·{' '}
+                <span className="font-mono">{user.account_id}</span>
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1"
+            aria-label="Close"
+          >
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+
+        {/* Table */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="p-10 text-center">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+              <p className="text-sm text-gray-500">Loading borrowing history…</p>
+            </div>
+          ) : error ? (
+            <div className="p-10 text-center text-gray-500">
+              <i className="fas fa-triangle-exclamation text-3xl text-red-400 mb-2"></i>
+              <p className="text-sm text-red-600">
+                Failed to load borrowing history.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRefreshCounter((c) => c + 1)
+                  refresh()
+                }}
+                className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100"
+              >
+                <i className="fas fa-rotate-right"></i>
+                Retry
+              </button>
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-10 text-center text-gray-500">
+              <i className="fas fa-book-open text-4xl text-gray-300 mb-3"></i>
+              <p className="text-sm font-medium text-gray-700">
+                No borrowing history yet
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                This user has not borrowed any books.
+              </p>
+            </div>
+          ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                    Accession #
+                  </th>
+                  <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                    Borrowed
+                  </th>
+                  <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                    Returned
+                  </th>
+                  <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {rows.map((t) => {
+                  const accession =
+                    t?.copy?.accession_number ||
+                    t?.accession_number ||
+                    '—'
+                  // The service includes `book.title` on every
+                  // row. Show it under the accession number so
+                  // staff can scan the table without cross-
+                  // referencing another screen.
+                  const bookTitle = t?.book?.title || null
+                  const borrowed = t?.borrow_date || t?.created_at
+                  const returned = t?.return_date
+                  return (
+                    <tr key={t.transaction_id} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 text-sm">
+                        <div className="font-mono text-gray-800">
+                          {accession}
+                        </div>
+                        {bookTitle && (
+                          <div
+                            className="text-xs text-gray-500 mt-0.5 truncate max-w-[280px]"
+                            title={bookTitle}
+                          >
+                            {bookTitle}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-gray-700">
+                        {borrowed ? formatDate(borrowed) : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-gray-700">
+                        {returned ? formatDate(returned) : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-sm">
+                        {getStatusBadge(t.status)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination — 10 per page */}
+        <div className="px-5 py-3 border-t bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <p className="text-xs text-gray-600">
+            {totalRows === 0
+              ? '0 results'
+              : `Showing ${(page - 1) * itemsPerPage + 1}–${Math.min(
+                  page * itemsPerPage,
+                  totalRows
+                )} of ${totalRows} record${totalRows === 1 ? '' : 's'} · 10 per page`}
+          </p>
+          {totalServerPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <i className="fas fa-chevron-left"></i>
+                Prev
+              </button>
+              <span className="text-xs text-gray-700 px-2">
+                Page {page} of {totalServerPages}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((p) => Math.min(totalServerPages, p + 1))
+                }
+                disabled={page === totalServerPages}
+                className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+                <i className="fas fa-chevron-right ml-1"></i>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// ============================================================
+// Fines Quick-View Modal
+// ------------------------------------------------------------
+// Self-contained modal with two tabs:
+//   - Summary  : outstanding book + locker fines, counts,
+//                and the per-row breakdown. Sourced from
+//                /api/overdue/user-summary/[user_id].
+//   - History  : every settlement row, most recent first,
+//                10 per page. Sourced from the dedicated
+//                /api/overdue/user-history/[user_id] endpoint.
+// ============================================================
+type FinesTab = 'summary' | 'history'
+
+function FinesQuickViewModal({
+  user,
+  onClose
+}: {
+  user: { user_id: number; full_name: string; account_id: string }
+  onClose: () => void
+}) {
+  const [tab, setTab] = useState<FinesTab>('summary')
+
+  // Summary tab — full snapshot, fetched once.
+  const summaryKey = `/api/overdue/user-summary/${user.user_id}`
+  const {
+    data: summaryResponse,
+    isLoading: summaryLoading,
+    error: summaryError
+  } = useApiSWR<any>(summaryKey, {
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    dedupingInterval: 1000
+  })
+
+  // History tab — server-side paginated, 10 per page,
+  // ordered by created_at DESC.
+  const [historyPage, setHistoryPage] = useState(1)
+  const historyLimit = 10
+  const historyKey = useMemo(
+    () =>
+      `/api/overdue/user-history/${user.user_id}` +
+      `?page=${historyPage}&limit=${historyLimit}`,
+    [user.user_id, historyPage]
+  )
+  const {
+    data: historyResponse,
+    isLoading: historyLoading,
+    error: historyError
+  } = useApiSWR<any>(historyKey, {
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    dedupingInterval: 1000
+  })
+
+  // The /api/overdue/user-summary endpoint wraps its
+  // payload in `data`, so we read through that layer.
+  const summary = (summaryResponse as any)?.data
+  const summaryTotals = summary?.summary || {
+    total_book_penalties: 0,
+    total_locker_penalties: 0,
+    total_penalties: 0,
+    book_count: 0,
+    locker_count: 0,
+    total_count: 0
+  }
+  const bookPenalties: any[] = summary?.book_penalties || []
+  const lockerPenalties: any[] = summary?.locker_penalties || []
+
+  const historyRows: any[] = useMemo(() => {
+    if (!historyResponse) return []
+    const d: any = historyResponse
+    if (Array.isArray(d)) return d
+    if (Array.isArray(d.data)) return d.data
+    if (Array.isArray(d.settlements)) return d.settlements
+    return []
+  }, [historyResponse])
+
+  const historyPagination = (historyResponse as any)?.pagination
+  const historyTotal: number =
+    typeof historyPagination?.total === 'number'
+      ? historyPagination.total
+      : historyRows.length
+  const historyTotalPages: number =
+    typeof historyPagination?.totalPages === 'number'
+      ? historyPagination.totalPages
+      : Math.max(1, Math.ceil(historyTotal / historyLimit))
+  const safeHistoryPage = Math.min(historyPage, historyTotalPages || 1)
+
+  // Status pill (reused by the History tab).
+  const getSettlementStatusBadge = (status: string, voided: boolean) => {
+    if (voided) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700">
+          VOIDED
+        </span>
+      )
+    }
+    const map: Record<string, string> = {
+      SETTLED: 'bg-green-100 text-green-800',
+      PENDING: 'bg-red-100 text-red-800',
+      PARTIAL: 'bg-yellow-100 text-yellow-800'
+    }
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+          map[status] || 'bg-gray-100 text-gray-800'
+        }`}
+      >
+        {status}
+      </span>
+    )
+  }
+
+  // Render via portal at the document body level so the
+  // overlay is never clipped or constrained by an ancestor.
+  if (typeof document === 'undefined') return null
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1000] w-screen h-screen m-0 p-0 bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="flex items-center justify-center min-h-screen w-full p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="relative bg-white rounded-lg shadow-xl w-full max-w-4xl flex flex-col max-h-[90vh] min-h-[600px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <div className="flex items-center gap-2 min-w-0">
+            <i className="fas fa-receipt text-rose-600"></i>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-gray-900 truncate">
+                Fines Quick View
+              </h2>
+              <p className="text-xs text-gray-500 truncate">
+                {user.full_name} ·{' '}
+                <span className="font-mono">{user.account_id}</span>
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1"
+            aria-label="Close"
+          >
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="px-5 pt-3 border-b bg-gray-50">
+          <div className="flex items-center gap-1" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'summary'}
+              onClick={() => setTab('summary')}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                tab === 'summary'
+                  ? 'border-rose-600 text-rose-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <i className="fas fa-chart-pie text-xs"></i>
+              Summary
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'history'}
+              onClick={() => setTab('history')}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                tab === 'history'
+                  ? 'border-rose-600 text-rose-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <i className="fas fa-clock-rotate-left text-xs"></i>
+              History
+              {historyTotal > 0 && (
+                <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-gray-200 text-gray-700">
+                  {historyTotal}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {tab === 'summary' ? (
+            <FinesSummaryTab
+              loading={summaryLoading}
+              error={summaryError}
+              totals={summaryTotals}
+              bookPenalties={bookPenalties}
+              lockerPenalties={lockerPenalties}
+            />
+          ) : (
+            <FinesHistoryTab
+              loading={historyLoading}
+              error={historyError}
+              rows={historyRows}
+              page={safeHistoryPage}
+              total={historyTotal}
+              totalPages={historyTotalPages}
+              onPageChange={setHistoryPage}
+              getSettlementStatusBadge={getSettlementStatusBadge}
+            />
+          )}
+        </div>
+      </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// ----- Fines Summary tab -----
+function FinesSummaryTab({
+  loading,
+  error,
+  totals,
+  bookPenalties,
+  lockerPenalties
+}: {
+  loading: boolean
+  error: any
+  totals: {
+    total_book_penalties: number
+    total_locker_penalties: number
+    total_penalties: number
+    book_count: number
+    locker_count: number
+    total_count: number
+  }
+  bookPenalties: any[]
+  lockerPenalties: any[]
+}) {
+  if (loading) {
+    return (
+      <div className="p-10 text-center">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+        <p className="text-sm text-gray-500">Loading fines summary…</p>
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="p-10 text-center text-gray-500">
+        <i className="fas fa-triangle-exclamation text-3xl text-red-400 mb-2"></i>
+        <p className="text-sm text-red-600">Failed to load fines summary.</p>
+      </div>
+    )
+  }
+
+  const hasAny = totals.total_count > 0
+
+  if (!hasAny) {
+    return (
+      <div className="p-10 text-center text-gray-500">
+        <i className="fas fa-circle-check text-4xl text-green-400 mb-3"></i>
+        <p className="text-sm font-medium text-gray-700">No outstanding fines</p>
+        <p className="text-xs text-gray-500 mt-1">
+          This user has no book or locker fines on record.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-5 space-y-5">
+      {/* Aggregate cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <SummaryCard
+          label="Book fines"
+          icon="fa-book"
+          iconColor="text-amber-600"
+          amount={totals.total_book_penalties}
+          count={totals.book_count}
+        />
+        <SummaryCard
+          label="Locker fines"
+          icon="fa-key"
+          iconColor="text-blue-600"
+          amount={totals.total_locker_penalties}
+          count={totals.locker_count}
+        />
+        <SummaryCard
+          label="Total outstanding"
+          icon="fa-coins"
+          iconColor="text-rose-600"
+          amount={totals.total_penalties}
+          count={totals.total_count}
+          highlight
+        />
+      </div>
+
+      {/* Per-item breakdown */}
+      {(bookPenalties.length > 0 || lockerPenalties.length > 0) && (
+        <div className="space-y-4">
+          {bookPenalties.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                Book fines ({bookPenalties.length})
+              </h3>
+              <ul className="divide-y divide-gray-100 border border-gray-200 rounded-md">
+                {bookPenalties.map((p) => (
+                  <li
+                    key={`book-${p.transaction_id}`}
+                    className="flex items-start justify-between gap-3 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900 truncate">
+                        {p.item_name || 'Unknown book'}
+                      </div>
+                      {p.item_author && (
+                        <div className="text-xs text-gray-500 truncate">
+                          {p.item_author}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-gray-400 mt-0.5">
+                        {p.due_date
+                          ? `Due ${formatDate(p.due_date)}`
+                          : ''}
+                        {p.return_date
+                          ? ` · Returned ${formatDate(p.return_date)}`
+                          : p.is_returned
+                            ? ''
+                            : ' · Not yet returned'}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-semibold text-gray-900">
+                        {formatCurrency(p.remaining_balance || 0)}
+                      </div>
+                      {Number(p.penalty_amount) > Number(p.amount_paid) && (
+                        <div className="text-[11px] text-gray-500">
+                          of {formatCurrency(p.penalty_amount)}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {lockerPenalties.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                Locker fines ({lockerPenalties.length})
+              </h3>
+              <ul className="divide-y divide-gray-100 border border-gray-200 rounded-md">
+                {lockerPenalties.map((p) => (
+                  <li
+                    key={`locker-${p.transaction_id}`}
+                    className="flex items-start justify-between gap-3 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900 truncate">
+                        Locker {p.item_name || '—'}
+                      </div>
+                      {p.item_location && (
+                        <div className="text-xs text-gray-500 truncate">
+                          {p.item_location}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-gray-400 mt-0.5">
+                        {p.borrow_time
+                          ? `Borrowed ${formatDate(p.borrow_time)}`
+                          : ''}
+                        {p.return_time
+                          ? ` · Returned ${formatDate(p.return_time)}`
+                          : p.is_returned
+                            ? ''
+                            : ' · Not yet returned'}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-semibold text-gray-900">
+                        {formatCurrency(p.remaining_balance || 0)}
+                      </div>
+                      {Number(p.penalty_amount) > Number(p.amount_paid) && (
+                        <div className="text-[11px] text-gray-500">
+                          of {formatCurrency(p.penalty_amount)}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SummaryCard({
+  label,
+  icon,
+  iconColor,
+  amount,
+  count,
+  highlight
+}: {
+  label: string
+  icon: string
+  iconColor: string
+  amount: number
+  count: number
+  highlight?: boolean
+}) {
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        highlight
+          ? 'border-rose-200 bg-rose-50'
+          : 'border-gray-200 bg-white'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <i className={`fas ${icon} ${iconColor}`}></i>
+        <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+          {label}
+        </span>
+      </div>
+      <div
+        className={`mt-1 text-2xl font-bold ${
+          highlight ? 'text-rose-700' : 'text-gray-900'
+        }`}
+      >
+        {formatCurrency(amount || 0)}
+      </div>
+      <div className="text-[11px] text-gray-500 mt-0.5">
+        {count} {count === 1 ? 'item' : 'items'}
+      </div>
+    </div>
+  )
+}
+
+// ----- Fines History tab -----
+function FinesHistoryTab({
+  loading,
+  error,
+  rows,
+  page,
+  total,
+  totalPages,
+  onPageChange,
+  getSettlementStatusBadge
+}: {
+  loading: boolean
+  error: any
+  rows: any[]
+  page: number
+  total: number
+  totalPages: number
+  onPageChange: (p: number) => void
+  getSettlementStatusBadge: (status: string, voided: boolean) => React.ReactElement
+}) {
+  if (loading) {
+    return (
+      <div className="p-10 text-center">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+        <p className="text-sm text-gray-500">Loading settlement history…</p>
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="p-10 text-center text-gray-500">
+        <i className="fas fa-triangle-exclamation text-3xl text-red-400 mb-2"></i>
+        <p className="text-sm text-red-600">Failed to load settlement history.</p>
+      </div>
+    )
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="p-10 text-center text-gray-500">
+        <i className="fas fa-folder-open text-4xl text-gray-300 mb-3"></i>
+        <p className="text-sm font-medium text-gray-700">No settlement history</p>
+        <p className="text-xs text-gray-500 mt-1">
+          This user has no fine transactions on record.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <table className="min-w-full divide-y divide-gray-200">
+        <thead className="bg-gray-50 sticky top-0">
+          <tr>
+            <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Date
+            </th>
+            <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Type
+            </th>
+            <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Item
+            </th>
+            <th className="px-4 py-2 text-right text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Penalty
+            </th>
+            <th className="px-4 py-2 text-right text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Paid
+            </th>
+            <th className="px-4 py-2 text-right text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Balance
+            </th>
+            <th className="px-4 py-2 text-left text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Status
+            </th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {rows.map((r) => {
+            const t = r.transaction_details || {}
+            const itemName =
+              t.type === 'LOCKER'
+                ? `Locker ${t.locker_number || '—'}`
+                : t.book_title || '—'
+            const itemSub =
+              t.type === 'LOCKER'
+                ? t.locker_location || ''
+                : t.book_author || t.accession_number
+                  ? [
+                      t.book_author || null,
+                      t.accession_number ? `Acc. ${t.accession_number}` : null
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : ''
+            return (
+              <tr key={r.settlement_id} className="hover:bg-gray-50">
+                <td className="px-4 py-2 text-sm text-gray-700 whitespace-nowrap">
+                  {r.created_at ? formatDate(r.created_at) : '—'}
+                </td>
+                <td className="px-4 py-2 text-sm">
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      t.type === 'LOCKER'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {t.type === 'LOCKER' ? 'Locker' : 'Book'}
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-sm">
+                  <div
+                    className="font-medium text-gray-900 truncate max-w-[260px]"
+                    title={itemName}
+                  >
+                    {itemName}
+                  </div>
+                  {itemSub && (
+                    <div
+                      className="text-xs text-gray-500 truncate max-w-[260px]"
+                      title={itemSub}
+                    >
+                      {itemSub}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-sm text-right text-gray-900 whitespace-nowrap">
+                  {formatCurrency(r.penalty_amount || 0)}
+                </td>
+                <td className="px-4 py-2 text-sm text-right text-green-700 whitespace-nowrap">
+                  {formatCurrency(r.amount_paid || 0)}
+                </td>
+                <td className="px-4 py-2 text-sm text-right font-semibold whitespace-nowrap">
+                  <span
+                    className={
+                      Number(r.remaining_balance) > 0
+                        ? 'text-rose-700'
+                        : 'text-gray-500'
+                    }
+                  >
+                    {formatCurrency(r.remaining_balance || 0)}
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-sm">
+                  {getSettlementStatusBadge(r.status, !!r.voided)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      {/* Pagination — 10 per page, mirrors the borrowing-
+          history footer for consistency. */}
+      <div className="px-5 py-3 border-t bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <p className="text-xs text-gray-600">
+          {total === 0
+            ? '0 results'
+            : `Showing ${(page - 1) * 10 + 1}–${Math.min(
+                page * 10,
+                total
+              )} of ${total} record${total === 1 ? '' : 's'} · 10 per page`}
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+              disabled={page === 1}
+              className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <i className="fas fa-chevron-left"></i>
+              Prev
+            </button>
+            <span className="text-xs text-gray-700 px-2">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+              disabled={page === totalPages}
+              className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+              <i className="fas fa-chevron-right ml-1"></i>
+            </button>
+          </div>
+        )}
+      </div>
+    </>
   )
 }

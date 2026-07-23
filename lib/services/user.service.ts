@@ -75,10 +75,25 @@ export class UserService extends BaseService {
       // Remove UI-only fields that don't exist in the database schema
       const { student_category, basic_ed_level, ...dbData } = data as any
 
+      // Derive education_level from grade level for basic education students
+      let educationLevel = data.education_level || (data as any).basic_ed_level || null
+      if (!educationLevel && (data as any).grade_level_id) {
+        try {
+          const gradeLevel = await prisma.gradeLevel.findUnique({
+            where: { grade_level_id: parseInt((data as any).grade_level_id) },
+            select: { education_level: true }
+          })
+          if (gradeLevel) {
+            educationLevel = gradeLevel.education_level
+          }
+        } catch {}
+      }
+
       const user = await this.create<LibraryUser>(prisma.user, {
         ...dbData,
         account_id: data.account_id || generateAccountId(data.user_type),
         full_name,
+        education_level: educationLevel,
         // Normalize optional empty strings to null to satisfy DB constraints
         middle_name: data.middle_name ? data.middle_name : null,
         suffix: data.suffix ? data.suffix : null,
@@ -182,6 +197,19 @@ export class UserService extends BaseService {
               code: true,
               is_active: true
             }
+          },
+          // Basic-Education equivalents: the list page
+          // shows grade_level / section in place of
+          // department / program for students whose
+          // education_level is NOT COLLEGE / GRADUATE_SCHOOL
+          // (so a "Grade 5 — Section Rizal" row reads as
+          // naturally for a Basic-Ed user as "CS — BSCS"
+          // does for a College user).
+          grade_level: {
+            select: { grade_level_id: true, name: true, code: true }
+          },
+          section: {
+            select: { section_id: true, name: true }
           }
         },
         {
@@ -207,7 +235,18 @@ export class UserService extends BaseService {
         data: result.data ? result.data.map((user: any) => ({
           ...user,
           department: user.department_ref ? user.department_ref.code : null,
-          course: user.program ? user.program.code : null
+          course: user.program ? user.program.code : null,
+          // Basic-Education equivalents. The list page
+          // falls back to these on the department / course
+          // columns when the user is a non-college
+          // student, so a Basic-Ed row reads naturally.
+          grade_level_name: user.grade_level
+            ? user.grade_level.name
+            : null,
+          grade_level_code: user.grade_level
+            ? user.grade_level.code
+            : null,
+          section_name: user.section ? user.section.name : null
         })) : []
       }
 
@@ -266,6 +305,26 @@ export class UserService extends BaseService {
     if (filters.status) {
       where.status = filters.status
     }
+
+    // The user-list table's "Department" / "Program" /
+    // "Office" filters work on the compact string codes
+    // that the service projects onto the user row
+    // (`user.department` = `department_ref.code`,
+    // `user.course` = `program.code`, etc.). The frontend
+    // sends the code as `?department_code=CS` /
+    // `?program_code=BSIT` so the same data the UI shows
+    // in the table cells also drives the server-side
+    // filter — this lets server-side pagination stay
+    // accurate when the user picks one of these filters.
+    if ((filters as any).department_code) {
+      where.department_ref = { code: (filters as any).department_code }
+    }
+    if ((filters as any).program_code) {
+      where.program = { code: (filters as any).program_code }
+    }
+    if ((filters as any).office_code) {
+      where.office_ref = { code: (filters as any).office_code }
+    }
     
     // Additional category filters
     if ((filters as any).section_id) {
@@ -282,6 +341,19 @@ export class UserService extends BaseService {
     
     if ((filters as any).office_id) {
       where.office_id = parseInt((filters as any).office_id)
+    }
+    
+    // "Has RFID" toggle on the user-list table. Empty
+    // string is the default "any" state; 'yes' matches
+    // users with a non-null `rfid_code`; 'no' matches the
+    // inverse. Implemented as a Prisma `not` for the 'no'
+    // branch so a NULL rfid_code still counts as "no
+    // RFID" (NULL is not equal to NULL but IS matched by
+    // `NOT: { equals: ... }`).
+    if ((filters as any).has_rfid === 'yes') {
+      where.rfid_code = { not: null }
+    } else if ((filters as any).has_rfid === 'no') {
+      where.rfid_code = null
     }
     
     if (filters.dateFrom || filters.dateTo) {

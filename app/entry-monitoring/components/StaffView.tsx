@@ -20,6 +20,15 @@ interface EntryLog {
   verified_by?: number | null;
   /** Stamped at write time from the verifying staff's campus. */
   campus?: 'COLLEGE' | 'BASIC_EDUCATION' | null;
+  /** Stamped at write time from the active entrance on the
+   *  entry-management page. Null when the staff member
+   *  didn't pick an entrance for that entry. */
+  entrance_id?: number | null;
+  entrance?: {
+    entrance_id: number;
+    name: string;
+    campus: 'COLLEGE' | 'BASIC_EDUCATION';
+  } | null;
   user?: {
     full_name: string;
     account_id: string;
@@ -130,12 +139,61 @@ export default function StaffView({ className }: StaffViewProps) {
     purpose: ''
   });
 
+  // Active entrance selection. Staff can switch which
+  // entrance they're operating from via a dropdown in the
+  // form header; the chosen id is sent with every entry
+  // POST so the entrylog row is stamped with the entrance
+  // that was active at the moment of the entry. The
+  // selection is persisted in localStorage so the staff
+  // member only has to set it once per device.
+  //
+  // The keys are scoped by `session.user.id` (the staff
+  // account_id) so two different staff accounts on the
+  // same browser — e.g. a College-designated staff and
+  // a Basic-Ed-designated staff sharing a Chrome login —
+  // do NOT see each other's entrance selection. Without
+  // this scoping, a College staff's choice would leak
+  // into the next Basic Ed staff's session because the
+  // persisted value is still valid (entrance id exists
+  // in the DB), it's just on the wrong campus.
+  const userStorageId =
+    (session?.user as any)?.id != null
+      ? String((session?.user as any).id)
+      : 'anon'
+  const ENTRANCE_STORAGE_KEY = `entry-monitoring.active-entrance-id.${userStorageId}`
+  const [activeEntranceId, setActiveEntranceId] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = window.localStorage.getItem(ENTRANCE_STORAGE_KEY)
+      if (!raw) return null
+      const n = parseInt(raw)
+      return Number.isFinite(n) && n > 0 ? n : null
+    } catch {
+      return null
+    }
+  })
+  const [availableEntrances, setAvailableEntrances] = useState<Array<{
+    entrance_id: number
+    name: string
+    campus: 'COLLEGE' | 'BASIC_EDUCATION'
+  }>>([])
+  const [entrancesLoaded, setEntrancesLoaded] = useState(false)
+  // Inline validation flag for the entrance selector. Set
+  // to true when the staff tries to log an entry without
+  // picking an entrance, so the dropdown flashes red and
+  // shows a "Please select entrance" hint. Cleared the
+  // moment the staff picks a valid entrance.
+  const [entranceError, setEntranceError] = useState(false)
+  const entranceSelectRef = useRef<HTMLSelectElement | null>(null)
+
   // Scan priority: which identification field is the
   // primary input the staff member uses day-to-day.
   // 'rfid' = RFID scanner (default), 'userId' = manual
   // User ID entry. Stored in localStorage so the
-  // preference sticks across sessions.
-  const SCAN_PRIORITY_KEY = 'entry-monitoring.scan-priority'
+  // preference sticks across sessions. Scoped by
+  // user-id for the same reason as ENTRANCE_STORAGE_KEY
+  // above.
+  const SCAN_PRIORITY_KEY = `entry-monitoring.scan-priority.${userStorageId}`
   const [scanPriority, setScanPriorityState] = useState<'rfid' | 'userId'>(
     () => {
       if (typeof window === 'undefined') return 'rfid'
@@ -201,6 +259,7 @@ export default function StaffView({ className }: StaffViewProps) {
     try {
       const response = await fetch('/api/entry-logs?limit=10&include_user=true', {
         credentials: 'include',
+        cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
@@ -273,6 +332,7 @@ export default function StaffView({ className }: StaffViewProps) {
       try {
         const res = await fetch('/api/staff/me/campus', {
           credentials: 'include',
+          cache: 'no-store',
           headers: { 'Cache-Control': 'no-store' }
         })
         if (!res.ok) {
@@ -290,6 +350,72 @@ export default function StaffView({ className }: StaffViewProps) {
       }
     })()
     return () => { cancelled = true }
+  }, [])
+
+  // Load the entrances available to this staff member.
+  // Scoped server-side to the staff's campus so a
+  // COLLEGE-designated staff never sees BASIC_EDUCATION
+  // entrances and vice versa. ADMIN / SUPER_ADMIN get
+  // every active entrance (their `campus` is null on
+  // user_account).
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/staff/me/entrances', {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-store' }
+        })
+        if (cancelled) return
+        if (!res.ok) {
+          setEntrancesLoaded(true)
+          return
+        }
+        const body = await res.json()
+        const list: Array<{
+          entrance_id: number
+          name: string
+          campus: 'COLLEGE' | 'BASIC_EDUCATION'
+        }> = Array.isArray(body?.data) ? body.data : []
+        setAvailableEntrances(list)
+
+        // If the persisted entrance is no longer in the
+        // allowed list (e.g. it was archived, or the staff
+        // was re-designated to a different campus), drop
+        // the persisted value so the dropdown shows
+        // nothing rather than an invalid choice.
+        setActiveEntranceId((prev) => {
+          if (prev == null) return prev
+          const stillAvailable = list.some((e) => e.entrance_id === prev)
+          if (!stillAvailable) {
+            try { window.localStorage.removeItem(ENTRANCE_STORAGE_KEY) } catch { /* ignore */ }
+            return null
+          }
+          return prev
+        })
+
+        setEntrancesLoaded(true)
+      } catch {
+        if (!cancelled) setEntrancesLoaded(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Persist entrance selection in localStorage so the
+  // staff member only has to pick once per device.
+  const setAndPersistEntranceId = useCallback((next: number | null) => {
+    setActiveEntranceId(next)
+    try {
+      if (next == null) {
+        window.localStorage.removeItem(ENTRANCE_STORAGE_KEY)
+      } else {
+        window.localStorage.setItem(ENTRANCE_STORAGE_KEY, String(next))
+      }
+    } catch {
+      /* localStorage may be blocked */
+    }
   }, [])
 
   const recentEntriesArray: EntryLog[] = Array.isArray(recentEntries) ? recentEntries : [];
@@ -406,7 +532,25 @@ export default function StaffView({ className }: StaffViewProps) {
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Entrance is mandatory — the API persists it on
+    // every entrylog row, and the realtime + analytics
+    // views both key off it. If the staff member forgot
+    // to pick one, surface a SweetAlert, highlight the
+    // entrance dropdown in red, focus it, and block the
+    // submission so they can't log an entry that would
+    // land with `entrance_id = NULL` in the database.
+    if (activeEntranceId == null) {
+      setEntranceError(true)
+      entranceSelectRef.current?.focus()
+      await NotificationService.warning(
+        'Select an entrance',
+        'Please select the entrance you are currently operating from before logging an entry.'
+      )
+      return
+    }
+    setEntranceError(false)
+
     if (!formData.user_id && !formData.rfid_code) {
       NotificationService.warning(
         'Missing Information',
@@ -453,7 +597,14 @@ export default function StaffView({ className }: StaffViewProps) {
         body: JSON.stringify({
           user_id: user.user_id, // use numeric primary key
           rfid_code: formData.rfid_code || undefined,
-          purpose: formData.purpose || 'General'
+          purpose: formData.purpose || 'General',
+          // Stamp the entry with the entrance the staff is
+          // currently operating from. The server persists
+          // this on the entrylog row even when null, so we
+          // only send the field when the staff has picked
+          // one.
+          
+          entrance_id: activeEntranceId ?? undefined
         })
       });
       
@@ -816,6 +967,77 @@ export default function StaffView({ className }: StaffViewProps) {
                     <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'} text-xs`}></i>
                     <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
                   </button>
+                  {/*
+                    Entrance switcher. Sits next to the
+                    fullscreen button so the staff can see
+                    the entrance they're currently operating
+                    from alongside the other layout
+                    controls. The list is fetched from
+                    /api/staff/me/entrances and is scoped
+                    server-side to the staff's campus (a
+                    COLLEGE-designated staff only sees
+                    COLLEGE entrances, etc.). The chosen
+                    id is stamped on every entrylog row.
+                  */}
+                  {entrancesLoaded && availableEntrances.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <label
+                        className="inline-flex items-center gap-1.5 text-xs text-gray-500"
+                        title="Select which entrance you are currently operating from"
+                      >
+                        <i className="fas fa-door-closed text-gray-400"></i>
+                        <span className="hidden sm:inline">Entrance:</span>
+                        <select
+                          ref={entranceSelectRef}
+                          value={activeEntranceId ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            setAndPersistEntranceId(v ? parseInt(v) : null)
+                            // The instant the staff picks an
+                            // entrance, clear the red highlight
+                            // + "Please select entrance" hint
+                            // so the form goes back to a calm
+                            // state. The highlight is only for
+                            // the missed-selection error case.
+                            if (v) setEntranceError(false)
+                          }}
+                          className={`h-9 pl-2 pr-7 text-sm rounded-md border transition-colors ${
+                            activeEntranceId
+                              ? 'border-blue-300 bg-blue-50 text-blue-800 font-medium'
+                              : entranceError
+                                ? 'border-red-500 bg-red-50 text-red-800 ring-2 ring-red-200 focus:outline-none focus:ring-2 focus:ring-red-400'
+                                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                          }`}
+                          aria-label="Select active entrance"
+                          aria-invalid={entranceError || undefined}
+                          aria-describedby={
+                            entranceError ? 'active-entrance-error' : undefined
+                          }
+                        >
+                          <option value="">Select…</option>
+                          {availableEntrances.map((e) => (
+                            <option key={e.entrance_id} value={e.entrance_id}>
+                              {e.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {/* Inline validation hint. Sits directly
+                          under the entrance dropdown so the
+                          staff's eyes don't have to leave the
+                          highlighted field to see the error. */}
+                      {entranceError && (
+                        <span
+                          id="active-entrance-error"
+                          role="alert"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-red-600"
+                        >
+                          <i className="fas fa-exclamation-circle"></i>
+                          Please select entrance
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -998,13 +1220,14 @@ export default function StaffView({ className }: StaffViewProps) {
                     variant="outline"
                     onClick={clearForm}
                     disabled={submitting}
+                    className='px-6 py-6 bg-blue-100 hover:bg-blue-700 hover:text-white'
                   >
                     Clear
                   </Button>
                   <Button
                     type="submit"
                     disabled={submitting || (!formData.user_id && !formData.rfid_code)}
-                    className="bg-blue-700 hover:bg-blue-800 min-w-[140px] text-white"
+                    className="bg-blue-700 hover:bg-blue-800 py-6 px-4 min-w-[140px] text-white"
                   >
                     {submitting ? (
                       <>
@@ -1122,6 +1345,18 @@ export default function StaffView({ className }: StaffViewProps) {
                           )}
                           <span className="text-gray-300">•</span>
                           <span className="font-mono">{formatTime(entry.entry_time)}</span>
+                          {entry.entrance?.name && (
+                            <>
+                              <span className="text-gray-300">•</span>
+                              <span
+                                className="inline-flex items-center gap-1 text-blue-700"
+                                title={`Entrance: ${entry.entrance.name}`}
+                              >
+                                <i className="fas fa-door-closed text-[9px]"></i>
+                                {entry.entrance.name}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     );

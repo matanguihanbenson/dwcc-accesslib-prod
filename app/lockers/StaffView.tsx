@@ -695,7 +695,7 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                   setSelectedLockerForInfo(locker)
                   setShowLockerInfoModal(true)
                 }}
-                className={`relative p-3 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md group ${
+                className={`relative p-3 rounded-lg py-4 border-2 cursor-pointer transition-all hover:shadow-md group ${
                   isAvailable 
                     ? 'border-green-300 bg-green-50 hover:border-green-400' 
                     : isOvertime 
@@ -707,7 +707,7 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                 
                 {/* Locker Number */}
                 <div className="text-center">
-                  <div className={`w-10 h-10 mx-auto rounded-lg flex items-center justify-center text-sm font-bold mb-2 ${
+                  <div className={`w-12 h-12 mx-auto rounded-lg flex items-center justify-center text-sm font-bold mb-2 ${
                     isAvailable ? 'bg-green-600 text-white'
                       : isOvertime ? 'bg-orange-500 text-white'
                       : 'bg-red-500 text-white'

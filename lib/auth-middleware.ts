@@ -50,11 +50,6 @@ const publicRoutes = [
   '/search',
   '/about',
   '/contact',
-  // /setup is publicly accessible so the very first
-  // SUPER_ADMIN can be created before any account exists.
-  // The /setup page itself checks /api/setup/status on
-  // mount and redirects to /login when setup is already
-  // complete, so the route is "self-locking".
   '/setup'
 ]
 

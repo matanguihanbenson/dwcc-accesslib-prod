@@ -36,6 +36,22 @@ export const GET = withAuth(
       department: filters.department || undefined,
       year_level: filters.year_level || undefined,
       campus: effectiveCampus,
+      // Forward the entrance_id filter straight through. The
+      // service's `buildEntrySearchQuery` accepts both a single
+      // number / numeric string and a comma-separated list, so we
+      // pass the raw value through and let the service parse it.
+      // Normalising here (splitting on comma) is the more
+      // consistent contract across the app's existing filters.
+      entrance_id: (() => {
+        const raw = (filters as any).entrance_id
+        if (raw === undefined || raw === null || raw === '') return undefined
+        const str = String(raw).trim()
+        if (!str) return undefined
+        if (str.includes(',')) {
+          return str.split(',').map((s) => s.trim()).filter(Boolean)
+        }
+        return str
+      })(),
       date_from: filters.date_from || undefined,
       date_to: filters.date_to || undefined,
       status: filters.status || undefined, // 'inside', 'exited', or 'all'
@@ -86,18 +102,37 @@ export const POST = withAuth(
         let result
         
         try {
+          // Optional entrance_id from the staff's "Switch
+          // entrance" dropdown on the entry management page.
+          // Accept any of: number, numeric string, null, or
+          // undefined; reject anything else so a bad value
+          // can't sneak into the entrylog row.
+          let entranceId: number | null | undefined = undefined
+          if (typedData.entrance_id !== undefined && typedData.entrance_id !== null && typedData.entrance_id !== '') {
+            const parsed = parseInt(String(typedData.entrance_id))
+            if (isNaN(parsed) || parsed <= 0) {
+              return NextResponse.json(
+                { success: false, error: 'Invalid entrance_id', code: 'VALIDATION_ERROR' },
+                { status: 400 }
+              )
+            }
+            entranceId = parsed
+          }
+
           if (typedData.rfid_code) {
             result = await entryService.recordEntryByRFID(
               typedData.rfid_code,
               typedData.purpose || 'General',
-              verifiedBy
+              verifiedBy,
+              entranceId
             )
           } else {
             result = await entryService.recordEntry(
               parseInt(typedData.user_id),
               typedData.rfid_code,
               typedData.purpose || 'General',
-              verifiedBy
+              verifiedBy,
+              entranceId
             )
           }
           

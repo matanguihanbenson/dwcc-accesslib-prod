@@ -156,11 +156,13 @@ export const EnhancedBookForm = forwardRef<
   const [sections, setSections] = useState<{ section_id: number; name: string }[]>(propSections || [])
 
   // Dynamic option lists for the hard-coded <select> fields.
-  // We start from the same defaults the original form used,
-  // but allow new values to be appended at runtime — important
-  // for the Open Library ISBN lookup: if the scraped book is
-  // a new material type / format we don't know about yet, we
-  // can still surface it as a usable option and select it.
+  // We start from the same defaults the original form used
+  // (so the form still works on a brand-new install where
+  // the admin hasn't populated the catalog table yet) and
+  // then merge in the values from `/api/book-catalog-values`
+  // (see the `useCatalogValues` effect below). Active rows
+  // are appended; inactive rows are hidden so a deactivated
+  // value doesn't appear in the dropdowns.
   const [materialTypeOptions, setMaterialTypeOptions] = useState<string[]>([
     'Book', 'eBook', 'Audiobook', 'DVD', 'Magazine'
   ])
@@ -176,6 +178,76 @@ export const EnhancedBookForm = forwardRef<
   const [fountasPinnellOptions, setFountasPinnellOptions] = useState<string[]>([
     'Any Level', 'Level A', 'Level B', 'Level C', 'Level D', 'Level Z'
   ])
+
+  // Pull the live catalog values from the
+  // `book_catalog_value` table so anything an admin added
+  // on the cataloging-setup page shows up here. Fetched
+  // once on mount; `ensureOption` + `addOption` (below)
+  // also push new values into the right list as the user
+  // picks them.
+  useEffect(() => {
+    let cancelled = false
+    const merge = (
+      current: string[],
+      next: string[]
+    ) => {
+      const seen = new Set<string>()
+      const out: string[] = []
+      // Hard-coded defaults first so the form stays
+      // usable even on a brand-new install.
+      for (const v of current) {
+        if (!seen.has(v)) {
+          seen.add(v)
+          out.push(v)
+        }
+      }
+      // Then any catalog values that aren't already
+      // in the list. Inactive rows are skipped so a
+      // deactivated value doesn't appear in the
+      // dropdowns.
+      for (const v of next) {
+        if (!seen.has(v)) {
+          seen.add(v)
+          out.push(v)
+        }
+      }
+      return out
+    }
+    const types: Array<{
+      api: 'MATERIAL_TYPE' | 'SUBTYPE' | 'INTEREST_LEVEL' | 'LEXILE' | 'FOUNTAS_PINNELL'
+      setter: React.Dispatch<React.SetStateAction<string[]>>
+    }> = [
+      { api: 'MATERIAL_TYPE', setter: setMaterialTypeOptions },
+      { api: 'SUBTYPE', setter: setSubtypeOptions },
+      { api: 'INTEREST_LEVEL', setter: setInterestLevelOptions },
+      { api: 'LEXILE', setter: setLexileOptions },
+      { api: 'FOUNTAS_PINNELL', setter: setFountasPinnellOptions }
+    ]
+    Promise.all(
+      types.map((t) =>
+        fetch(`/api/book-catalog-values?type=${t.api}&all=true`, {
+          credentials: 'include',
+          cache: 'no-store'
+        })
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => [])
+      )
+    ).then((results) => {
+      if (cancelled) return
+      types.forEach((t, i) => {
+        const list: any[] = Array.isArray(results[i])
+          ? results[i]
+          : (results[i] as any)?.data || []
+        const values = list
+          .filter((v: any) => v && v.value && v.is_active !== false)
+          .map((v: any) => String(v.value))
+        t.setter((prev) => merge(prev, values))
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Modal that drives the Open Library ISBN lookup.
   const [showIsbnModal, setShowIsbnModal] = useState(false)
@@ -1285,11 +1357,11 @@ export const EnhancedBookForm = forwardRef<
                     </select>
                   </div>
                 </div>
-
+                   {/*   */}     
                 <div>
                   <div className="flex justify-between items-center mb-2">
                     <label className="block text-sm font-medium text-gray-700">Notes</label>
-                    <Button type="button" onClick={addNote} size="sm" variant="outline">
+                    <Button type="button" onClick={addNote} size="sm" variant="outline"  className='bg-primary-600 py-5 px-4 text-white'>
                       Add Note
                     </Button>
                   </div>
@@ -1608,7 +1680,7 @@ export const EnhancedBookForm = forwardRef<
                 <div>
                   <div className="flex justify-between items-center mb-2">
                     <label className="block text-sm font-medium text-gray-700">Co-authors, Illustrators, Editors, etc.</label>
-                    <Button type="button" onClick={addCoAuthor} size="sm" variant="outline">
+                    <Button type="button" onClick={addCoAuthor} size="sm" variant="outline"  className='bg-primary-600 py-5 px-4 text-white'>
                       Add Entry
                     </Button>
                   </div>
@@ -1703,14 +1775,14 @@ export const EnhancedBookForm = forwardRef<
                 </div>
               </div>
             )}
-
+            {/*  */}
             {/* Resources Tab */}
             {activeTab === 'resources' && (
               <div className="space-y-6">
                 <div>
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-medium text-gray-900">Links</h3>
-                    <Button type="button" onClick={addLink} size="sm" variant="outline">
+                    <Button type="button" onClick={addLink} size="sm" variant="outline"  className='bg-primary-600 py-5 px-4 text-white'>
                       Add Link
                     </Button>
                   </div>
@@ -1755,7 +1827,7 @@ export const EnhancedBookForm = forwardRef<
                 <div>
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-medium text-gray-900">Digital Content</h3>
-                    <Button type="button" onClick={addDigitalContent} size="sm" variant="outline">
+                    <Button type="button" onClick={addDigitalContent} size="sm" variant="outline"  className='bg-primary-600 py-5 px-4 text-white'>
                       Add New
                     </Button>
                   </div>

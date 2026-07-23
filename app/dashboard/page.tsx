@@ -9,6 +9,7 @@ import { LoadingScreen } from '@/components/ui/loading-spinner'
 import { UserRole } from '@/types'
 import AdminView from '@/components/dashboard/AdminView'
 import { LineChart, BarChart, PieChart } from '@/components/charts'
+import { getDayBucketsInTz } from '@/lib/timezone'
 
 export default function DashboardPage() {
   const { data: session, status } = useSession()
@@ -25,17 +26,18 @@ export default function DashboardPage() {
   const [activeBorrows, setActiveBorrows] = useState<any[]>([])
   const [overdueAlerts, setOverdueAlerts] = useState<any[]>([])
   const [usageChartData, setUsageChartData] = useState<any[]>(() => {
-    // Initialize with empty data for the last 7 days to prevent chart loading issues
-    return Array.from({ length: 7 }, (_, i) => {
-      const date = new Date()
-      date.setDate(date.getDate() - (6 - i))
-      return {
-        name: date.toLocaleDateString('en-US', { weekday: 'short' }),
-        entries: 0,
-        books: 0,
-        lockers: 0
-      }
-    })
+    // Initial empty 7-day chart. Weekday labels are anchored to
+    // Asia/Manila so the placeholder bars line up with whatever
+    // the server returns from /api/dashboard/staff-analytics —
+    // important when this state is rendered in a browser whose
+    // local timezone disagrees with the server's (e.g. UTC host
+    // with a PH-based staff member).
+    return getDayBucketsInTz(7).map((b) => ({
+      name: b.name,
+      entries: 0,
+      books: 0,
+      lockers: 0
+    }))
   })
   const [loadingStaffData, setLoadingStaffData] = useState(false) // Changed to false for background loading
   const [staffAnalytics, setStaffAnalytics] = useState<any>(null)
@@ -228,10 +230,10 @@ export default function DashboardPage() {
         return [
           { icon: 'fa-user-shield', text: 'Add Admin', color: 'blue', href: '/users/register-admin' },
           { icon: 'fa-user-plus', text: 'Register User', color: 'green', href: '/library-users/add' },
-          { icon: 'fa-building', text: 'Add Department', color: 'yellow', href: '/library-users/add' },
+          { icon: 'fa-building', text: 'Add Department', color: 'yellow', href: '/departments/add' },
           { icon: 'fa-book-open-reader', text: 'Add Program', color: 'black', href: '/programs/add' },
-          { icon: 'fa-briefcase', text: 'Add Office', color: 'orange', href: '/library-users/add' },
-          { icon: 'fa-school', text: 'Manage Basic Ed', color: 'red', href: '/library-users/add' },
+          { icon: 'fa-briefcase', text: 'Add Office', color: 'orange', href: '/offices/add' },
+          { icon: 'fa-school', text: 'Manage Basic Ed', color: 'red', href: '/basic-education' },
           { icon: 'fa-history', text: 'System Logs', color: 'purple', href: '/activity-logs' }
         ]
       case UserRole.ADMIN:

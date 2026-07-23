@@ -2,10 +2,10 @@ import { NextRequest } from 'next/server'
 import { UserRole } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
+import { formatAccessionNumber } from '@/lib/accession-number'
 
 const ACCESSION_SEQUENCE_START = 48000
 const INITIAL_LAST_NUMBER = ACCESSION_SEQUENCE_START - 1
-const ACCESSION_NUMBER_MIN_WIDTH = 5
 
 // POST - Initialize copies for existing books (one-time migration)
 export const POST = withAuth(
@@ -48,8 +48,7 @@ export const POST = withAuth(
       if (!sequence) {
         sequence = await prisma.accessionNumberSequence.create({
           data: {
-            last_number: INITIAL_LAST_NUMBER,
-            prefix: 'LIB'
+            last_number: INITIAL_LAST_NUMBER
           }
         })
       }
@@ -67,7 +66,7 @@ export const POST = withAuth(
       
       for (let i = 0; i < numberOfCopies; i++) {
         currentNumber++
-        const accessionNumber = `${sequence.prefix}-${String(currentNumber).padStart(ACCESSION_NUMBER_MIN_WIDTH, '0')}`
+        const accessionNumber = formatAccessionNumber(currentNumber)
 
         // Create copy
         const copy = await prisma.bookCopy.create({

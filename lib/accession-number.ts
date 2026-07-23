@@ -5,7 +5,27 @@ const INITIAL_LAST_NUMBER = ACCESSION_SEQUENCE_START - 1
 const ACCESSION_NUMBER_MIN_WIDTH = 5
 
 /**
- * Generate sequential accession numbers in format LIB-XXXXX (min width 5)
+ * Render a numeric accession number as a zero-padded string
+ * (e.g. `48012`). The library used to emit a `LIB-` prefix,
+ * but the physical stickers never carried it, so the prefix was
+ * removed entirely — both from every existing row (by the
+ * `202607070001_drop_lib_accession_prefix` migration) and from
+ * the `accession_number_sequence` schema itself (by the
+ * `202607150001_drop_accession_number_sequence_prefix` migration).
+ * New copies are emitted as bare zero-padded integers.
+ *
+ * Exported so the two copy-creation endpoints
+ * (`app/api/books/[book_id]/copies/route.ts` and
+ * `app/api/books/[book_id]/copies/initialize/route.ts`) can
+ * share the same formatter as the central service instead of
+ * keeping a local copy in lockstep.
+ */
+export function formatAccessionNumber(value: number): string {
+  return String(value).padStart(ACCESSION_NUMBER_MIN_WIDTH, '0')
+}
+
+/**
+ * Generate sequential accession numbers (min width 5, e.g. `48012`).
  * @param count Number of accession numbers to generate
  * @returns Array of accession numbers
  */
@@ -20,8 +40,7 @@ export async function generateAccessionNumbers(count: number): Promise<string[]>
     if (!sequence) {
       sequence = await tx.accessionNumberSequence.create({
         data: {
-          last_number: INITIAL_LAST_NUMBER,
-          prefix: 'LIB'
+          last_number: INITIAL_LAST_NUMBER
         }
       })
     }
@@ -39,9 +58,7 @@ export async function generateAccessionNumbers(count: number): Promise<string[]>
     // Generate accession numbers
     for (let i = 0; i < count; i++) {
       currentNumber++
-      const paddedNumber = String(currentNumber).padStart(ACCESSION_NUMBER_MIN_WIDTH, '0')
-      const accessionNumber = `${sequence.prefix}-${paddedNumber}`
-      accessionNumbers.push(accessionNumber)
+      accessionNumbers.push(formatAccessionNumber(currentNumber))
     }
     
     // Update sequence
@@ -71,6 +88,5 @@ export async function getNextAccessionNumber(): Promise<string> {
   const sequence = await prisma.accessionNumberSequence.findFirst()
   const lastNumber = sequence?.last_number ?? INITIAL_LAST_NUMBER
   const nextNumber = Math.max(lastNumber, INITIAL_LAST_NUMBER) + 1
-  const prefix = sequence?.prefix || 'LIB'
-  return `${prefix}-${String(nextNumber).padStart(ACCESSION_NUMBER_MIN_WIDTH, '0')}`
+  return formatAccessionNumber(nextNumber)
 }

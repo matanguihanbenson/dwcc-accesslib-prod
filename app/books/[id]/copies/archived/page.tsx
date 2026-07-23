@@ -304,15 +304,15 @@ export default function ArchivedCopiesPage({ params }: { params: Promise<{ id: s
                           <div className="flex gap-2 items-center">
                             <button
                               onClick={() => handleRestoreCopy(copy.copy_id)}
-                              className="text-green-600 hover:text-green-800 p-1"
+                              className="text-green-600 bg-green-100 w-9 h-9 rounded-md hover:text-green-800 p-1"
                               title="Restore Copy"
                             >
                               <i className="fas fa-undo text-base"></i>
                             </button>
-                            {userRole === 'SUPER_ADMIN' && (
+                            {userRole === 'ADMIN' && (
                               <button
                                 onClick={() => handlePermanentDelete(copy.copy_id)}
-                                className="text-red-600 hover:text-red-800 p-1"
+                                className="text-red-600 w-9 h-9 bg-red-100 rounded-md hover:text-red-800 p-1"
                                 title="Permanently Delete"
                               >
                                 <i className="fas fa-trash text-base"></i>

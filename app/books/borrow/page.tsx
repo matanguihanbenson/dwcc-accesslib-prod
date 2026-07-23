@@ -817,7 +817,7 @@ export default function BorrowBooksPage() {
                     <Input
                       value={accessionNumber}
                       onChange={handleAccessionNumberChange}
-                      placeholder="Enter accession number (e.g., LIB-000001)"
+                      placeholder="Enter accession number (e.g., 000001)"
                       disabled={loading}
                       required
                       className="flex-1 h-[50px] w-full"

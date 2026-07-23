@@ -56,6 +56,7 @@ export async function GET(
           select: {
             transaction_id: true,
             book_id: true,
+            copy_id: true,
             borrow_date: true,
             due_date: true,
             return_date: true,
@@ -68,6 +69,15 @@ export async function GET(
                   select: { name: true },
                   orderBy: { display_order: 'asc' },
                   take: 1
+                },
+                // Pull every copy's accession number so the
+                // page can surface the specific copy that
+                // was borrowed (matched by `copy_id`) and
+                // fall back to the first one for legacy
+                // book-level (no-copy) transactions.
+                book_copies: {
+                  select: { copy_id: true, accession_number: true },
+                  orderBy: { copy_id: 'asc' }
                 }
               }
             }
@@ -82,7 +92,11 @@ export async function GET(
             entry_id: true,
             entry_time: true,
             exit_time: true,
-            purpose: true
+            purpose: true,
+            campus: true,
+            entrance: {
+              select: { entrance_id: true, name: true }
+            }
           },
           orderBy: {
             entry_time: 'desc'

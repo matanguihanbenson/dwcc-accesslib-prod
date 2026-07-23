@@ -115,6 +115,91 @@ model BookSection {
   @@map("book_section")
 }
 
+// ============================================================
+// Hierarchical book classification (DDC-like).
+// ============================================================
+// One self-referencing table with five `level` values
+// covers the entire tree:
+//   MAIN_CLASS          → root (no parent)
+//   DIVISION            → child of MAIN_CLASS
+//   SECTION             → child of DIVISION
+//   DECIMAL_SUBDIVISION  → child of SECTION
+//   DEEPER_SUBDIVISION    → child of DECIMAL_SUBDIVISION
+//                          (or another DEEPER_SUBDIVISION
+//                          for arbitrarily deep DDC ranges)
+// The "code" column is a free-form string so it can
+// store both DDC ranges ("000", "022") and DDC
+// subdivisions ("022.1", "022.11") in the same column.
+// ============================================================
+enum BookClassificationLevel {
+  MAIN_CLASS
+  DIVISION
+  SECTION
+  DECIMAL_SUBDIVISION
+  DEEPER_SUBDIVISION
+}
+
+model BookClassification {
+  id           Int                     @id @default(autoincrement())
+  // Self-reference for the tree. Nullable so the
+  // root nodes (Main Classes) can exist without a
+  // parent.
+  parent_id    Int?
+  parent       BookClassification?     @relation("ClassificationTree", fields: [parent_id], references: [id], onDelete: Cascade)
+  children     BookClassification[]    @relation("ClassificationTree")
+  // The classifier code. Free-form so it can hold
+  // ranges ("000"), sections ("020"), and decimal
+  // subdivisions ("022.1") without per-level schemas.
+  code         String                  @db.VarChar(20)
+  name         String                  @db.VarChar(100)
+  description  String?                 @db.Text
+  level        BookClassificationLevel
+  is_active    Boolean                 @default(true)
+  created_at   DateTime                @default(now()) @db.Timestamp(0)
+  updated_at   DateTime                @updatedAt
+  books        Book[]
+
+  @@unique([parent_id, code], name: "book_classification_parent_code_unique")
+  @@unique([level, code], name: "book_classification_level_code_unique")
+  @@index([parent_id])
+  @@index([level])
+  @@index([is_active])
+  @@map("book_classification")
+}
+
+// Source of truth for the six "live value" dropdowns
+// on the add-book form (Classification, Material Type,
+// Subtype, Interest Level, Lexile, Fountas & Pinnell).
+//
+// One table backs every catalog so the API and the
+// cataloging-setup page only have to be built once.
+// The unique index on (type, value) prevents the same
+// string from being added twice in a single catalog;
+// the same string may still appear across different
+// catalogs (e.g. "N/A" in both Subtype and Year Level).
+enum BookCatalogValueType {
+  CLASSIFICATION
+  MATERIAL_TYPE
+  SUBTYPE
+  INTEREST_LEVEL
+  LEXILE
+  FOUNTAS_PINNELL
+}
+
+model BookCatalogValue {
+  id          Int                   @id @default(autoincrement())
+  type        BookCatalogValueType
+  value       String                @db.VarChar(100)
+  description String?               @db.VarChar(255)
+  is_active   Boolean               @default(true)
+  created_at  DateTime              @default(now()) @db.Timestamp(0)
+  updated_at  DateTime              @updatedAt
+
+  @@unique([type, value])
+  @@index([type, is_active])
+  @@map("book_catalog_value")
+}
+
 model Book {
   book_id           Int               @id @default(autoincrement())
   title             String            @db.VarChar(300)
@@ -158,6 +243,13 @@ model Book {
   alternate_titles  AlternateTitle[]
   category          BookCategory      @relation(fields: [category_id], references: [category_id])
   section           BookSection?      @relation(fields: [section_id], references: [section_id])
+  // Leaf-level classification (DDC). Nullable so a
+  // book can be created without a classification;
+  // the cataloging-setup page's "View Books" report
+  // on any classification node shows every book whose
+  // classification_id is that node or any descendant.
+  classification_id Int?
+  classification    BookClassification? @relation(fields: [classification_id], references: [id], onDelete: SetNull)
   authors           BookAuthor[]
   contributors      BookContributor[]
   links             BookLink[]
@@ -203,7 +295,6 @@ model BookCopy {
 model AccessionNumberSequence {
   id          Int      @id @default(autoincrement())
   last_number Int      @default(0)
-  prefix      String   @default("LIB") @db.VarChar(10)
   updated_at  DateTime @updatedAt
 
   @@map("accession_number_sequence")
@@ -335,6 +426,35 @@ model Locker {
   @@map("locker")
 }
 
+// Per-campus entrances / gates (e.g. "Main Library Entrance",
+// "Law School Library Entrance" on the College campus; or
+// "Basic Ed Library Entrance" on the Basic Ed campus).
+//
+// Super admins manage these from the "Entrances" sidebar
+// link. The entry-management page exposes them as a
+// dropdown so STAFF can switch which entrance they're
+// operating from; each entrylog row is then stamped with
+// the selected entrance_id so historical reporting
+// (e.g. "which students went to the law school library
+// vs the main library") stays accurate.
+model Entrance {
+  entrance_id  Int        @id @default(autoincrement())
+  name         String     @db.VarChar(100)
+  campus       Campus
+  description  String?    @db.Text
+  is_active    Boolean    @default(true)
+  created_at   DateTime   @default(now()) @db.Timestamp(0)
+  updated_at   DateTime   @updatedAt @db.Timestamp(0)
+  archived_at  DateTime?  @db.Timestamp(0)
+  entry_logs   EntryLog[]
+
+  @@unique([name, campus])
+  @@index([campus])
+  @@index([is_active])
+  @@index([archived_at])
+  @@map("entrance")
+}
+
 model LockerTransaction {
   transaction_id Int               @id @default(autoincrement())
   borrow_time    DateTime          @default(now()) @db.Timestamp(0)
@@ -370,13 +490,52 @@ model EntryLog {
   purpose     String?   @db.VarChar(100)
   verified_by Int?
   campus      Campus    @default(COLLEGE)
+  // Entrance the staff member was operating from when
+  // this entry was logged. Stamped at write time from the
+  // staff's currently-selected entrance so historical
+  // records keep the correct value even if the entrance
+  // list is later reconfigured.
+  entrance_id Int?
   user        User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  entrance    Entrance? @relation(fields: [entrance_id], references: [entrance_id], onDelete: SetNull)
+
+  // ============================================================
+  // User-attribute snapshot. Stamped at write time from the
+  // user's *then-current* row so historical reports on
+  // `entrylog` reflect the user as they were at the moment
+  // of the entry, not the (possibly changed) live `user`
+  // row. A student who was 2nd Year last year and is 3rd
+  // Year this year still reads "2nd Year" on a "last year"
+  // report. The 3 denormalised name columns survive
+  // later renames of the lookup tables. This is the
+  // same pattern the row already uses for `campus`,
+  // `entrance_id`, and `purpose` — those are immutable
+  // per-entry, which is exactly why reports from last
+  // year still read "College / Main Library / General"
+  // correctly.
+  // ============================================================
+  user_year_level        String?            @db.VarChar(10)
+  user_grade_level_id    Int?
+  user_program_id        Int?
+  user_department_id     Int?
+  user_office_id         Int?
+  user_user_type         UserType
+  user_education_level   EducationLevel?
+  user_full_name         String?            @db.VarChar(100)
+  user_department_name   String?            @db.VarChar(200)
+  user_program_name      String?            @db.VarChar(200)
+  user_grade_level_name  String?            @db.VarChar(50)
 
   @@index([user_id])
   @@index([entry_time])
   @@index([exit_time])
   @@index([rfid_code])
   @@index([campus])
+  @@index([entrance_id])
+  @@index([user_grade_level_id])
+  @@index([user_program_id])
+  @@index([user_department_id])
+  @@index([user_year_level])
   @@map("entrylog")
 }
 

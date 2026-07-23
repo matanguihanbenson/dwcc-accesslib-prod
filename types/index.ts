@@ -136,6 +136,14 @@ export interface LibraryUser {
   // long name.
   course?: string | null
   department?: string | null
+  // Basic-Education equivalents — populated by
+  // UserService.getLibraryUsers so the list page can
+  // show grade / section on a Basic-Ed user the same
+  // way it shows department / program on a College
+  // user.
+  grade_level_name?: string | null
+  grade_level_code?: string | null
+  section_name?: string | null
   office_id?: number | null
   year_level?: string | null
   email?: string | null
@@ -375,6 +383,15 @@ export interface EntryLog {
   purpose: string | null
   verified_by: number | null
   campus: Campus
+  // ID of the entrance the staff was operating from when
+  // this entry was logged. Null when the staff member
+  // didn't pick an entrance for that entry.
+  entrance_id?: number | null
+  entrance?: {
+    entrance_id: number
+    name: string
+    campus: Campus
+  } | null
   user?: LibraryUser
 }
 

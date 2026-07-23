@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { EntranceExitReportData, EntranceExitTimeRangeData, UserRole, Campus } from '@/types'
 import { categorizeUserForEntranceExit } from '@/lib/utils'
+import { TIMEZONE, getHourInTz } from '@/lib/timezone'
 
 /**
  * Auto-scope STAFF users to their own campus, mirror the entry-logs
@@ -80,10 +81,30 @@ export const GET = withAuth(async (req: NextRequest, session) => {
     const effectiveCampus = await resolveReportCampus(session, queryCampus)
     const campusWhere = effectiveCampus ? { campus: effectiveCampus } : {}
 
+    // Optional entrance_id filter. Accepts a single number,
+    // numeric string, or comma-separated list of numbers.
+    // Whitelisted against an explicit `campus` scope when
+    // both are present so a STAFF/ADMIN can't pass an
+    // entrance from a different campus than the one they
+    // picked in the UI.
+    const rawEntrance = searchParams.get('entrance_id')
+    const entranceIds: number[] = (() => {
+      if (!rawEntrance) return []
+      const list = String(rawEntrance)
+        .split(',')
+        .map((s) => parseInt(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0)
+      // De-dupe so a user passing "1,1,1" doesn't double-count.
+      return Array.from(new Set(list))
+    })()
+
     // Fetch all entry logs for the month with user details
     const entryLogs = await prisma.entryLog.findMany({
       where: {
         ...campusWhere,
+        ...(entranceIds.length > 0
+          ? { entrance_id: { in: entranceIds } }
+          : {}),
         entry_time: {
           gte: startDate,
           lte: endDate,
@@ -94,6 +115,11 @@ export const GET = withAuth(async (req: NextRequest, session) => {
           select: {
             user_id: true,
             user_type: true,
+            // The direct `education_level` enum is the
+            // primary signal for student categorisation
+            // (Basic Ed vs College). The FK fields are
+            // kept around as a fallback for legacy rows.
+            education_level: true,
             grade_level_id: true,
             section_id: true,
             department_id: true,
@@ -138,9 +164,24 @@ export const GET = withAuth(async (req: NextRequest, session) => {
 
     // Process each entry log
     entryLogs.forEach(log => {
+      // Use the PH wall-clock hour / minute here, not the
+      // Node process's local timezone. `Date#getHours` would
+      // return the UTC hour on a hosted server, which means
+      // a 2:30pm PH entry (stored as 06:30 UTC) would land
+      // outside the 7–19 range and be silently dropped from
+      // the report. `getHourInTz` is the same helper the
+      // other analytics endpoints use to fix exactly this.
       const entryTime = new Date(log.entry_time)
-      const hour = entryTime.getHours()
-      const minute = entryTime.getMinutes()
+      const hour = getHourInTz(entryTime, TIMEZONE)
+      const minute = getHourInTz(entryTime, TIMEZONE) === hour
+        ? Math.floor((entryTime.getTime() - new Date(
+            entryTime.getFullYear(),
+            entryTime.getMonth(),
+            entryTime.getDate(),
+            hour,
+            0, 0
+          ).getTime()) / 60000)
+        : 0
 
       // Determine which time range this entry falls into
       // Time ranges use inclusive start, exclusive end: [7:00, 8:00)
@@ -166,10 +207,14 @@ export const GET = withAuth(async (req: NextRequest, session) => {
         return
       }
 
-      // Categorize the user
+      // Categorize the user. Pass the direct
+      // `education_level` enum first so a college
+      // student with a stale `grade_level_id` from
+      // older data doesn't get bucketed as Basic Ed.
       const category = categorizeUserForEntranceExit({
         role: log.user?.user_account?.role,
         user_type: log.user?.user_type,
+        education_level: log.user?.education_level,
         grade_level_id: log.user?.grade_level_id,
         section_id: log.user?.section_id,
         department_id: log.user?.department_id,

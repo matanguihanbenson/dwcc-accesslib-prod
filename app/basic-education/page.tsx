@@ -10,6 +10,7 @@ import { notify } from '@/lib/notification'
 import StrandModal from '@/components/modals/StrandModal'
 import GradeLevelModal from '@/components/modals/GradeLevelModal'
 import SectionModal from '@/components/modals/SectionModal'
+import { EducationLevel } from '@/types'
 
 async function fetchJson<T>(url: string): Promise<T> {
   const cacheBuster = url.includes('?') ? `&ts=${Date.now()}` : `?ts=${Date.now()}`
@@ -33,15 +34,25 @@ async function fetchJson<T>(url: string): Promise<T> {
 export default function BasicEducationPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState('strands')
+  const [activeTab, setActiveTab] = useState('kindergarten')
+  const [seniorHighSubTab, setSeniorHighSubTab] = useState('grade-levels')
   const [strands, setStrands] = useState<any[] | null>(null)
-  const [gradeLevels, setGradeLevels] = useState<any[] | null>(null)
+  const [kindergartenGrades, setKindergartenGrades] = useState<any[] | null>(null)
+  const [elementaryGrades, setElementaryGrades] = useState<any[] | null>(null)
+  const [juniorHighGrades, setJuniorHighGrades] = useState<any[] | null>(null)
+  const [seniorHighGrades, setSeniorHighGrades] = useState<any[] | null>(null)
   const [sections, setSections] = useState<any[] | null>(null)
   const [strandsError, setStrandsError] = useState<string | null>(null)
-  const [gradeLevelsError, setGradeLevelsError] = useState<string | null>(null)
+  const [kindergartenError, setKindergartenError] = useState<string | null>(null)
+  const [elementaryError, setElementaryError] = useState<string | null>(null)
+  const [juniorHighError, setJuniorHighError] = useState<string | null>(null)
+  const [seniorHighError, setSeniorHighError] = useState<string | null>(null)
   const [sectionsError, setSectionsError] = useState<string | null>(null)
   const [strandsLoading, setStrandsLoading] = useState(false)
-  const [gradeLevelsLoading, setGradeLevelsLoading] = useState(false)
+  const [kindergartenLoading, setKindergartenLoading] = useState(false)
+  const [elementaryLoading, setElementaryLoading] = useState(false)
+  const [juniorHighLoading, setJuniorHighLoading] = useState(false)
+  const [seniorHighLoading, setSeniorHighLoading] = useState(false)
   const [sectionsLoading, setSectionsLoading] = useState(false)
   
   // Modal states
@@ -66,17 +77,59 @@ export default function BasicEducationPage() {
     }
   }
 
-  const loadGradeLevels = async () => {
+  const loadKindergartenGrades = async () => {
     try {
-      setGradeLevelsLoading(true)
-      setGradeLevelsError(null)
-      const data = await fetchJson<any[]>('/api/grade-levels')
-      setGradeLevels(data)
+      setKindergartenLoading(true)
+      setKindergartenError(null)
+      const data = await fetchJson<any[]>('/api/grade-levels?education_level=KINDERGARTEN')
+      setKindergartenGrades(data)
     } catch (error) {
-      setGradeLevels([])
-      setGradeLevelsError(error instanceof Error ? error.message : 'Failed to load grade levels')
+      setKindergartenGrades([])
+      setKindergartenError(error instanceof Error ? error.message : 'Failed to load kindergarten grades')
     } finally {
-      setGradeLevelsLoading(false)
+      setKindergartenLoading(false)
+    }
+  }
+
+  const loadElementaryGrades = async () => {
+    try {
+      setElementaryLoading(true)
+      setElementaryError(null)
+      const data = await fetchJson<any[]>('/api/grade-levels?education_level=ELEMENTARY')
+      setElementaryGrades(data)
+    } catch (error) {
+      setElementaryGrades([])
+      setElementaryError(error instanceof Error ? error.message : 'Failed to load elementary grades')
+    } finally {
+      setElementaryLoading(false)
+    }
+  }
+
+  const loadJuniorHighGrades = async () => {
+    try {
+      setJuniorHighLoading(true)
+      setJuniorHighError(null)
+      const data = await fetchJson<any[]>('/api/grade-levels?education_level=JUNIOR_HIGH')
+      setJuniorHighGrades(data)
+    } catch (error) {
+      setJuniorHighGrades([])
+      setJuniorHighError(error instanceof Error ? error.message : 'Failed to load junior high grades')
+    } finally {
+      setJuniorHighLoading(false)
+    }
+  }
+
+  const loadSeniorHighGrades = async () => {
+    try {
+      setSeniorHighLoading(true)
+      setSeniorHighError(null)
+      const data = await fetchJson<any[]>('/api/grade-levels?education_level=SENIOR_HIGH')
+      setSeniorHighGrades(data)
+    } catch (error) {
+      setSeniorHighGrades([])
+      setSeniorHighError(error instanceof Error ? error.message : 'Failed to load senior high grades')
+    } finally {
+      setSeniorHighLoading(false)
     }
   }
 
@@ -127,7 +180,10 @@ export default function BasicEducationPage() {
 
   useEffect(() => {
     loadStrands()
-    loadGradeLevels()
+    loadKindergartenGrades()
+    loadElementaryGrades()
+    loadJuniorHighGrades()
+    loadSeniorHighGrades()
     loadSections()
   }, [])
 
@@ -170,8 +226,9 @@ export default function BasicEducationPage() {
     }
   }
 
-  const handleAddGradeLevel = () => {
-    setEditingGradeLevel(null)
+  // Grade level handler functions (used across all education levels)
+  const handleAddGradeLevel = (defaultEducationLevel?: string) => {
+    setEditingGradeLevel(defaultEducationLevel ? { education_level: defaultEducationLevel } : null)
     setGradeLevelModalOpen(true)
   }
 
@@ -202,7 +259,12 @@ export default function BasicEducationPage() {
       }
 
       await notify.success('Success', `Grade level ${action}d successfully`)
-      await loadGradeLevels()
+      await Promise.all([
+        loadKindergartenGrades(),
+        loadElementaryGrades(),
+        loadJuniorHighGrades(),
+        loadSeniorHighGrades()
+      ])
     } catch (error) {
       await notify.error('Error', error instanceof Error ? error.message : `Failed to ${action} grade level`)
     }
@@ -260,6 +322,17 @@ export default function BasicEducationPage() {
                 <span className="text-gray-900 font-medium">Basic Education</span>
               </nav>
             </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                className='bg-gray-100 h-[50px] px-4 hover:bg-gray-200'
+                onClick={() => router.push('/library-users/categories')}
+                title="Browse users by section, program, department, grade level, or strand"
+              >
+                <i className="fas fa-th-large mr-2" />
+                View Categories
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -268,14 +341,22 @@ export default function BasicEducationPage() {
       {/* Content */}
       <div className="py-4">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-3 mb-6">
-            <TabsTrigger value="strands">
-              <i className="fas fa-bookmark mr-2"></i>
-              Senior High Strands
+          <TabsList className="grid w-full grid-cols-5 mb-6">
+            <TabsTrigger value="kindergarten">
+              <i className="fas fa-baby mr-2"></i>
+              Kindergarten
             </TabsTrigger>
-            <TabsTrigger value="grades">
-              <i className="fas fa-layer-group mr-2"></i>
-              Grade Levels
+            <TabsTrigger value="elementary">
+              <i className="fas fa-school mr-2"></i>
+              Elementary
+            </TabsTrigger>
+            <TabsTrigger value="junior-high">
+              <i className="fas fa-chalkboard-teacher mr-2"></i>
+              Junior High
+            </TabsTrigger>
+            <TabsTrigger value="senior-high">
+              <i className="fas fa-bookmark mr-2"></i>
+              Senior High
             </TabsTrigger>
             <TabsTrigger value="sections">
               <i className="fas fa-users mr-2"></i>
@@ -283,109 +364,243 @@ export default function BasicEducationPage() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Strands Tab */}
-          <TabsContent value="strands">
+          {/* Senior High Tab */}
+          <TabsContent value="senior-high">
+            <Tabs value={seniorHighSubTab} onValueChange={setSeniorHighSubTab}>
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="grade-levels">
+                  <i className="fas fa-layer-group mr-2"></i>
+                  Grade Levels
+                </TabsTrigger>
+                <TabsTrigger value="strands">
+                  <i className="fas fa-bookmark mr-2"></i>
+                  Strands
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Senior High Grade Levels Sub-Tab */}
+              <TabsContent value="grade-levels">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Senior High Grade Levels</CardTitle>
+                      <Button onClick={() => handleAddGradeLevel('SENIOR_HIGH')} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
+                        <i className="fas fa-plus mr-2"></i>
+                        Add Grade Level
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {seniorHighError ? (
+                      <div className="text-red-600">{seniorHighError}</div>
+                    ) : seniorHighLoading || !seniorHighGrades ? (
+                      <div className="text-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                        <div className="text-sm text-gray-600">Loading grade levels...</div>
+                      </div>
+                    ) : seniorHighGrades.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <i className="fas fa-layer-group text-4xl mb-3 text-gray-300"></i>
+                        <p>No senior high grade levels created yet</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Level</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sections</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Students</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {seniorHighGrades.map((grade: any) => (
+                              <tr key={grade.grade_level_id}>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{grade.name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.code}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.level_number}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                                    {grade.section_count || 0}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    {grade.student_count || 0}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${grade.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                                    {grade.is_active ? 'Active' : 'Inactive'}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button onClick={() => handleEditGradeLevel({ id: grade.grade_level_id, name: grade.name, code: grade.code, level_number: grade.level_number, education_level: grade.education_level, is_active: grade.is_active })} className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors" title="Edit Grade Level">
+                                      <i className="fas fa-edit mr-1.5"></i>Edit
+                                    </button>
+                                    <button onClick={() => handleToggleGradeLevelActive(grade.grade_level_id, grade.is_active)} className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${grade.is_active ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`} title={grade.is_active ? 'Deactivate' : 'Activate'}>
+                                      <i className={`fas fa-${grade.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>{grade.is_active ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Senior High Strands Sub-Tab */}
+              <TabsContent value="strands">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Senior High School Strands</CardTitle>
+                      <Button onClick={handleAddStrand} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
+                        <i className="fas fa-plus mr-2"></i>
+                        Add Strand
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {strandsError ? (
+                      <div className="text-red-600">{strandsError}</div>
+                    ) : strandsLoading || !strands ? (
+                      <div className="text-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                        <div className="text-sm text-gray-600">Loading strands...</div>
+                      </div>
+                    ) : strands.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <i className="fas fa-bookmark text-4xl mb-3 text-gray-300"></i>
+                        <p>No strands created yet</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Abbreviation</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Students</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {strands.map((strand: any) => (
+                              <tr key={strand.strand_id}>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{strand.name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{strand.code}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{strand.abbreviation}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    {strand.student_count || 0}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${strand.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                                    {strand.is_active ? 'Active' : 'Inactive'}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button onClick={() => handleEditStrand({ id: strand.strand_id, name: strand.name, code: strand.code, abbreviation: strand.abbreviation, is_active: strand.is_active })} className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors" title="Edit Strand">
+                                      <i className="fas fa-edit mr-1.5"></i>Edit
+                                    </button>
+                                    <button onClick={() => handleToggleStrandActive(strand.strand_id, strand.is_active)} className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${strand.is_active ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`} title={strand.is_active ? 'Deactivate' : 'Activate'}>
+                                      <i className={`fas fa-${strand.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>{strand.is_active ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
+
+          {/* Kindergarten Tab */}
+          <TabsContent value="kindergarten">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Senior High School Strands</CardTitle>
-                  <Button onClick={handleAddStrand} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
+                  <CardTitle>Kindergarten Grade Levels</CardTitle>
+                  <Button onClick={() => handleAddGradeLevel('KINDERGARTEN')} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
                     <i className="fas fa-plus mr-2"></i>
-                    Add Strand
+                    Add Grade Level
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                {strandsError ? (
-                  <div className="text-red-600">{strandsError}</div>
-                ) : strandsLoading || !strands ? (
+                {kindergartenError ? (
+                  <div className="text-red-600">{kindergartenError}</div>
+                ) : kindergartenLoading || !kindergartenGrades ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                    <div className="text-sm text-gray-600">Loading strands...</div>
+                    <div className="text-sm text-gray-600">Loading grade levels...</div>
                   </div>
-                ) : strands.length === 0 ? (
+                ) : kindergartenGrades.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    <i className="fas fa-bookmark text-4xl mb-3 text-gray-300"></i>
-                    <p>No strands created yet</p>
+                    <i className="fas fa-baby text-4xl mb-3 text-gray-300"></i>
+                    <p>No kindergarten grade levels created yet</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Name
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Code
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Abbreviation
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Students
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
-                          </th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Actions
-                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Level</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sections</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Students</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {strands.map((strand: any) => (
-                          <tr key={strand.strand_id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {strand.name}
-                            </td>
+                        {kindergartenGrades.map((grade: any) => (
+                          <tr key={grade.grade_level_id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{grade.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.code}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.level_number}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {strand.code}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {strand.abbreviation}
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                                {grade.section_count || 0}
+                              </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                {strand.student_count || 0}
+                                {grade.student_count || 0}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                strand.is_active
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}>
-                                {strand.is_active ? 'Active' : 'Inactive'}
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${grade.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                                {grade.is_active ? 'Active' : 'Inactive'}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <div className="flex items-center justify-end gap-2">
-                                <button 
-                                  onClick={() => handleEditStrand({
-                                    id: strand.strand_id,
-                                    name: strand.name,
-                                    code: strand.code,
-                                    abbreviation: strand.abbreviation,
-                                    is_active: strand.is_active
-                                  })}
-                                  className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors"
-                                  title="Edit Strand"
-                                >
-                                  <i className="fas fa-edit mr-1.5"></i>
-                                  Edit
+                                <button onClick={() => handleEditGradeLevel({ id: grade.grade_level_id, name: grade.name, code: grade.code, level_number: grade.level_number, education_level: grade.education_level, is_active: grade.is_active })} className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors" title="Edit Grade Level">
+                                  <i className="fas fa-edit mr-1.5"></i>Edit
                                 </button>
-                                <button 
-                                  onClick={() => handleToggleStrandActive(strand.strand_id, strand.is_active)}
-                                  className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${
-                                    strand.is_active
-                                      ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                                      : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                  }`}
-                                  title={strand.is_active ? 'Deactivate' : 'Activate'}
-                                >
-                                  <i className={`fas fa-${strand.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>
-                                  {strand.is_active ? 'Deactivate' : 'Activate'}
+                                <button onClick={() => handleToggleGradeLevelActive(grade.grade_level_id, grade.is_active)} className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${grade.is_active ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`} title={grade.is_active ? 'Deactivate' : 'Activate'}>
+                                  <i className={`fas fa-${grade.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>{grade.is_active ? 'Deactivate' : 'Activate'}
                                 </button>
                               </div>
                             </td>
@@ -399,79 +614,51 @@ export default function BasicEducationPage() {
             </Card>
           </TabsContent>
 
-          {/* Grade Levels Tab */}
-          <TabsContent value="grades">
+          {/* Elementary Tab */}
+          <TabsContent value="elementary">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Grade Levels</CardTitle>
-                  <Button onClick={handleAddGradeLevel} className='bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2'>
+                  <CardTitle>Elementary Grade Levels</CardTitle>
+                  <Button onClick={() => handleAddGradeLevel('ELEMENTARY')} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
                     <i className="fas fa-plus mr-2"></i>
                     Add Grade Level
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                {gradeLevelsError ? (
-                  <div className="text-red-600">{gradeLevelsError}</div>
-                ) : gradeLevelsLoading || !gradeLevels ? (
+                {elementaryError ? (
+                  <div className="text-red-600">{elementaryError}</div>
+                ) : elementaryLoading || !elementaryGrades ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
                     <div className="text-sm text-gray-600">Loading grade levels...</div>
                   </div>
-                ) : gradeLevels.length === 0 ? (
+                ) : elementaryGrades.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    <i className="fas fa-layer-group text-4xl mb-3 text-gray-300"></i>
-                    <p>No grade levels created yet</p>
+                    <i className="fas fa-school text-4xl mb-3 text-gray-300"></i>
+                    <p>No elementary grade levels created yet</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Name
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Code
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Level
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Education Level
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Sections
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Students
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
-                          </th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Actions
-                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Level</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sections</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Students</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {gradeLevels.map((grade: any) => (
+                        {elementaryGrades.map((grade: any) => (
                           <tr key={grade.grade_level_id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {grade.name}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {grade.code}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {grade.level_number}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-                                {grade.education_level.replace('_', ' ')}
-                              </span>
-                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{grade.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.code}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.level_number}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                                 {grade.section_count || 0}
@@ -483,42 +670,97 @@ export default function BasicEducationPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                grade.is_active
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}>
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${grade.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                                 {grade.is_active ? 'Active' : 'Inactive'}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <div className="flex items-center justify-end gap-2">
-                                <button 
-                                  onClick={() => handleEditGradeLevel({
-                                    id: grade.grade_level_id,
-                                    name: grade.name,
-                                    code: grade.code,
-                                    level_number: grade.level_number,
-                                    education_level: grade.education_level,
-                                    is_active: grade.is_active
-                                  })}
-                                  className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors"
-                                  title="Edit Grade Level"
-                                >
-                                  <i className="fas fa-edit mr-1.5"></i>
-                                  Edit
+                                <button onClick={() => handleEditGradeLevel({ id: grade.grade_level_id, name: grade.name, code: grade.code, level_number: grade.level_number, education_level: grade.education_level, is_active: grade.is_active })} className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors" title="Edit Grade Level">
+                                  <i className="fas fa-edit mr-1.5"></i>Edit
                                 </button>
-                                <button 
-                                  onClick={() => handleToggleGradeLevelActive(grade.grade_level_id, grade.is_active)}
-                                  className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${
-                                    grade.is_active
-                                      ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                                      : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                  }`}
-                                  title={grade.is_active ? 'Deactivate' : 'Activate'}
-                                >
-                                  <i className={`fas fa-${grade.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>
-                                  {grade.is_active ? 'Deactivate' : 'Activate'}
+                                <button onClick={() => handleToggleGradeLevelActive(grade.grade_level_id, grade.is_active)} className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${grade.is_active ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`} title={grade.is_active ? 'Deactivate' : 'Activate'}>
+                                  <i className={`fas fa-${grade.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>{grade.is_active ? 'Deactivate' : 'Activate'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Junior High Tab */}
+          <TabsContent value="junior-high">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Junior High Grade Levels</CardTitle>
+                  <Button onClick={() => handleAddGradeLevel('JUNIOR_HIGH')} className="bg-primary-600 px-4 py-5 text-white hover:bg-primary-700 mb-2">
+                    <i className="fas fa-plus mr-2"></i>
+                    Add Grade Level
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {juniorHighError ? (
+                  <div className="text-red-600">{juniorHighError}</div>
+                ) : juniorHighLoading || !juniorHighGrades ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                    <div className="text-sm text-gray-600">Loading grade levels...</div>
+                  </div>
+                ) : juniorHighGrades.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <i className="fas fa-chalkboard-teacher text-4xl mb-3 text-gray-300"></i>
+                    <p>No junior high grade levels created yet</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Level</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sections</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Students</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {juniorHighGrades.map((grade: any) => (
+                          <tr key={grade.grade_level_id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{grade.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.code}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{grade.level_number}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                                {grade.section_count || 0}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                {grade.student_count || 0}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${grade.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                                {grade.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                              <div className="flex items-center justify-end gap-2">
+                                <button onClick={() => handleEditGradeLevel({ id: grade.grade_level_id, name: grade.name, code: grade.code, level_number: grade.level_number, education_level: grade.education_level, is_active: grade.is_active })} className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors" title="Edit Grade Level">
+                                  <i className="fas fa-edit mr-1.5"></i>Edit
+                                </button>
+                                <button onClick={() => handleToggleGradeLevelActive(grade.grade_level_id, grade.is_active)} className={`inline-flex items-center px-3 py-1.5 rounded-md transition-colors ${grade.is_active ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`} title={grade.is_active ? 'Deactivate' : 'Activate'}>
+                                  <i className={`fas fa-${grade.is_active ? 'ban' : 'check-circle'} mr-1.5`}></i>{grade.is_active ? 'Deactivate' : 'Activate'}
                                 </button>
                               </div>
                             </td>
@@ -676,7 +918,13 @@ export default function BasicEducationPage() {
           setGradeLevelModalOpen(false)
           setEditingGradeLevel(null)
         }}
-        onSuccess={loadGradeLevels}
+        onSuccess={() => {
+          loadKindergartenGrades()
+          loadElementaryGrades()
+          loadJuniorHighGrades()
+          loadSeniorHighGrades()
+        }}
+        defaultEducationLevel={editingGradeLevel?.education_level as EducationLevel}
         editData={editingGradeLevel}
       />
 

@@ -3,6 +3,95 @@ import { UserRole } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
 
+// GET - Paginated borrowing history for a specific copy.
+// Used by the "View Borrowing History" action on the manage-copies
+// page so staff can see every transaction tied to one physical
+// copy. Defaults to 10 per page, ordered most-recent-first by
+// borrow date (then by transaction id as a tiebreaker for copies
+// that were borrowed and returned the same day).
+export const GET = withAuth(
+  async (req: NextRequest, session, context) => {
+    try {
+      const { book_id, copyId } = await context.params
+      const bookId = parseInt(book_id)
+      const copyIdNum = parseInt(copyId)
+
+      if (isNaN(bookId) || isNaN(copyIdNum)) {
+        return createErrorResponse('Invalid book ID or copy ID', 400)
+      }
+
+      const { searchParams } = new URL(req.url)
+      // Cap page size: the modal renders 10 rows by default, so
+      // anything past 50 would just produce scrollbars.
+      const limit = Math.min(
+        parseInt(searchParams.get('limit') || '10'),
+        50
+      )
+      const page = Math.max(parseInt(searchParams.get('page') || '1'), 1)
+      const offset = (page - 1) * limit
+
+      // Confirm the copy actually belongs to this book so we
+      // never leak transactions from a different book via a
+      // mismatched URL.
+      const copy = await prisma.bookCopy.findUnique({
+        where: { copy_id: copyIdNum },
+        select: { copy_id: true, book_id: true }
+      })
+
+      if (!copy || copy.book_id !== bookId) {
+        return createErrorResponse('Copy not found', 404)
+      }
+
+      const where = { copy_id: copyIdNum }
+
+      const [transactions, total] = await Promise.all([
+        prisma.bookTransaction.findMany({
+          where,
+          orderBy: [
+            { borrow_date: 'desc' },
+            { transaction_id: 'desc' }
+          ],
+          skip: offset,
+          take: limit,
+          select: {
+            transaction_id: true,
+            borrow_date: true,
+            return_date: true,
+            due_date: true,
+            status: true,
+            penalty: true,
+            user: {
+              select: {
+                user_id: true,
+                full_name: true,
+                account_id: true,
+                user_type: true
+              }
+            }
+          }
+        }),
+        prisma.bookTransaction.count({ where })
+      ])
+
+      const totalPages = Math.max(1, Math.ceil(total / limit))
+
+      return createSuccessResponse({
+        transactions,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages
+        }
+      })
+    } catch (error) {
+      console.error('Error fetching copy borrow history:', error)
+      return createErrorResponse('Failed to fetch borrowing history', 500)
+    }
+  },
+  [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF]
+)
+
 // PATCH - Update copy status, condition, location, etc.
 export const PATCH = withAuth(
   async (req: NextRequest, session, context) => {

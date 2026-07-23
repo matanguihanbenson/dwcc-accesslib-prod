@@ -80,6 +80,23 @@ export default function ReportsPage() {
   const [myCampus, setMyCampus] = useState<Campus | null>(null)
   const [myCampusLoaded, setMyCampusLoaded] = useState(false)
 
+  // Entrance filter. When a specific campus is selected
+  // we narrow the dropdown to entrances on that campus.
+  // When "All Campuses" is selected we show every active
+  // entrance from both campuses so an ADMIN can build a
+  // system-wide entrance/exit report without picking them
+  // one by one. STAFF users are auto-pinned to their
+  // own campus upstream so the campus filter is locked
+  // for them; we just hide the entrance select entirely
+  // when there's only one entrance to pick from (e.g. a
+  // STAFF campus with a single entrance).
+  const [entranceId, setEntranceId] = useState<string>('')
+  const [availableEntrances, setAvailableEntrances] = useState<Array<{
+    entrance_id: number
+    name: string
+    campus: Campus
+  }>>([])
+
   // Effective campus to send to the API / use in titles. For STAFF,
   // always pin to their own campus. For ADMIN, honor their selection.
   const effectiveCampus: Campus | null = useMemo(() => {
@@ -156,6 +173,7 @@ export default function ReportsPage() {
       try {
         const res = await fetch('/api/staff/me/campus', {
           credentials: 'include',
+          cache: 'no-store',
           headers: { 'Cache-Control': 'no-store' }
         })
         if (!res.ok) {
@@ -174,6 +192,77 @@ export default function ReportsPage() {
     })()
     return () => { cancelled = true }
   }, [session, status])
+
+  // Fetch the list of active entrances for the entrance
+  // filter. We re-fetch whenever the user toggles between
+  // "All Campuses" and a specific campus so the dropdown
+  // always shows the right slice. The same endpoint works
+  // for everyone (SUPER_ADMIN/ADMIN/STAFF); the
+  // server-side scope is enforced by the route handler.
+  useEffect(() => {
+    let cancelled = false
+    const url = '/api/entrances?include_archived=false'
+    ;(async () => {
+      try {
+        const res = await fetch(url, {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-store' }
+        })
+        if (cancelled) return
+        if (!res.ok) {
+          setAvailableEntrances([])
+          return
+        }
+        const body = await res.json()
+        const list: any[] = Array.isArray(body)
+          ? body
+          : (body?.data || [])
+        // The list endpoint doesn't filter by campus,
+        // so we filter client-side based on whatever
+        // campus scope the picker currently reflects. The
+        // 'campus' key on each entrance is the
+        // campus enum ('COLLEGE' | 'BASIC_EDUCATION').
+        const filtered = list
+          .filter((e) => e && e.entrance_id && e.name)
+          .map((e) => ({
+            entrance_id: e.entrance_id,
+            name: e.name,
+            campus: e.campus as Campus
+          }))
+          // Hide the picker entirely for STAFF (their
+          // campus is already auto-pinned server-side
+          // and they typically only have one entrance).
+          .filter((e) => {
+            const scope = effectiveCampus
+            if (!scope) return true // All Campuses -> show every entrance
+            return e.campus === scope
+          })
+        if (cancelled) return
+        setAvailableEntrances(filtered)
+        // If the currently-picked entrance is no longer
+        // in the visible list (e.g. the user switched
+        // campus), drop the selection so we don't send
+        // a query the API will silently ignore.
+        if (entranceId) {
+          const stillVisible = filtered.some(
+            (e) => String(e.entrance_id) === entranceId
+          )
+          if (!stillVisible) setEntranceId('')
+        }
+      } catch {
+        if (!cancelled) setAvailableEntrances([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // Re-fetch whenever the effective campus changes so
+    // the list always reflects the right slice, and when
+    // the user changes their entrance selection (so we
+    // can re-validate the still-visible check).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveCampus])
 
   // Debounced user search for individual statistics
   useEffect(() => {
@@ -257,14 +346,19 @@ export default function ReportsPage() {
   }, [datePreset, reportType, entrySpecificDate])
 
   // Build the common query params every report endpoint expects
-  // (date range + optional campus). The API auto-scopes STAFF to
-  // their own campus regardless of what we send, so this is mostly
-  // the ADMIN "All / College / Basic Ed" selector.
+  // (date range + optional campus + optional entrance_id).
+  // The API auto-scopes STAFF to their own campus regardless
+  // of what we send, so the campus selector is mostly the
+  // ADMIN "All / College / Basic Ed" picker. The entrance
+  // filter narrows the dataset further when the user has
+  // picked a specific entrance; reports that don't support
+  // it (e.g. user statistics) simply ignore the param.
   const buildReportQuery = (includeCampus = true): URLSearchParams => {
     const params = new URLSearchParams()
     if (dateFrom) params.append('date_from', dateFrom)
     if (dateTo) params.append('date_to', dateTo)
     if (includeCampus && effectiveCampus) params.append('campus', effectiveCampus)
+    if (entranceId) params.append('entrance_id', entranceId)
     return params
   }
 
@@ -1602,10 +1696,20 @@ export default function ReportsPage() {
                     </span>
                   </div>
                 
-                ) : (
+                 ) : (
                   <select
                     value={campus}
-                    onChange={(e) => setCampus(e.target.value as Campus | '')}
+                    onChange={(e) => {
+                      setCampus(e.target.value as Campus | '')
+                      // The entrance list is campus-scoped, so
+                      // a campus switch could leave the
+                      // current entrance outside the visible
+                      // list. Drop the entrance selection on
+                      // any campus change; the effect above
+                      // will re-validate it against the new
+                      // list anyway.
+                      setEntranceId('')
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={!myCampusLoaded}
                   >
@@ -1614,7 +1718,44 @@ export default function ReportsPage() {
                     <option value="BASIC_EDUCATION">Basic Education Library</option>
                   </select>
                 )}
-               
+
+              </div>
+
+              {/* Entrance filter. Sits right under the campus
+                  picker so the user reads them as a pair:
+                  "this campus → these entrances → pick one (or
+                  all)". The list comes from the effect above
+                  and is already filtered by the effective
+                  campus scope, so "All Campuses" surfaces
+                  every entrance from both campuses while a
+                  specific campus surfaces only its entrances. */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Entrance
+                </label>
+                {availableEntrances.length === 0 ? (
+                  <div className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-md text-sm text-gray-500 italic">
+                    No entrances configured for this campus.
+                  </div>
+                ) : (
+                  <select
+                    value={entranceId}
+                    onChange={(e) => setEntranceId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      {effectiveCampus
+                        ? 'All entrances (this campus)'
+                        : 'All entrances (both campuses)'}
+                    </option>
+                    {availableEntrances.map((e) => (
+                      <option key={e.entrance_id} value={String(e.entrance_id)}>
+                        {e.name}
+                        {e.campus ? ` (${e.campus === 'COLLEGE' ? 'College' : 'Basic Ed'})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Date Range Filters - For Individual Statistics */}
@@ -1683,7 +1824,7 @@ export default function ReportsPage() {
                     fetchReportData()
                   }}
                   disabled={loading}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-5"
                 >
                   {loading ? (
                     <>
@@ -3942,11 +4083,11 @@ export default function ReportsPage() {
                 <Button
                   variant="outline"
                   onClick={() => setShowFinesTypeModal(false)}
-                >
+                 className='px-2 py-4'>
                   Cancel
                 </Button>
                 <Button
-                  className="bg-purple-600 hover:bg-purple-700"
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-2 py-4"
                   onClick={() => {
                     setShowFinesTypeModal(false)
                     fetchReportData()

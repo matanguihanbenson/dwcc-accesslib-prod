@@ -200,14 +200,16 @@ function SetupPageContent() {
   return (
     <SetupShell>
       <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 max-w-2xl w-full">
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
+        <div className="text-center mb-6 flex">
+          <div className="bg-blue-50 rounded-full flex items-center w-16 h-16 mr-4 justify-center mb-3">
             <i className="fas fa-shield-halved text-blue-600 text-2xl"></i>
           </div>
-          <h2 className="text-2xl font-semibold text-gray-900">Initial setup</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Create the first SUPER_ADMIN account to unlock the system.
-          </p>
+          <div className='text-left'>
+            <h2 className="text-2xl font-semibold text-gray-900">Initial setup</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Create the first SUPER_ADMIN account to unlock the system.
+            </p>
+          </div>
         </div>
 
         {error && (
@@ -221,13 +223,13 @@ function SetupPageContent() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field
               label="Account ID"
-              hint="Human-readable identifier (e.g. SUPER-ADMIN)"
+              hint="ID Number"
               required
             >
               <input
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
-                placeholder="SUPER-ADMIN"
+                placeholder="Enter ID Number"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
                 disabled={submitting}

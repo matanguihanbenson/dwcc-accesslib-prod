@@ -10,6 +10,7 @@ interface GradeLevelModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccess: () => void
+  defaultEducationLevel?: EducationLevel
   editData?: {
     id: number
     name: string
@@ -33,16 +34,17 @@ export default function GradeLevelModal({
   isOpen,
   onClose,
   onSuccess,
+  defaultEducationLevel = 'ELEMENTARY',
   editData
 }: GradeLevelModalProps) {
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [levelNumber, setLevelNumber] = useState('')
-  const [educationLevel, setEducationLevel] = useState<EducationLevel>('ELEMENTARY')
+  const [educationLevel, setEducationLevel] = useState<EducationLevel>(defaultEducationLevel)
   const [isActive, setIsActive] = useState(true)
   const [processing, setProcessing] = useState(false)
 
-  const isEditMode = !!editData
+  const isEditMode = !!editData?.id
 
   useEffect(() => {
     if (editData) {
@@ -60,7 +62,7 @@ export default function GradeLevelModal({
     setName('')
     setCode('')
     setLevelNumber('')
-    setEducationLevel('ELEMENTARY')
+    setEducationLevel(defaultEducationLevel)
     setIsActive(true)
   }
 

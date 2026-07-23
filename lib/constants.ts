@@ -114,7 +114,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
         roles: [USER_ROLES.USER]
       },
       {
-        name: 'Book Transaction History',
+        name: 'Book Transactions',
         href: '/books/transactions',
         icon: 'fa-history',
         roles: [USER_ROLES.ADMIN, USER_ROLES.STAFF]
@@ -184,15 +184,20 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     ]
   },
   {
-    name: 'Programs',
-    href: '/programs',
+    name: 'College',
+    href: '/college',
     icon: 'fa-graduation-cap',
     roles: [USER_ROLES.SUPER_ADMIN]
   },
   {
-    name: 'Departments',
-    href: '/departments',
-    icon: 'fa-building',
+    // Per-campus entrances used by the entry-management
+    // page (e.g. "Main Library Entrance", "Law School
+    // Library Entrance" on the College campus). Super
+    // admin only -- STAFF just pick an entrance from a
+    // dropdown on the entry page.
+    name: 'Entrances',
+    href: '/entrances',
+    icon: 'fa-door-closed',
     roles: [USER_ROLES.SUPER_ADMIN]
   },
   {
