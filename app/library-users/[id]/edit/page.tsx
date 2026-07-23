@@ -118,6 +118,7 @@ export default function EditLibraryUserPage() {
     'idle' | 'checking' | 'available' | 'taken'
   >('idle')
   const accountIdCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const populatingRef = useRef(false)
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -190,7 +191,7 @@ export default function EditLibraryUserPage() {
         const data = await response.json()
         const userData = data.data
         setUser(userData)
-        populateFromUser(userData)
+        await populateFromUser(userData)
       } else if (response.status === 404) {
         router.push('/library-users')
         return
@@ -206,7 +207,9 @@ export default function EditLibraryUserPage() {
     }
   }
 
-  const populateFromUser = (userData: any) => {
+  const populateFromUser = async (userData: any) => {
+    populatingRef.current = true
+    try {
     // Compute the student_category from the user row so
     // the add/edit form's "Basic Ed / College" radio
     // reflects the persisted state. College / Graduate
@@ -224,6 +227,40 @@ export default function EditLibraryUserPage() {
     // section collapses in the UI.
     const isBasicEd = isStudent && !isCollege
 
+    // Pre-fetch the lookup-table lists BEFORE setting formData
+    // so the cascading selects have data available when effects fire.
+    if (userData.department_id) {
+      await fetchPrograms(userData.department_id.toString())
+    }
+
+    // Load college grade levels for year level dropdown
+    if (isCollege) {
+      await fetchCollegeGradeLevels()
+    }
+    
+    let fetchedGrades: GradeLevel[] = gradeLevels
+    if (isBasicEd && userData.education_level) {
+      fetchedGrades = await fetchGradeLevels(userData.education_level) || []
+    }
+
+    // Load strands and sections based on education level
+    if (userData.grade_level_id) {
+      const glId = userData.grade_level_id.toString()
+      const edLevel = userData.education_level
+      
+      if (edLevel === 'SENIOR_HIGH') {
+        await fetchStrands()
+        if (userData.strand_id) {
+          await fetchSections(glId, userData.strand_id.toString())
+        } else {
+          await fetchSections(glId)
+        }
+      } else if (edLevel === 'JUNIOR_HIGH' || edLevel === 'ELEMENTARY' || edLevel === 'KINDERGARTEN') {
+        await fetchSections(glId)
+      }
+    }
+
+    // NOW set formData - effects will fire with data already loaded
     setFormData({
       first_name: userData.first_name || '',
       last_name: userData.last_name || '',
@@ -260,36 +297,8 @@ export default function EditLibraryUserPage() {
       purpose: userData.purpose || '',
       status: userData.status
     })
-
-    // Pre-fetch the lookup-table lists for the persisted
-    // values so the cascading selects (programs by
-    // department, sections by grade_level / strand,
-    // grade_levels by education_level) all populate.
-    if (userData.department_id) {
-      fetchPrograms(userData.department_id.toString())
-    }
-    if (userData.grade_level_id) {
-      const glId = userData.grade_level_id.toString()
-      if (userData.education_level) {
-        fetchGradeLevels(userData.education_level)
-      }
-      // If the persisted education_level is a Senior
-      // High strand-bearing level, also fetch strands.
-      if (userData.education_level === 'SENIOR_HIGH' && userData.strand_id) {
-        fetchStrands()
-        // Defer section fetch until strands are loaded
-        // (the form re-renders after the strands effect
-        // and the strand id then drives section fetch).
-      }
-      // If a strand is already set, fetch sections
-      // directly.
-      if (userData.strand_id) {
-        fetchSections(glId, userData.strand_id.toString())
-      } else {
-        // Try to fetch sections anyway — they'll be empty
-        // for non-SENIOR_HIGH levels but it doesn't hurt.
-        fetchSections(glId)
-      }
+    } finally {
+      populatingRef.current = false
     }
   }
 
@@ -375,6 +384,7 @@ export default function EditLibraryUserPage() {
           ? data
           : (data?.data || [])
         setGradeLevels(list)
+        return list
       } else {
         setGradeLevels([])
       }
@@ -382,6 +392,7 @@ export default function EditLibraryUserPage() {
       console.error('Error fetching grade levels:', error)
       setGradeLevels([])
     }
+    return []
   }
 
   const fetchSections = async (gradeLevelId: string, strandId?: string) => {
@@ -433,6 +444,7 @@ export default function EditLibraryUserPage() {
   // Auto-fetch grade levels when the Basic Ed education
   // level changes.
   useEffect(() => {
+    if (populatingRef.current) return
     if (formData.basic_ed_level) {
       fetchGradeLevels(formData.basic_ed_level)
     } else {
@@ -455,6 +467,7 @@ export default function EditLibraryUserPage() {
   // We re-derive the selected grade's `education_level`
   // from the just-loaded `gradeLevels` array.
   useEffect(() => {
+    if (populatingRef.current) return
     const selectedGrade = gradeLevels.find(
       (g) => g.grade_level_id.toString() === formData.grade_level_id.toString()
     )
@@ -471,6 +484,7 @@ export default function EditLibraryUserPage() {
   // (and the grade is Senior-High), fetch the sections
   // for that grade + strand.
   useEffect(() => {
+    if (populatingRef.current) return
     if (formData.grade_level_id) {
       const selectedGrade = gradeLevels.find(
         (g) => g.grade_level_id.toString() === formData.grade_level_id.toString()

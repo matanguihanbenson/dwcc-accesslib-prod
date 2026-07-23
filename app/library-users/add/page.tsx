@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -54,6 +54,7 @@ export default function AddLibraryUserPage() {
   const [showRetrieveModal, setShowRetrieveModal] = useState(false)
   const [rfidInput, setRfidInput] = useState('')
   const [rfidBusy, setRfidBusy] = useState(false)
+  const populatingRef = useRef(false)
 
   const isFormValid = useMemo(() => {
     const hasBasicFields =
@@ -416,6 +417,7 @@ export default function AddLibraryUserPage() {
   }, [formData.department_id])
 
   useEffect(() => {
+    if (populatingRef.current) return
     if (formData.basic_ed_level) {
       fetchGradeLevels(formData.basic_ed_level)
     } else {
@@ -424,6 +426,7 @@ export default function AddLibraryUserPage() {
   }, [formData.basic_ed_level])
 
   useEffect(() => {
+    if (populatingRef.current) return
     const selectedGrade = gradeLevels.find(g => g.grade_level_id.toString() === formData.grade_level_id.toString())
     if (selectedGrade && selectedGrade.education_level === 'SENIOR_HIGH') {
       fetchStrands()
@@ -434,6 +437,7 @@ export default function AddLibraryUserPage() {
   }, [formData.grade_level_id, gradeLevels])
 
   useEffect(() => {
+    if (populatingRef.current) return
     if (formData.grade_level_id) {
       const selectedGrade = gradeLevels.find(g => g.grade_level_id.toString() === formData.grade_level_id.toString())
       if (selectedGrade && selectedGrade.education_level === 'SENIOR_HIGH') {
@@ -451,6 +455,8 @@ export default function AddLibraryUserPage() {
   }, [formData.grade_level_id, formData.strand_id, gradeLevels])
 
   const populateFromUser = async (user: any) => {
+    populatingRef.current = true
+    try {
     const isStudent = user.user_type === 'STUDENT'
     const isBasicEd = isStudent && user.education_level && user.education_level !== 'COLLEGE' && user.education_level !== 'GRADUATE_SCHOOL'
     const isCollege = isStudent && (user.education_level === 'COLLEGE' || user.education_level === 'GRADUATE_SCHOOL' || (!user.education_level && (user.program_id || user.department_id)))
@@ -538,6 +544,9 @@ export default function AddLibraryUserPage() {
       purpose: user.purpose || '',
       status: (user.status || 'ACTIVE') as UserStatus
     })
+    } finally {
+      populatingRef.current = false
+    }
   }
 
   const handleRetrieve = async () => {
