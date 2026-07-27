@@ -326,8 +326,8 @@ export function validateCreateBook(data: any): ValidationResult {
   }
   
   if (data.copies_total !== undefined) {
-    if (typeof data.copies_total !== 'number' || data.copies_total < 1) {
-      errors.push('Total copies must be at least 1')
+    if (typeof data.copies_total !== 'number' || data.copies_total < 0) {
+      errors.push('Total copies must be at least 0')
     }
   }
   

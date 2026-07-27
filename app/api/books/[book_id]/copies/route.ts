@@ -49,8 +49,46 @@ export const POST = withAuth(
       }
 
       const body = await req.json()
-      const { numberOfCopies, condition = 'GOOD', location, notes } = body
+      const { numberOfCopies, condition = 'GOOD', location, notes, accession_number, acquisition_date } = body
 
+      // Single copy with manual accession number
+      if (accession_number) {
+        const cleaned = String(accession_number).trim().toUpperCase()
+        if (!cleaned) {
+          return createErrorResponse('Accession number cannot be empty', 400)
+        }
+        // Check uniqueness
+        const conflict = await prisma.bookCopy.findFirst({
+          where: { accession_number: cleaned }
+        })
+        if (conflict) {
+          return createErrorResponse(`Accession number "${cleaned}" is already in use`, 400)
+        }
+
+        const copy = await prisma.bookCopy.create({
+          data: {
+            book_id: bookId,
+            accession_number: cleaned,
+            condition,
+            status: 'AVAILABLE',
+            location,
+            notes,
+            acquisition_date: acquisition_date ? new Date(acquisition_date) : new Date()
+          }
+        })
+
+        await prisma.book.update({
+          where: { book_id: bookId },
+          data: {
+            copies_total: { increment: 1 },
+            copies_available: { increment: 1 }
+          }
+        })
+
+        return createSuccessResponse({ copies: [copy] }, 'Copy added')
+      }
+
+      // Batch auto-generated copies
       if (!numberOfCopies || numberOfCopies < 1 || numberOfCopies > 100) {
         return createErrorResponse('Number of copies must be between 1 and 100', 400)
       }

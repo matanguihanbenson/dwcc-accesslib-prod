@@ -40,13 +40,12 @@ export async function GET(req: NextRequest) {
       role: account.role,
       campus: account.campus,
       user: account.user
-    },{
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    }
-
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }
     })
   } catch (error) {
     console.error('Error fetching current staff campus:', error)

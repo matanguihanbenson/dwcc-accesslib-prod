@@ -63,7 +63,7 @@ function mapCodeToStatus(code?: string) {
 function transformCreateBookPayload(input: any): CreateBookData {
   const copies_total = input.copies_total != null
     ? Number(input.copies_total)
-    : (input.copies ? parseInt(String(input.copies), 10) : 1)
+    : (input.copies ? parseInt(String(input.copies), 10) : 0)
 
   const year_published = input.year_published != null
     ? Number(input.year_published)
@@ -154,6 +154,8 @@ function transformCreateBookPayload(input: any): CreateBookData {
     notes,
     language: input.language || undefined,
 
+    classification_id: input.classification_id ? Number(input.classification_id) : undefined,
+    call_number: input.call_number || undefined,
     category_id: Number(input.category_id),
     section_id: input.section_id ? Number(input.section_id) : undefined,
     location: input.location || undefined,

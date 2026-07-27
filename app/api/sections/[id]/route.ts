@@ -67,10 +67,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!id || isNaN(id)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 })
     const body = await req.json()
     const name = body.name !== undefined ? String(body.name).trim() : undefined
+    const code = body.code !== undefined ? (body.code ? String(body.code).trim() : null) : undefined
     const description = body.description !== undefined ? String(body.description) : undefined
     const is_active = body.is_active !== undefined ? Boolean(body.is_active) : undefined
 
-    const updated = await prisma.bookSection.update({ where: { section_id: id }, data: { name, description, is_active } })
+    const updated = await prisma.bookSection.update({ where: { section_id: id }, data: { name, code, description, is_active } })
     try {
       if (session?.user?.id) {
         await auditLogger.logAction(

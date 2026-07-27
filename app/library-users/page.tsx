@@ -46,34 +46,17 @@ export default function LibraryUsersPage() {
   const [itemsPerPage, setItemsPerPage] = useState(25)
   const [refreshCounter, setRefreshCounter] = useState(0)
 
-  // Comprehensive table filters. The URL-driven filters
-  // (sectionIdFilter, etc.) are inherited from the parent
-  // navigation and stay as-is. The new client-only filters
-  // below add a per-table view that doesn't require a
-  // round-trip to the server.
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [departmentFilter, setDepartmentFilter] = useState<string>('')
   const [programFilter, setProgramFilter] = useState<string>('')
-  const [yearLevelFilter, setYearLevelFilter] = useState<string>('')
-  // New table-level filters (all sent to the server so
-  // pagination stays accurate):
-  //   - officeFilter  → `?office_code=…` (string code)
-  //   - sectionFilter → `?section_id=…` (numeric id)
-  //   - gradeLevelFilter → `?grade_level_id=…` (numeric id)
-  //   - strandFilter  → `?strand_id=…` (numeric id)
-  //   - hasRfidFilter → `?has_rfid=yes|no`
-  //   - registeredFrom / registeredTo → ISO date strings
-  //     for the `created_at` range filter.
   const [officeFilter, setOfficeFilter] = useState<string>('')
-  const [sectionFilter, setSectionFilter] = useState<string>('')
-  const [gradeLevelFilter, setGradeLevelFilter] = useState<string>('')
-  const [strandFilter, setStrandFilter] = useState<string>('')
   const [hasRfidFilter, setHasRfidFilter] = useState<string>('')
   const [registeredFrom, setRegisteredFrom] = useState<string>('')
   const [registeredTo, setRegisteredTo] = useState<string>('')
-  // Sort controls. Default sort is the server's "newest
-  // first" so we keep the existing UX until the user
-  // picks something different.
+  const [educationLevelFilter, setEducationLevelFilter] = useState<string>('')
+  const [sectionFilter, setSectionFilter] = useState<string>('')
+  const [gradeLevelFilter, setGradeLevelFilter] = useState<string>('')
+  const [strandFilter, setStrandFilter] = useState<string>('')
   const [sortBy, setSortBy] = useState<string>('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
@@ -109,7 +92,7 @@ export default function LibraryUsersPage() {
     if (departmentFilter) params.append('department_code', departmentFilter)
     if (programFilter) params.append('program_code', programFilter)
     if (officeFilter) params.append('office_code', officeFilter)
-    if (yearLevelFilter) params.append('year_level', yearLevelFilter)
+    if (educationLevelFilter) params.append('education_level', educationLevelFilter)
     if (sectionFilter) params.append('section_id', sectionFilter)
     if (gradeLevelFilter) params.append('grade_level_id', gradeLevelFilter)
     if (strandFilter) params.append('strand_id', strandFilter)
@@ -134,7 +117,7 @@ export default function LibraryUsersPage() {
     departmentFilter,
     programFilter,
     officeFilter,
-    yearLevelFilter,
+    educationLevelFilter,
     sectionFilter,
     gradeLevelFilter,
     strandFilter,
@@ -182,71 +165,143 @@ export default function LibraryUsersPage() {
     session ? '/api/departments' : null,
     { dedupingInterval: 60_000 }
   )
-  const { data: programsData } = useApiSWR<{ data: any[] }>(
-    session ? '/api/programs' : null,
-    { dedupingInterval: 60_000 }
-  )
-  // Offices, sections, grade-levels and strands feed the
-  // new table-level filter selects below. Same long
-  // deduping window as the other reference-data fetches.
-  const { data: officesData } = useApiSWR<{ data: any[] }>(
-    session ? '/api/offices?include_archived=false' : null,
-    { dedupingInterval: 60_000 }
-  )
-  const { data: sectionsData } = useApiSWR<{ data: any[] }>(
-    session ? '/api/student-sections?limit=500' : null,
-    { dedupingInterval: 60_000 }
-  )
-  const { data: gradeLevelsData } = useApiSWR<{ data: any[] }>(
-    session ? '/api/grade-levels?limit=500' : null,
-    { dedupingInterval: 60_000 }
-  )
-  const { data: strandsData } = useApiSWR<{ data: any[] }>(
-    session ? '/api/strands?limit=500' : null,
-    { dedupingInterval: 60_000 }
-  )
 
-  const departmentOptions: { code: string; name: string }[] = useMemo(() => {
+  const departmentOptions: { id: number; code: string; name: string }[] = useMemo(() => {
     const list: any[] = (departmentsData as any)?.data ?? []
     return list
       .filter((d: any) => d?.code)
-      .map((d: any) => ({ code: d.code, name: d.name }))
+      .map((d: any) => ({ id: d.department_id, code: d.code, name: d.name }))
   }, [departmentsData])
 
+  // Derive the selected department's numeric ID from the
+  // code stored in `departmentFilter` so we can fetch
+  // only that department's programs.
+  const selectedDepartmentId = useMemo(() => {
+    if (!departmentFilter) return null
+    const match = departmentOptions.find((d) => d.code === departmentFilter)
+    return match?.id ?? null
+  }, [departmentFilter, departmentOptions])
+
+  // When a department is selected, only fetch programs
+  // belonging to that department. SWR re-fetches
+  // automatically when the URL key changes.
+  const { data: programsData } = useApiSWR<any[]>(
+    session
+      ? selectedDepartmentId
+        ? `/api/programs?departmentId=${selectedDepartmentId}`
+        : '/api/programs'
+      : null,
+    { dedupingInterval: 60_000 }
+  )
+  // Offices, sections, grade-levels and strands feed the
+  // filter dropdowns. These APIs return raw arrays (not
+  // wrapped in { data: [...] }), so SWR stores the array
+  // directly — we use it as-is in the option builders.
+  const { data: officesData } = useApiSWR<any[]>(
+    session ? '/api/offices?include_archived=false' : null,
+    { dedupingInterval: 60_000 }
+  )
+  const { data: sectionsData } = useApiSWR<any[]>(
+    session ? '/api/student-sections' : null,
+    { dedupingInterval: 60_000 }
+  )
+  const { data: gradeLevelsData } = useApiSWR<any[]>(
+    session ? '/api/grade-levels' : null,
+    { dedupingInterval: 60_000 }
+  )
+  const { data: strandsData } = useApiSWR<any[]>(
+    session ? '/api/strands' : null,
+    { dedupingInterval: 60_000 }
+  )
+
+  // Programs API returns raw arrays — same as sections/grade-levels.
   const programOptions: { code: string; name: string }[] = useMemo(() => {
-    const list: any[] = (programsData as any)?.data ?? []
+    const list: any[] = Array.isArray(programsData) ? programsData : (programsData as any)?.data ?? []
     return list
       .filter((p: any) => p?.code)
       .map((p: any) => ({ code: p.code, name: p.name }))
   }, [programsData])
 
   const officeOptions: { code: string; name: string }[] = useMemo(() => {
-    const list: any[] = (officesData as any)?.data ?? []
+    const list: any[] = Array.isArray(officesData) ? officesData : (officesData as any)?.data ?? []
     return list
       .filter((o: any) => o?.code)
       .map((o: any) => ({ code: o.code, name: o.name }))
   }, [officesData])
 
-  const sectionOptions: { id: number; name: string }[] = useMemo(() => {
-    const list: any[] = (sectionsData as any)?.data ?? []
+  // Sections, grade-levels, and strands APIs return raw
+  // arrays — no `{ data: [...] }` wrapper.
+  const sectionOptions: { id: number; name: string; grade_level_id: number; strand_id: number | null }[] = useMemo(() => {
+    const list: any[] = Array.isArray(sectionsData) ? sectionsData : []
     return list
       .filter((s: any) => s?.section_id != null)
-      .map((s: any) => ({ id: s.section_id, name: s.name || `Section #${s.section_id}` }))
+      .map((s: any) => ({
+        id: s.section_id,
+        name: s.name || `Section #${s.section_id}`,
+        grade_level_id: s.grade_level_id,
+        strand_id: s.strand_id ?? null
+      }))
   }, [sectionsData])
 
-  const gradeLevelOptions: { id: number; name: string }[] = useMemo(() => {
-    const list: any[] = (gradeLevelsData as any)?.data ?? []
+  const gradeLevelOptions: { id: number; name: string; education_level: string; level_number: number }[] = useMemo(() => {
+    const list: any[] = Array.isArray(gradeLevelsData) ? gradeLevelsData : []
     return list
       .filter((g: any) => g?.grade_level_id != null)
-      .map((g: any) => ({ id: g.grade_level_id, name: g.name || `Grade #${g.grade_level_id}` }))
+      .map((g: any) => ({
+        id: g.grade_level_id,
+        name: g.name || `Grade #${g.grade_level_id}`,
+        education_level: g.education_level,
+        level_number: g.level_number
+      }))
   }, [gradeLevelsData])
 
   const strandOptions: { id: number; name: string }[] = useMemo(() => {
-    const list: any[] = (strandsData as any)?.data ?? []
+    const list: any[] = Array.isArray(strandsData) ? strandsData : []
     return list
       .filter((s: any) => s?.strand_id != null)
       .map((s: any) => ({ id: s.strand_id, name: s.name || `Strand #${s.strand_id}` }))
   }, [strandsData])
+
+  // College year levels (grade levels where education_level = COLLEGE)
+  const collegeYearLevelOptions = useMemo(() => {
+    return gradeLevelOptions
+      .filter((g) => g.education_level === 'COLLEGE')
+      .sort((a, b) => a.level_number - b.level_number)
+  }, [gradeLevelOptions])
+
+  // Basic Education grade levels (KINDERGARTEN, ELEMENTARY, JUNIOR_HIGH, SENIOR_HIGH)
+  const basicEdGradeLevelOptions = useMemo(() => {
+    return gradeLevelOptions
+      .filter((g) => g.education_level !== 'COLLEGE' && g.education_level !== 'GRADUATE_SCHOOL')
+      .sort((a, b) => a.level_number - b.level_number)
+  }, [gradeLevelOptions])
+
+  // Sections filtered by the selected basic-ed grade level
+  const filteredSectionOptions = useMemo(() => {
+    if (educationLevelFilter === 'BASIC_EDUCATION' && gradeLevelFilter) {
+      return sectionOptions.filter((s) => s.grade_level_id === parseInt(gradeLevelFilter))
+    }
+    if (educationLevelFilter === 'COLLEGE') {
+      // College sections are not grade-level-specific in this schema
+      return []
+    }
+    return sectionOptions
+  }, [sectionOptions, gradeLevelFilter, educationLevelFilter])
+
+  // Strands filtered by the selected basic-ed grade level
+  const filteredStrandOptions = useMemo(() => {
+    if (educationLevelFilter === 'BASIC_EDUCATION' && gradeLevelFilter) {
+      const selectedGrade = basicEdGradeLevelOptions.find(
+        (g) => g.id === parseInt(gradeLevelFilter)
+      )
+      // Only show strands for Senior High (level_number 11-12 range)
+      if (selectedGrade && selectedGrade.education_level === 'SENIOR_HIGH') {
+        return strandOptions
+      }
+      return []
+    }
+    return []
+  }, [strandOptions, gradeLevelFilter, educationLevelFilter, basicEdGradeLevelOptions])
 
   // Mutation hook for status changes
   const { execute: toggleUserStatus } = useApi({
@@ -502,7 +557,7 @@ export default function LibraryUsersPage() {
     (departmentFilter ? 1 : 0) +
     (programFilter ? 1 : 0) +
     (officeFilter ? 1 : 0) +
-    (yearLevelFilter ? 1 : 0) +
+    (educationLevelFilter ? 1 : 0) +
     (sectionFilter ? 1 : 0) +
     (gradeLevelFilter ? 1 : 0) +
     (strandFilter ? 1 : 0) +
@@ -805,151 +860,197 @@ export default function LibraryUsersPage() {
 
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Department
+                    Education Level
                   </label>
                   <select
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={departmentFilter}
+                    value={educationLevelFilter}
                     onChange={(e) => {
-                      setDepartmentFilter(e.target.value)
+                      setEducationLevelFilter(e.target.value)
+                      // Reset dependent filters when education level changes
+                      setGradeLevelFilter('')
+                      setStrandFilter('')
+                      setSectionFilter('')
+                      setDepartmentFilter('')
+                      setProgramFilter('')
                       setCurrentPage(1)
                     }}
                   >
-                    <option value="">All Departments</option>
-                    {departmentOptions.map((d) => (
-                      <option key={d.code} value={d.code}>
-                        {d.code} — {d.name}
-                      </option>
-                    ))}
+                    <option value="">All Education Levels</option>
+                    <option value="COLLEGE">College</option>
+                    <option value="BASIC_EDUCATION">Basic Education</option>
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Program
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={programFilter}
-                    onChange={(e) => {
-                      setProgramFilter(e.target.value)
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <option value="">All Programs</option>
-                    {programOptions.map((p) => (
-                      <option key={p.code} value={p.code}>
-                        {p.code} — {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* COLLEGE filters: Department → Program → Year Level */}
+                {educationLevelFilter === 'COLLEGE' && (
+                  <>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                        Department
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                        value={departmentFilter}
+                        onChange={(e) => {
+                          setDepartmentFilter(e.target.value)
+                          setProgramFilter('')
+                          setCurrentPage(1)
+                        }}
+                      >
+                        <option value="">All Departments</option>
+                        {departmentOptions.map((d) => (
+                          <option key={d.code} value={d.code}>
+                            {d.code} — {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Year Level
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={yearLevelFilter}
-                    onChange={(e) => {
-                      setYearLevelFilter(e.target.value)
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <option value="">All Year Levels</option>
-                    <option value="1st Year">1st Year</option>
-                    <option value="2nd Year">2nd Year</option>
-                    <option value="3rd Year">3rd Year</option>
-                    <option value="4th Year">4th Year</option>
-                    <option value="Graduate">Graduate</option>
-                    <option value="N/A">N/A</option>
-                  </select>
-                </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                        Program
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                        value={programFilter}
+                        onChange={(e) => {
+                          setProgramFilter(e.target.value)
+                          setCurrentPage(1)
+                        }}
+                      >
+                        <option value="">All Programs</option>
+                        {programOptions.map((p) => (
+                          <option key={p.code} value={p.code}>
+                            {p.code} — {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Office
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={officeFilter}
-                    onChange={(e) => {
-                      setOfficeFilter(e.target.value)
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <option value="">All Offices</option>
-                    {officeOptions.map((o) => (
-                      <option key={o.code} value={o.code}>
-                        {o.code} — {o.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                        Year Level
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                        value={gradeLevelFilter}
+                        onChange={(e) => {
+                          setGradeLevelFilter(e.target.value)
+                          setCurrentPage(1)
+                        }}
+                      >
+                        <option value="">All Year Levels</option>
+                        {collegeYearLevelOptions.map((g) => (
+                          <option key={g.id} value={String(g.id)}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Section
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={sectionFilter}
-                    onChange={(e) => {
-                      setSectionFilter(e.target.value)
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <option value="">All Sections</option>
-                    {sectionOptions.map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* BASIC_EDUCATION filters: Grade Level → Strand (SH only) → Section */}
+                {educationLevelFilter === 'BASIC_EDUCATION' && (
+                  <>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                        Grade Level
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                        value={gradeLevelFilter}
+                        onChange={(e) => {
+                          setGradeLevelFilter(e.target.value)
+                          setStrandFilter('')
+                          setSectionFilter('')
+                          setCurrentPage(1)
+                        }}
+                      >
+                        <option value="">All Grade Levels</option>
+                        {basicEdGradeLevelOptions.map((g) => (
+                          <option key={g.id} value={String(g.id)}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Grade Level
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={gradeLevelFilter}
-                    onChange={(e) => {
-                      setGradeLevelFilter(e.target.value)
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <option value="">All Grade Levels</option>
-                    {gradeLevelOptions.map((g) => (
-                      <option key={g.id} value={String(g.id)}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {/* Strand — only for Senior High */}
+                    {filteredStrandOptions.length > 0 && (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                          Strand
+                        </label>
+                        <select
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                          value={strandFilter}
+                          onChange={(e) => {
+                            setStrandFilter(e.target.value)
+                            setSectionFilter('')
+                            setCurrentPage(1)
+                          }}
+                        >
+                          <option value="">All Strands</option>
+                          {filteredStrandOptions.map((s) => (
+                            <option key={s.id} value={String(s.id)}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
-                    Strand
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                    value={strandFilter}
-                    onChange={(e) => {
-                      setStrandFilter(e.target.value)
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <option value="">All Strands</option>
-                    {strandOptions.map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {/* Section — filtered by selected grade level */}
+                    {filteredSectionOptions.length > 0 && (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                          Section
+                        </label>
+                        <select
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                          value={sectionFilter}
+                          onChange={(e) => {
+                            setSectionFilter(e.target.value)
+                            setCurrentPage(1)
+                          }}
+                        >
+                          <option value="">All Sections</option>
+                          {filteredSectionOptions.map((s) => (
+                            <option key={s.id} value={String(s.id)}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* No education level selected — show Office as the remaining always-visible filter */}
+                {!educationLevelFilter && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
+                      Office
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                      value={officeFilter}
+                      onChange={(e) => {
+                        setOfficeFilter(e.target.value)
+                        setCurrentPage(1)
+                      }}
+                    >
+                      <option value="">All Offices</option>
+                      {officeOptions.map((o) => (
+                        <option key={o.code} value={o.code}>
+                          {o.code} — {o.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
@@ -970,9 +1071,7 @@ export default function LibraryUsersPage() {
                 </div>
               </div>
 
-              {/* Registered between — kept on its own row so
-                  the two date inputs don't crowd the 4-col
-                  filter grid on narrow screens. */}
+              {/* Registered between */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-600 mb-1 uppercase tracking-wide">
@@ -1019,7 +1118,7 @@ export default function LibraryUsersPage() {
                       setDepartmentFilter('')
                       setProgramFilter('')
                       setOfficeFilter('')
-                      setYearLevelFilter('')
+                      setEducationLevelFilter('')
                       setSectionFilter('')
                       setGradeLevelFilter('')
                       setStrandFilter('')

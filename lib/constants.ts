@@ -114,6 +114,12 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
         roles: [USER_ROLES.USER]
       },
       {
+        name: 'Authors',
+        href: '/books/authors',
+        icon: 'fa-users',
+        roles: [USER_ROLES.ADMIN, USER_ROLES.STAFF]
+      },
+      {
         name: 'Book Transactions',
         href: '/books/transactions',
         icon: 'fa-history',

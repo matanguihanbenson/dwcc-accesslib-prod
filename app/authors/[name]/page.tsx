@@ -71,7 +71,7 @@ export default function AuthorWorksPage() {
       ? decodedName
       : decodedName.replace(/-/g, ' ')
 
-    fetch(`/api/public/authors/${encodeURIComponent(rawParam)}`, {
+    fetch(`/api/public/authors/${encodeURIComponent(name)}`, {
       signal: controller.signal,
       cache: 'no-store'
     })

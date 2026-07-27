@@ -106,6 +106,7 @@ model BookCategory {
 model BookSection {
   section_id  Int      @id @default(autoincrement())
   name        String   @unique @db.VarChar(100)
+  code        String?  @db.VarChar(20)
   description String?  @db.Text
   is_active   Boolean  @default(true)
   created_at  DateTime @default(now()) @db.Timestamp(0)
@@ -250,6 +251,8 @@ model Book {
   // classification_id is that node or any descendant.
   classification_id Int?
   classification    BookClassification? @relation(fields: [classification_id], references: [id], onDelete: SetNull)
+  call_number       String?              @db.VarChar(100)
+  spelledout_title  String?              @db.VarChar(600)
   authors           BookAuthor[]
   contributors      BookContributor[]
   links             BookLink[]
@@ -301,27 +304,35 @@ model AccessionNumberSequence {
 }
 
 model BookAuthor {
-  id            Int      @id @default(autoincrement())
-  book_id       Int
-  name          String   @db.VarChar(200)
-  dates         String?  @db.VarChar(100)
-  display_order Int      @default(1)
-  created_at    DateTime @default(now()) @db.Timestamp(0)
-  book          Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+  id              Int      @id @default(autoincrement())
+  book_id         Int
+  name            String   @db.VarChar(200)
+  dates           String?  @db.VarChar(100)
+  cutter_number   String?  @db.VarChar(10)
+  decimal_value   Float?   @db.Float
+  base_workmark   String?  @db.VarChar(5)
+  final_workmark  String?  @db.VarChar(10)
+  display_order   Int      @default(1)
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+  book            Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
 
   @@index([book_id])
   @@map("book_author")
 }
 
 model BookContributor {
-  id            Int      @id @default(autoincrement())
-  book_id       Int
-  name          String   @db.VarChar(200)
-  role          String   @db.VarChar(100)
-  dates         String?  @db.VarChar(100)
-  display_order Int      @default(1)
-  created_at    DateTime @default(now()) @db.Timestamp(0)
-  book          Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+  id              Int      @id @default(autoincrement())
+  book_id         Int
+  name            String   @db.VarChar(200)
+  role            String   @db.VarChar(100)
+  dates           String?  @db.VarChar(100)
+  cutter_number   String?  @db.VarChar(10)
+  decimal_value   Float?   @db.Float
+  base_workmark   String?  @db.VarChar(5)
+  final_workmark  String?  @db.VarChar(10)
+  display_order   Int      @default(1)
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+  book            Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
 
   @@index([book_id])
   @@map("book_contributor")

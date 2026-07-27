@@ -140,6 +140,7 @@ const TABS: TabDef[] = [
 interface SectionRow {
   section_id: number
   name: string
+  code?: string | null
   description?: string | null
   is_active?: boolean
   student_count?: number
@@ -451,6 +452,11 @@ function SectionListItem({
           <span className="text-sm font-medium text-gray-900">
             {section.name}
           </span>
+          {section.code && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+              {section.code}
+            </span>
+          )}
           <BookCountBadge count={section.student_count} label="students" />
           {!active && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700 border border-gray-300">
@@ -1081,6 +1087,7 @@ function SectionFormModal({
   onSaved: () => void
 }) {
   const [name, setName] = useState(editing?.name || '')
+  const [code, setCode] = useState(editing?.code || '')
   const [description, setDescription] = useState(
     editing?.description || ''
   )
@@ -1092,6 +1099,7 @@ function SectionFormModal({
   useEffect(() => {
     if (editing) {
       setName(editing.name)
+      setCode(editing.code || '')
       setDescription(editing.description || '')
       setIsActive(editing.is_active !== false)
     }
@@ -1114,6 +1122,7 @@ function SectionFormModal({
         credentials: 'include',
         body: JSON.stringify({
           name: name.trim(),
+          code: code.trim() || null,
           description: description.trim() || null,
           is_active: isActive
         })
@@ -1149,7 +1158,24 @@ function SectionFormModal({
       onSave={handleSave}
       nameLabel="Section name"
       namePlaceholder="e.g. Circulation"
-    />
+    >
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">
+          Section Code
+        </label>
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          maxLength={20}
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          placeholder="e.g. CIR"
+        />
+        <p className="mt-1 text-[11px] text-gray-500">
+          Short code used in call numbers (e.g. CIR, GS).
+        </p>
+      </div>
+    </FormModal>
   )
 }
 /*

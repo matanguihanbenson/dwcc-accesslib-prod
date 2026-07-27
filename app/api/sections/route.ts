@@ -24,13 +24,14 @@ export const POST = withAuth(
   async (req: NextRequest) => {
     const body = await req.json()
     const name = (body.name || '').trim()
+    const code = body.code ? String(body.code).trim() : null
     const description = body.description ? String(body.description) : null
     const is_active = body.is_active === undefined ? true : Boolean(body.is_active)
     if (!name) {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 })
     }
     const created = await prisma.bookSection.create({
-      data: { name, description: description || undefined, is_active }
+      data: { name, code: code || undefined, description: description || undefined, is_active }
     })
     try {
       const session = await getServerSession(authOptions) as any

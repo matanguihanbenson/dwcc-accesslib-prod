@@ -12,19 +12,9 @@ import {
 import AddOptionModal, {
   type AddOptionItem
 } from '@/components/forms/AddOptionModal'
+import BookPreviewModal from '@/components/forms/BookPreviewModal'
+import { generateCallNumber } from '@/lib/call-number'
 
-/**
- * Quick actions available from the page header. Each maps a
- * display label + icon to either:
- *   - `endpoint`: a server endpoint to POST to (for
- *     API-backed options like Sections and Categories).
- *   - `optionKind`: an OptionKind on the form, in which case
- *     the page calls `formRef.current.addOption(kind, value)`
- *     to push the new value into the form's local option list.
- *
- * The `mode` controls whether the modal shows a description
- * field alongside the name.
- */
 type QuickAction = {
   label: string
   icon: string
@@ -51,35 +41,31 @@ export default function AddBookPage() {
   const [authReady, setAuthReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<{ category_id: number; name: string }[]>([])
-  const [sections, setSections] = useState<{ section_id: number; name: string }[]>([])
-
-  // The header quick action modal state. `null` means the
-  // modal is closed.
+  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null }[]>([])
   const [quickAdd, setQuickAdd] = useState<QuickAction | null>(null)
+
+  // ── Preview Modal state ─────────────────────────────────
+  const [showPreview, setShowPreview] = useState(false)
+  const [pendingBookData, setPendingBookData] = useState<any>(null)
+  const [suggestedCallNumber, setSuggestedCallNumber] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const checkAuth = async () => {
-      if (status === 'loading') {
-        return
-      }
-
+      if (status === 'loading') return
       if (status === 'authenticated' && session?.user) {
         if (session.user.role !== 'ADMIN' && session.user.role !== 'STAFF') {
           console.warn('Access denied: User does not have required privileges')
           router.push('/dashboard')
           return
         }
-        console.log('NextAuth session ready for add book')
         setAuthReady(true)
       } else {
         try {
           const response = await fetch('/api/users/profile', {
             credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
           })
-
           if (response.ok) {
             const userData = await response.json()
             if (userData.role !== 'ADMIN' && userData.role !== 'STAFF') {
@@ -87,10 +73,8 @@ export default function AddBookPage() {
               router.push('/dashboard')
               return
             }
-            console.log('JWT token authentication ready for add book')
             setAuthReady(true)
           } else {
-            console.warn('No valid authentication found, redirecting to login')
             router.push('/login')
             return
           }
@@ -101,13 +85,11 @@ export default function AddBookPage() {
         }
       }
     }
-
     checkAuth()
   }, [session, status, router])
 
   useEffect(() => {
     if (!authReady) return
-
     const loadOptions = async () => {
       try {
         setLoading(true)
@@ -115,13 +97,11 @@ export default function AddBookPage() {
           fetch('/api/book-categories', { credentials: 'include' }),
           fetch('/api/sections', { credentials: 'include' })
         ])
-
         if (catRes.ok) {
           const catData = await catRes.json()
           const list = Array.isArray(catData) ? catData : (catData.data || [])
           setCategories(list)
         }
-
         if (secRes.ok) {
           const secData = await secRes.json()
           const list = Array.isArray(secData) ? secData : (secData.data || [])
@@ -136,45 +116,98 @@ export default function AddBookPage() {
     loadOptions()
   }, [authReady])
 
-  const handleSubmit = async (data: any) => {
+  // Step 1: Capture form data, generate call number, show preview (NO save yet)
+  const handleSubmit = useCallback(async (data: any) => {
+    let classificationCode = null
+    if (data.classification_id) {
+      try {
+        const classRes = await fetch(`/api/book-classifications/${data.classification_id}`, { credentials: 'include' })
+        if (classRes.ok) {
+          const classData = await classRes.json()
+          const classInfo = classData.data || classData
+          classificationCode = classInfo?.code || null
+        }
+      } catch {}
+    }
+
+    const section = sections.find((s) => s.section_id === data.section_id)
+    const sectionCode = section?.code || null
+
+    const callNumber = generateCallNumber({
+      section_code: sectionCode,
+      classification_code: classificationCode,
+      book_author: data.book_author,
+      title: data.title,
+      year_published: data.year_published || data.publication_year || null,
+    })
+
+    setPendingBookData({ ...data, classification_code: classificationCode })
+    setSuggestedCallNumber(callNumber)
+    setShowPreview(true)
+  }, [sections])
+
+  // Step 2: User confirms preview → save book + copies → redirect to accession
+  const handlePreviewConfirm = useCallback(async (callNumber: string, copiesCount: number) => {
+    if (!pendingBookData) return
+    setSaving(true)
     try {
-      notify.loading('Adding book...', 'Please wait while we save the record')
-      const response = await fetch('/api/books', {
+      notify.loading('Saving book...', 'Creating the book record')
+
+      const bookRes = await fetch('/api/books', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(data)
+        body: JSON.stringify(pendingBookData)
       })
 
-      if (response.ok) {
-        notify.close()
-        await notify.success('Success', 'Book added successfully')
-        router.push('/books')
-      } else {
+      if (!bookRes.ok) {
         let message = 'Failed to add book'
         try {
-          const errorData = await response.json()
-          message = errorData.error || errorData.message || message
-        } catch (_) {
-          const text = await response.text()
-          if (text) message = text
-        }
+          const err = await bookRes.json()
+          message = err.error || err.message || message
+        } catch {}
         notify.close()
         await notify.error('Error', message)
+        setSaving(false)
+        return
+      }
+
+      const bookResult = await bookRes.json()
+      const book = bookResult.data || bookResult
+      const bookId = book.book_id || book.id
+
+      // Create copies
+      const copyRes = await fetch(`/api/books/${bookId}/copies/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          mode: 'auto',
+          count: copiesCount,
+          call_number: callNumber
+        })
+      })
+
+      notify.close()
+
+      if (copyRes.ok) {
+        setShowPreview(false)
+        setPendingBookData(null)
+        await notify.success('Book saved', `${copiesCount} cop${copiesCount > 1 ? 'ies' : 'y'} created`)
+        router.push(`/books/${bookId}/accession`)
+      } else {
+        setShowPreview(false)
+        setPendingBookData(null)
+        await notify.success('Book saved', 'You can manage copies from the book page')
+        router.push(`/books/${bookId}/accession`)
       }
     } catch (error) {
       notify.close()
       await notify.error('Error', 'Network error occurred')
-      console.error('Error adding book:', error)
+      setSaving(false)
     }
-  }
+  }, [pendingBookData, router])
 
-  // Local option lists mirror the form's hard-coded option
-  // arrays. They're used to populate the right column of the
-  // header quick-action modal so the user sees the existing
-  // values and the new one appears immediately.
   const [localOptions, setLocalOptions] = useState<Record<OptionKind, string[]>>({
     materialType: ['Book', 'eBook', 'Audiobook', 'DVD', 'Magazine'],
     subtype: ['Paperback', 'Hardcover', 'Board Book'],
@@ -183,29 +216,13 @@ export default function AddBookPage() {
     fountasPinnell: ['Any Level', 'Level A', 'Level B', 'Level C', 'Level D', 'Level Z']
   })
 
-  // Pull the live catalog values from the
-  // `book_catalog_value` table so the quick-action modal's
-  // right column also shows everything the admin can pick
-  // from. We keep the page's local mirror in sync with the
-  // form's option lists so the user sees the full set on
-  // the first open and any subsequent additions.
   useEffect(() => {
     let cancelled = false
     const merge = (current: string[], next: string[]) => {
       const seen = new Set<string>()
       const out: string[] = []
-      for (const v of current) {
-        if (!seen.has(v)) {
-          seen.add(v)
-          out.push(v)
-        }
-      }
-      for (const v of next) {
-        if (!seen.has(v)) {
-          seen.add(v)
-          out.push(v)
-        }
-      }
+      for (const v of current) { if (!seen.has(v)) { seen.add(v); out.push(v) } }
+      for (const v of next) { if (!seen.has(v)) { seen.add(v); out.push(v) } }
       return out
     }
     const types: Array<{
@@ -222,41 +239,30 @@ export default function AddBookPage() {
       types.map((t) =>
         fetch(`/api/book-catalog-values?type=${t.api}&all=true`, {
           credentials: 'include',
-          cache: 'no-store'
-        })
-          .then((r) => (r.ok ? r.json() : []))
-          .catch(() => [])
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => [])
       )
     ).then((results) => {
       if (cancelled) return
-      setLocalOptions((prev) => {
-        const next = { ...prev }
-        types.forEach((t, i) => {
-          const list: any[] = Array.isArray(results[i])
-            ? results[i]
-            : (results[i] as any)?.data || []
-          const values = list
-            .filter((v: any) => v && v.value && v.is_active !== false)
-            .map((v: any) => String(v.value))
-          next[t.kind] = merge(prev[t.kind] || [], values)
-        })
-        return next
+      const merged = { ...localOptions }
+      types.forEach((t, i) => {
+        const raw = results[i]
+        const values: string[] = Array.isArray(raw)
+          ? raw.map((v: any) => (typeof v === 'string' ? v : v?.value || v?.name || '')).filter(Boolean)
+          : []
+        merged[t.kind] = merge(merged[t.kind], values)
       })
+      setLocalOptions(merged)
     })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
-  const openQuickAdd = (action: QuickAction) => setQuickAdd(action)
   const closeQuickAdd = useCallback(() => setQuickAdd(null), [])
 
-  // Re-derive the visible "existing options" for the right
-  // column of the header quick-action modal. We prefer the
-  // page's local mirror (which we keep updated) and fall back
-  // to the form's defaults so the user sees the full list
-  // even on the first open.
-  const getQuickAddExistingOptions = (): AddOptionItem[] => {
+  const openQuickAdd = useCallback((action: QuickAction) => {
+    setQuickAdd(action)
+  }, [])
+
+  const getQuickAddExistingOptions = useCallback(() => {
     if (!quickAdd) return []
     if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/sections') {
       return sections.map((s) => ({ id: s.section_id, name: s.name }))
@@ -268,51 +274,27 @@ export default function AddBookPage() {
       return localOptions[quickAdd.optionKind].map((name) => ({ name }))
     }
     return []
-  }
+  }, [quickAdd, sections, categories, localOptions])
 
-  // After a quick action successfully adds, push the new
-  // value into the matching local state + the form via the
-  // imperative handle. The AddOptionModal's own local list
-  // already shows the new value highlighted; this keeps the
-  // page's mirror in sync for the next open.
   const handleQuickAdd = useCallback(
     async (item: AddOptionItem) => {
       if (!quickAdd) return
       if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/sections') {
-        // Sections are API-backed: the modal already POSTed.
-        // The form's imperative handle syncs the dropdown.
-        formRef.current?.addSection({
-          section_id: item.id as number,
-          name: item.name
-        })
+        formRef.current?.addSection({ section_id: item.id as number, name: item.name })
         setSections((prev) =>
-          prev.some((s) => s.section_id === item.id)
-            ? prev
-            : [...prev, { section_id: item.id as number, name: item.name }]
+          prev.some((s) => s.section_id === item.id) ? prev : [...prev, { section_id: item.id as number, name: item.name }]
         )
-      } else if (
-        quickAdd.kind === 'server' &&
-        quickAdd.endpoint === '/api/book-categories'
-      ) {
-        formRef.current?.addCategory({
-          category_id: item.id as number,
-          name: item.name
-        })
+      } else if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/book-categories') {
+        formRef.current?.addCategory({ category_id: item.id as number, name: item.name })
         setCategories((prev) =>
-          prev.some((c) => c.category_id === item.id)
-            ? prev
-            : [...prev, { category_id: item.id as number, name: item.name }]
+          prev.some((c) => c.category_id === item.id) ? prev : [...prev, { category_id: item.id as number, name: item.name }]
         )
       } else if (quickAdd.kind === 'local') {
         const kind = quickAdd.optionKind
         formRef.current?.addOption(kind, item.name)
         setLocalOptions((prev) => ({
           ...prev,
-          [kind]: prev[kind].some(
-            (v) => v.toLowerCase() === item.name.toLowerCase()
-          )
-            ? prev[kind]
-            : [...prev[kind], item.name]
+          [kind]: prev[kind].some((v) => v.toLowerCase() === item.name.toLowerCase()) ? prev[kind] : [...prev[kind], item.name]
         }))
       }
     },
@@ -334,43 +316,26 @@ export default function AddBookPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page Header with Back Button, Breadcrumb, and Quick Actions */}
+      {/* Page Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/books')}
-            className="text-gray-600 hover:text-gray-900 transition-colors"
-            aria-label="Back to books"
-          >
+          <button onClick={() => router.push('/books')} className="text-gray-600 hover:text-gray-900 transition-colors" aria-label="Back to books">
             <i className="fas fa-arrow-left text-lg"></i>
           </button>
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Add New Book</h1>
             <nav className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
-              <button onClick={() => router.push('/books')} className="hover:text-gray-700">
-                Books
-              </button>
+              <button onClick={() => router.push('/books')} className="hover:text-gray-700">Books</button>
               <i className="fas fa-chevron-right text-xs"></i>
               <span className="text-gray-900 font-medium">Add New</span>
             </nav>
           </div>
         </div>
-
-        {/* Quick actions: add the various select options
-            (section, category, material type, etc.) without
-            leaving the page. Each button opens the same
-            2-column AddOptionModal. */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wider mr-1">
-            Quick add
-          </span>
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wider mr-1">Quick add</span>
           {QUICK_ACTIONS.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              onClick={() => openQuickAdd(action)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
-            >
+            <button key={action.label} type="button" onClick={() => openQuickAdd(action)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 hover:border-blue-300 hover:text-blue-700 transition-colors">
               <i className={`fas ${action.icon} text-gray-500`}></i>
               <span>+ {action.label}</span>
             </button>
@@ -390,22 +355,13 @@ export default function AddBookPage() {
         />
       </div>
 
-      {/* Header quick-action modal: 2-column layout (input on
-          left, existing options on right). For server-backed
-          options the modal POSTs to the API; for local
-          options it calls back into the form via the
-          imperative handle so the new value lands in the
-          form's dropdown. */}
+      {/* Quick-action modal */}
       {quickAdd && (
         <AddOptionModal
           isOpen={true}
           onClose={closeQuickAdd}
           title={`Add New ${quickAdd.label}`}
-          description={
-            quickAdd.kind === 'server'
-              ? 'Saved to the library and immediately available for new book records.'
-              : 'Added to the form\'s dropdown so you can pick it for the new book.'
-          }
+          description={quickAdd.kind === 'server' ? 'Saved to the library and immediately available for new book records.' : 'Added to the form\'s dropdown so you can pick it for the new book.'}
           icon={quickAdd.icon}
           endpoint={quickAdd.kind === 'server' ? quickAdd.endpoint : undefined}
           mode={quickAdd.mode}
@@ -413,6 +369,16 @@ export default function AddBookPage() {
           onAdded={handleQuickAdd}
         />
       )}
+
+      {/* Book Preview Modal — call number + copies count → save */}
+      <BookPreviewModal
+        isOpen={showPreview}
+        onClose={() => { setShowPreview(false); setPendingBookData(null) }}
+        onConfirm={handlePreviewConfirm}
+        bookData={pendingBookData || {}}
+        suggestedCallNumber={suggestedCallNumber}
+        loading={saving}
+      />
     </div>
   )
 }

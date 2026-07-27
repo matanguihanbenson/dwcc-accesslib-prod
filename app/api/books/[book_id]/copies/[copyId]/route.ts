@@ -105,7 +105,7 @@ export const PATCH = withAuth(
       }
 
       const body = await req.json()
-      const { status, condition, location, notes, barcode } = body
+      const { status, condition, location, notes, barcode, accession_number, acquisition_date } = body
 
       const copy = await prisma.bookCopy.findUnique({
         where: { copy_id: copyIdNum },
@@ -127,6 +127,23 @@ export const PATCH = withAuth(
       if (location !== undefined) updateData.location = location
       if (notes !== undefined) updateData.notes = notes
       if (barcode !== undefined) updateData.barcode = barcode
+      if (acquisition_date !== undefined) {
+        updateData.acquisition_date = acquisition_date ? new Date(acquisition_date) : null
+      }
+      if (accession_number !== undefined) {
+        const cleaned = String(accession_number).trim().toUpperCase()
+        if (!cleaned) {
+          return createErrorResponse('Accession number cannot be empty', 400)
+        }
+        // Check uniqueness (excluding this copy)
+        const conflict = await prisma.bookCopy.findFirst({
+          where: { accession_number: cleaned, copy_id: { not: copyIdNum } }
+        })
+        if (conflict) {
+          return createErrorResponse(`Accession number "${cleaned}" is already in use`, 400)
+        }
+        updateData.accession_number = cleaned
+      }
 
       const updatedCopy = await prisma.bookCopy.update({
         where: { copy_id: copyIdNum },

@@ -1,12 +1,14 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { notify } from '@/lib/notification'
 import { EnhancedBookForm } from '@/components/forms/EnhancedBookForm'
+import BookPreviewModal from '@/components/forms/BookPreviewModal'
 import { useUserStatus } from '@/lib/hooks'
 import { UserRole, Book } from '@/types'
+import { generateCallNumber } from '@/lib/call-number'
 
 export default function EditBookPage() {
   const router = useRouter()
@@ -16,8 +18,14 @@ export default function EditBookPage() {
   
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<{ category_id: number; name: string }[]>([])
-  const [sections, setSections] = useState<{ section_id: number; name: string }[]>([])
+  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null }[]>([])
   const [bookData, setBookData] = useState<Partial<Book> | null>(null)
+
+  // Preview modal state
+  const [showPreview, setShowPreview] = useState(false)
+  const [pendingData, setPendingData] = useState<any>(null)
+  const [suggestedCallNumber, setSuggestedCallNumber] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (authLoading) return
@@ -70,16 +78,55 @@ export default function EditBookPage() {
     loadData()
   }, [authLoading, isAuthenticated, isStaff, bookId, router])
 
-  const handleSubmit = async (data: any) => {
+  // Intercept form submission: capture data, fetch classification code, show preview
+  const handleFormSubmit = useCallback(async (data: any) => {
+    // Fetch the classification code if we have a classification_id
+    let classificationCode = null
+    if (data.classification_id) {
+      try {
+        const res = await fetch(`/api/book-classifications/${data.classification_id}`, {
+          credentials: 'include',
+          cache: 'no-store'
+        })
+        if (res.ok) {
+          const json = await res.json()
+          const node = json.data || json
+          classificationCode = node?.code || null
+        }
+      } catch {
+        // non-critical — call number will just omit DDC
+      }
+    }
+
+    // Find the section code
+    const section = sections.find((s) => s.section_id === data.section_id)
+    const sectionCode = section?.code || null
+
+    // Generate the call number
+    const cn = generateCallNumber({
+      section_code: sectionCode,
+      classification_code: classificationCode,
+      book_author: data.book_author,
+      title: data.title,
+      year_published: data.year_published || data.publication_year || null,
+    })
+
+    setPendingData({ ...data, classification_code: classificationCode })
+    setSuggestedCallNumber(cn)
+    setShowPreview(true)
+  }, [sections])
+
+  // Save with the (possibly edited) call number
+  const handleConfirmSave = useCallback(async (callNumber: string) => {
+    if (!pendingData) return
+    setSaving(true)
     try {
       notify.loading('Updating book...', 'Please wait while we save the changes')
       const response = await fetch(`/api/books/${bookId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(data)
+        body: JSON.stringify({ ...pendingData, call_number: callNumber })
       })
 
       if (response.ok) {
@@ -97,12 +144,16 @@ export default function EditBookPage() {
         }
         notify.close()
         await notify.error('Error', message)
+        setShowPreview(false)
       }
     } catch (error) {
       notify.close()
       await notify.error('Error', 'Network error occurred')
+      setShowPreview(false)
+    } finally {
+      setSaving(false)
     }
-  }
+  }, [pendingData, bookId, router])
 
   if (authLoading || loading) {
     return (
@@ -159,12 +210,21 @@ export default function EditBookPage() {
           initialData={bookData}
           categories={categories}
           sections={sections}
-          onSubmit={handleSubmit}
+          onSubmit={handleFormSubmit}
           onCancel={() => router.push(`/books/${bookId}/view`)}
           isEditing={true}
         />
       </div>
+
+      {/* Preview Modal */}
+      <BookPreviewModal
+        isOpen={showPreview}
+        onClose={() => { setShowPreview(false); setPendingData(null) }}
+        onConfirm={handleConfirmSave}
+        bookData={pendingData || {}}
+        suggestedCallNumber={suggestedCallNumber}
+        loading={saving}
+      />
     </div>
   )
 }
-

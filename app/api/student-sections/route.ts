@@ -15,8 +15,9 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Only SUPER_ADMIN and ADMIN can view sections
-    if (token.role !== 'SUPER_ADMIN' && token.role !== 'ADMIN') {
+    // SUPER_ADMIN, ADMIN, and STAFF can view sections
+    // (STAFF needs section data for library-user filters).
+    if (token.role !== 'SUPER_ADMIN' && token.role !== 'ADMIN' && token.role !== 'STAFF') {
       return NextResponse.json(
         { error: 'Insufficient permissions' },
         { status: 403 }

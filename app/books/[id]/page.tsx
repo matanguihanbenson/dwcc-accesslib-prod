@@ -2,9 +2,10 @@
 
 import React, { useEffect, useState, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { PublicHeader, PublicFooter } from '@/components/layout'
 import { LoadingScreen } from '@/components/ui/loading-spinner'
-import { bookHref, parseSlug } from '@/lib/utils'
+import { bookHref, parseSlug, slugify } from '@/lib/utils'
 
 interface Book {
   book_id: number
@@ -49,6 +50,8 @@ interface Book {
   updated_at?: string
   // Cached enrichment (set by the public catalogue API)
   other_details?: string | null
+  call_number?: string | null
+  classification?: { code: string; name: string; level?: string } | null
 }
 
 interface Copy {
@@ -111,6 +114,10 @@ function parseNotes(n: any): Array<{ type: string; content: string }> {
     return [{ type: 'Note', content: n }]
   }
   return []
+}
+
+function authorHref(name: string) {
+  return `/authors/${slugify(name)}`
 }
 
 export default function BookDetailsPage() {
@@ -332,6 +339,7 @@ export default function BookDetailsPage() {
             copies={copies}
             loading={copiesLoading}
             bookTitle={book.title}
+            callNumber={book.call_number || null}
           />
         )}
 
@@ -348,6 +356,7 @@ export default function BookDetailsPage() {
           <HistoryTab
             transactions={transactions}
             loading={historyLoading}
+            callNumber={book.call_number || null}
           />
         )}
       </main>
@@ -463,7 +472,7 @@ function BriefInfoTab({
           <p className="text-base text-gray-600 mt-1">{book.subtitle}</p>
         )}
         <p className="text-sm text-gray-700 mt-1">
-          by <span className="font-semibold">{primaryAuthor}</span>
+          by <Link href={authorHref(primaryAuthor)} className="font-semibold hover:text-blue-600 hover:underline transition-colors">{primaryAuthor}</Link>
         </p>
         <div className="flex flex-wrap items-center gap-2 mt-2">
           <span
@@ -493,9 +502,20 @@ function BriefInfoTab({
         <div className="flex items-center justify-between gap-3 px-3 py-2">
           <span className="text-gray-500">Call #</span>
           <span className="font-mono text-gray-900">
-            {book.lccn || book.isbn || '—'}
+            {book.call_number || '—'}
           </span>
         </div>
+        {book.classification && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <span className="text-gray-500">DDC</span>
+            <span className="font-mono text-gray-900 text-xs">
+              {book.classification.code}
+              {book.classification.name && (
+                <span className="font-sans text-gray-500 ml-1">— {book.classification.name}</span>
+              )}
+            </span>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3 px-3 py-2">
           <span className="text-gray-500">Sublocation</span>
           <span className="text-gray-900">
@@ -555,7 +575,7 @@ function FullInfoTab({
           <p className="text-base text-gray-600 mt-1">{book.subtitle}</p>
         )}
         <p className="text-sm text-gray-700 mt-1">
-          by <span className="font-semibold">{primaryAuthor}</span>
+          by <Link href={authorHref(primaryAuthor)} className="font-semibold hover:text-blue-600 hover:underline transition-colors">{primaryAuthor}</Link>
         </p>
       </div>
 
@@ -578,15 +598,24 @@ function FullInfoTab({
 
       {/* Authors & contributors */}
       <FieldSection title="Authors & Contributors">
-        <Field label="Primary author" value={primaryAuthor} />
+        <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-x-3">
+          <div className="text-gray-500">Primary author</div>
+          <Link href={authorHref(primaryAuthor)} className="text-sm text-gray-900 font-medium hover:text-blue-600 hover:underline transition-colors">{primaryAuthor}</Link>
+        </div>
         {book.authors && book.authors.length > 1 && (
-          <Field
-            label="Additional authors"
-            value={book.authors
-              .slice(1)
-              .map((a) => a.name + (a.dates ? ` (${a.dates})` : ''))
-              .join(', ')}
-          />
+          <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-x-3">
+            <div className="text-gray-500">Additional authors</div>
+            <div className="space-y-1">
+              {book.authors.slice(1).map((a, idx) => (
+                <div key={idx}>
+                  <Link href={authorHref(a.name)} className="text-sm text-gray-900 font-medium hover:text-blue-600 hover:underline transition-colors">
+                    {a.name}
+                  </Link>
+                  {a.dates && <span className="text-xs text-gray-500 ml-1">({a.dates})</span>}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
         {book.contributors && book.contributors.length > 0 && (
           <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-x-3">
@@ -594,7 +623,7 @@ function FullInfoTab({
             <div className="space-y-2">
               {book.contributors.map((c, idx) => (
                 <div key={idx} className="text-sm">
-                  <div className="text-gray-900 font-medium">{c.name}</div>
+                  <Link href={authorHref(c.name)} className="text-gray-900 font-medium hover:text-blue-600 hover:underline transition-colors">{c.name}</Link>
                   {(c.role || c.dates) && (
                     <div className="text-xs text-gray-500">
                       {[c.role, c.dates].filter(Boolean).join(' • ')}
@@ -644,6 +673,16 @@ function FullInfoTab({
 
       {/* Classification */}
       <FieldSection title="Classification">
+        <Field label="Call number" value={book.call_number} mono />
+        {book.classification && (
+          <>
+            <Field label="DDC code" value={book.classification.code} mono />
+            <Field label="DDC name" value={book.classification.name} />
+            {book.classification.level && (
+              <Field label="DDC level" value={book.classification.level} />
+            )}
+          </>
+        )}
         <Field label="Category" value={categoryName} />
         <Field label="Status" value={book.status} />
         <Field
@@ -722,11 +761,13 @@ function FullInfoTab({
 function CopiesTab({
   copies,
   loading,
-  bookTitle
+  bookTitle,
+  callNumber
 }: {
   copies: Copy[]
   loading: boolean
   bookTitle: string
+  callNumber: string | null
 }) {
   if (loading) {
     return (
@@ -764,6 +805,12 @@ function CopiesTab({
                 {c.status}
               </span>
             </div>
+            {callNumber && (
+              <div className="text-xs text-gray-600 mb-0.5">
+                <span className="text-gray-500">Call #:</span>{' '}
+                <span className="font-mono font-semibold text-gray-800">{callNumber}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2 text-xs text-gray-600">
               <span className="font-mono text-[10px] text-gray-500">
                 {c.condition}
@@ -788,6 +835,9 @@ function CopiesTab({
                 Accession #
               </th>
               <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                Call #
+              </th>
+              <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 Status
               </th>
               <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -806,6 +856,9 @@ function CopiesTab({
               <tr key={c.copy_id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-3 py-2 font-mono font-semibold text-gray-900">
                   {c.accession_number}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs text-gray-700">
+                  {callNumber || <span className="text-gray-400">—</span>}
                 </td>
                 <td className="px-3 py-2">
                   <span
@@ -864,7 +917,7 @@ function MarcTab({
           <p className="text-base text-gray-600 mt-1">{book.subtitle}</p>
         )}
         <p className="text-sm text-gray-700 mt-1">
-          by <span className="font-semibold">{primaryAuthor}</span>
+          by <Link href={authorHref(primaryAuthor)} className="font-semibold hover:text-blue-600 hover:underline transition-colors">{primaryAuthor}</Link>
         </p>
       </div>
 
@@ -872,7 +925,7 @@ function MarcTab({
         <div className="flex items-center justify-between gap-3 px-3 py-2">
           <span className="text-gray-500">Call #</span>
           <span className="font-mono text-gray-900">
-            {book.lccn || book.isbn || '—'}
+            {book.call_number || '—'}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3 px-3 py-2">
@@ -970,13 +1023,19 @@ function MarcTab({
             <Field label="Series" value={book.series_title} />
           )}
           {book.authors && book.authors.length > 1 && (
-            <Field
-              label="Contributors"
-              value={book.authors
-                .slice(1)
-                .map((a) => a.name + (a.dates ? ` (${a.dates})` : ''))
-                .join(', ')}
-            />
+            <div className="px-3 py-1.5 grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3">
+              <div className="text-gray-500">Contributors</div>
+              <div className="space-y-1">
+                {book.authors.slice(1).map((a, idx) => (
+                  <div key={idx}>
+                    <Link href={authorHref(a.name)} className="text-sm text-gray-900 font-medium hover:text-blue-600 hover:underline transition-colors">
+                      {a.name}
+                    </Link>
+                    {a.dates && <span className="text-xs text-gray-500 ml-1">({a.dates})</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
           {(book.summary || book.description) && (
             <div className="py-1.5">
@@ -1031,10 +1090,12 @@ function MarcTab({
 // ============================================================================
 function HistoryTab({
   transactions,
-  loading
+  loading,
+  callNumber
 }: {
   transactions: PublicTransaction[]
   loading: boolean
+  callNumber: string | null
 }) {
   const [page, setPage] = useState(1)
   const itemsPerPage = 10
@@ -1121,6 +1182,12 @@ function HistoryTab({
                     {t.accession_number || '—'}
                   </span>
                 </div>
+                {callNumber && (
+                  <div>
+                    <span className="text-gray-500">Call #:</span>{' '}
+                    <span className="font-mono font-semibold text-gray-800">{callNumber}</span>
+                  </div>
+                )}
                 <div>
                   <span className="text-gray-500">Borrowed:</span>{' '}
                   {formatDate(t.borrow_date)}
@@ -1154,6 +1221,9 @@ function HistoryTab({
                   Accession #
                 </th>
                 <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                  Call #
+                </th>
+                <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   Borrowed
                 </th>
                 <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -1175,6 +1245,9 @@ function HistoryTab({
                   </td>
                   <td className="px-3 py-2 text-sm font-mono font-semibold text-gray-800">
                     {t.accession_number || '—'}
+                  </td>
+                  <td className="px-3 py-2 text-sm font-mono text-gray-700">
+                    {callNumber || '—'}
                   </td>
                   <td className="px-3 py-2 text-sm text-gray-700 whitespace-nowrap">
                     {formatDate(t.borrow_date)}

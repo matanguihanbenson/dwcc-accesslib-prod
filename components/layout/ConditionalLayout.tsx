@@ -25,7 +25,7 @@ const PUBLIC_ROUTES = [
 // to match, and the negative lookahead explicitly excludes
 // every admin sub-route so they keep the authenticated
 // sidebar layout.
-const PUBLIC_BOOK_DETAIL_RE = /^\/books\/(?!add$|borrow$|return$|transactions$|archived-copies$|categories$|sections$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i
+const PUBLIC_BOOK_DETAIL_RE = /^\/books\/(?!add$|borrow$|return$|transactions$|archived-copies$|categories$|sections$|authors$|view$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i
 
 // Public author / contributor works page at
 // /authors/[slug]. Always public — anyone visiting the

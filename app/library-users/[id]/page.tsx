@@ -20,6 +20,11 @@ interface LibraryUser {
   department_id?: number
   program_id?: number
   year_level?: string
+  education_level?: string
+  grade_level_id?: number
+  section_id?: number
+  strand_id?: number
+  rfid_code?: string
   email?: string
   contact_number?: string
   purpose?: string
@@ -38,6 +43,21 @@ interface LibraryUser {
     name: string
     code: string
     is_active: boolean
+  }
+  grade_level?: {
+    grade_level_id: number
+    name: string
+    code: string
+    education_level: string
+  }
+  section?: {
+    section_id: number
+    name: string
+  }
+  strand?: {
+    strand_id: number
+    name: string
+    code: string
   }
   book_transactions?: {
     transaction_id: number
@@ -283,139 +303,151 @@ export default function LibraryUserViewPage() {
       </div>
 
       {/* Content */}
-      <div className="py-4 space-y-6">
+      <div className="px-6 py-4 space-y-6">
         {/* User Details */}
-        <Card>
-          <CardHeader>
-            <CardTitle>User Information</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name
-                </label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                  <span className="text-gray-900 font-medium">{user.full_name}</span>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Personal Info */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                  <i className="fas fa-user text-blue-600 text-sm"></i>
                 </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  ID Number
-                </label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                  <Badge variant="outline" className="text-sm">
-                    {user.account_id}
-                  </Badge>
+                Personal Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="rounded-md border border-gray-200 bg-white divide-y divide-gray-100 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                  <div className="text-gray-500">Full Name</div>
+                  <div className="text-gray-900 font-medium">{user.full_name}</div>
                 </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  User Type
-                </label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                  {getUserTypeBadge(user.user_type)}
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                  <div className="text-gray-500">ID Number</div>
+                  <div className="text-gray-900 font-mono">{user.account_id}</div>
                 </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Status
-                </label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                  {getStatusBadge(user.status)}
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                  <div className="text-gray-500">User Type</div>
+                  <div>{getUserTypeBadge(user.user_type)}</div>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                  <div className="text-gray-500">Status</div>
+                  <div>{getStatusBadge(user.status)}</div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                  <div className="text-gray-500">Created</div>
+                  <div className="text-gray-900">{formatDate(user.created_at)}</div>
+                </div>
+                {user.rfid_code && (
+                  <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                    <div className="text-gray-500">RFID</div>
+                    <div className="text-gray-900 font-mono">{user.rfid_code}</div>
+                  </div>
+                )}
               </div>
-              
-              {user.department_ref && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Department
-                  </label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-gray-900">{user.department_ref.name}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {user.department_ref.code}
-                      </Badge>
+            </CardContent>
+          </Card>
+
+          {/* School Info */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                  <i className="fas fa-graduation-cap text-green-600 text-sm"></i>
+                </div>
+                School Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {user.department_ref || user.program || user.grade_level || user.education_level ? (
+                <div className="rounded-md border border-gray-200 bg-white divide-y divide-gray-100 text-sm">
+                  {user.education_level && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Education Level</div>
+                      <div className="text-gray-900">{user.education_level.replace(/_/g, ' ')}</div>
                     </div>
-                  </div>
-                </div>
-              )}
-              
-              {user.program && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Program
-                  </label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-gray-900">{user.program.name}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {user.program.code}
-                      </Badge>
+                  )}
+                  {user.department_ref && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Department</div>
+                      <div className="text-gray-900">{user.department_ref.name} <span className="text-gray-400">({user.department_ref.code})</span></div>
                     </div>
-                  </div>
+                  )}
+                  {user.program && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Program</div>
+                      <div className="text-gray-900">{user.program.name} <span className="text-gray-400">({user.program.code})</span></div>
+                    </div>
+                  )}
+                  {user.grade_level && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">{user.education_level === 'COLLEGE' ? 'Year Level' : 'Grade Level'}</div>
+                      <div className="text-gray-900">{user.grade_level.name}</div>
+                    </div>
+                  )}
+                  {user.strand && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Strand</div>
+                      <div className="text-gray-900">{user.strand.name} <span className="text-gray-400">({user.strand.code})</span></div>
+                    </div>
+                  )}
+                  {user.section && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Section</div>
+                      <div className="text-gray-900">{user.section.name}</div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-400">
+                  <i className="fas fa-graduation-cap text-3xl mb-2 block"></i>
+                  <p className="text-sm italic">No school information recorded</p>
                 </div>
               )}
-              
-              {user.year_level && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Year Level
-                  </label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-gray-900">{user.year_level}</span>
-                  </div>
+            </CardContent>
+          </Card>
+
+          {/* Contact Info */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                  <i className="fas fa-envelope text-purple-600 text-sm"></i>
+                </div>
+                Contact Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {user.email || user.contact_number || user.purpose ? (
+                <div className="rounded-md border border-gray-200 bg-white divide-y divide-gray-100 text-sm">
+                  {user.email && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Email</div>
+                      <div className="text-gray-900">{user.email}</div>
+                    </div>
+                  )}
+                  {user.contact_number && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Contact Number</div>
+                      <div className="text-gray-900">{user.contact_number}</div>
+                    </div>
+                  )}
+                  {user.purpose && (
+                    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 px-3 py-2">
+                      <div className="text-gray-500">Purpose</div>
+                      <div className="text-gray-900">{user.purpose}</div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-400">
+                  <i className="fas fa-envelope-open text-3xl mb-2 block"></i>
+                  <p className="text-sm italic">No contact information recorded</p>
                 </div>
               )}
-              
-              {user.email && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email
-                  </label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-gray-900">{user.email}</span>
-                  </div>
-                </div>
-              )}
-              
-              {user.contact_number && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Contact Number
-                  </label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-gray-900">{user.contact_number}</span>
-                  </div>
-                </div>
-              )}
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Created Date
-                </label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                  <span className="text-gray-900">{formatDate(user.created_at)}</span>
-                </div>
-              </div>
-              
-              {user.purpose && (
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Purpose
-                  </label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-gray-900">{user.purpose}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Recent Book Transactions */}
         <Card>

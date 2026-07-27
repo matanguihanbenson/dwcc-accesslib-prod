@@ -15,8 +15,9 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Only SUPER_ADMIN and ADMIN can view strands
-    if (token.role !== 'SUPER_ADMIN' && token.role !== 'ADMIN') {
+    // SUPER_ADMIN, ADMIN, and STAFF can view strands
+    // (STAFF needs strand data for library-user filters).
+    if (token.role !== 'SUPER_ADMIN' && token.role !== 'ADMIN' && token.role !== 'STAFF') {
       return NextResponse.json(
         { error: 'Insufficient permissions' },
         { status: 403 }

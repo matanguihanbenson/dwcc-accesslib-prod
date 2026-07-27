@@ -2,6 +2,8 @@ import { BaseService } from './base.service'
 import { AuditService } from './audit.service'
 import { prisma } from '@/lib/prisma'
 import BookStatusManager from '@/lib/book-status-manager'
+import { generateCutterNumber, generateBaseWorkmark, generateFinalWorkmark, interpolateShelflist, cutterToDecimal } from '@/lib/cutter'
+import { generateSpelledTitle } from '@/lib/spelled-title'
 import {
   ServiceResult,
   CreateBookData,
@@ -37,34 +39,109 @@ export class BookService extends BaseService {
       // Extract related entities and drop legacy fields not in schema
       const { authors, contributors, alternate_titles, links, digital_content, book_author, ...bookData } = data as any
 
+      // Compute spelled-out title for workmark generation
+      const spelledTitle = generateSpelledTitle(data.title || '')
+      bookData.spelledout_title = spelledTitle || undefined
+
       // Get first author name for display
       const firstAuthorName = authors && authors.length > 0 ? authors[0].name : (book_author || 'Unknown')
 
+      // Title used for workmark generation: spelled-out version if available, else raw
+      const workmarkTitle = spelledTitle || data.title || ''
+
       // Create book with all relations in a transaction
       const book = await this.executeTransaction(async (tx) => {
-        const createdBook = await tx.book.create({
-          data: {
-            ...bookData,
-            copies_available: data.copies_total || 1,
-            created_by: createdBy,
-            updated_by: createdBy,
-            // Create authors
-            authors: authors && authors.length > 0 ? {
-              create: authors.map((author: any, index: number) => ({
+        // Pre-compute author cutters and workmarks using shelflist interpolation
+        const authorData = authors && authors.length > 0
+          ? await Promise.all(authors.map(async (author: any, index: number) => {
+              // Find existing authors in this classification for shelflist interpolation
+              let cutter: string
+              if (bookData.classification_id) {
+                const existingAuthors = await tx.bookAuthor.findMany({
+                  where: {
+                    book: {
+                      classification_id: bookData.classification_id,
+                      archived_at: null
+                    }
+                  },
+                  select: {
+                    name: true,
+                    cutter_number: true,
+                    book: { select: { title: true } }
+                  },
+                  orderBy: { name: 'asc' }
+                })
+                const shelflist = existingAuthors
+                  .filter((a) => a.cutter_number)
+                  .map((a) => {
+                    const parts = a.name.trim().split(/\s+/)
+                    const surname = (parts.pop() || a.name).replace(/[^A-Za-z]/g, '').toLowerCase()
+                    return {
+                      surname,
+                      fullName: a.name.trim(),
+                      cutter: a.cutter_number!
+                    }
+                  })
+                  .sort((a, b) => a.surname.localeCompare(b.surname))
+                cutter = interpolateShelflist(author.name || '', shelflist)
+              } else {
+                cutter = generateCutterNumber(author.name || '')
+              }
+
+              const baseWm = generateBaseWorkmark(workmarkTitle)
+              let finalWm = baseWm
+
+              if (baseWm && bookData.classification_id) {
+                const existing = await tx.bookAuthor.findMany({
+                  where: {
+                    name: author.name,
+                    book: {
+                      classification_id: bookData.classification_id,
+                      archived_at: null
+                    }
+                  },
+                  select: { final_workmark: true }
+                })
+                const existingMarks = existing
+                  .map((e) => e.final_workmark)
+                  .filter((m): m is string => !!m)
+                finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+              }
+
+              return {
                 name: author.name,
                 dates: author.dates,
+                cutter_number: cutter,
+                decimal_value: cutterToDecimal(cutter),
+                base_workmark: baseWm || undefined,
+                final_workmark: finalWm || undefined,
                 display_order: index + 1
-              }))
-            } : undefined,
-            // Create contributors
-            contributors: contributors && contributors.length > 0 ? {
-              create: contributors.map((contributor: any, index: number) => ({
+              }
+            }))
+          : undefined
+
+        // Pre-compute contributor workmarks
+        const contributorData = contributors && contributors.length > 0
+          ? contributors.map((contributor: any, index: number) => {
+              const cutter = generateCutterNumber(contributor.name || '')
+              return {
                 name: contributor.name,
                 role: contributor.role || 'Contributor',
                 dates: contributor.dates,
+                cutter_number: cutter,
+                decimal_value: cutterToDecimal(cutter),
                 display_order: index + 1
-              }))
-            } : undefined,
+              }
+            })
+          : undefined
+
+        const createdBook = await tx.book.create({
+          data: {
+            ...bookData,
+            created_by: createdBy,
+            updated_by: createdBy,
+            authors: authorData ? { create: authorData } : undefined,
+            contributors: contributorData ? { create: contributorData } : undefined,
             // Create alternate titles
             alternate_titles: alternate_titles && alternate_titles.length > 0 ? {
               create: alternate_titles.map((title: any) => ({
@@ -99,20 +176,6 @@ export class BookService extends BaseService {
             links: true,
             digital_content: true
           }
-        })
-
-        // Generate accession numbers and create book copies
-        const copiesToCreate = data.copies_total || 1
-        const accessionNumbers = await generateAccessionNumbers(copiesToCreate)
-        
-        await tx.bookCopy.createMany({
-          data: accessionNumbers.map(accessionNumber => ({
-            book_id: createdBook.book_id,
-            accession_number: accessionNumber,
-            status: 'AVAILABLE' as const,
-            condition: 'GOOD' as const,
-            acquisition_date: new Date()
-          }))
         })
 
         return createdBook
@@ -230,14 +293,25 @@ export class BookService extends BaseService {
         {
           category: true,
           section: true,
+          classification: true,
           authors: { orderBy: { display_order: 'asc' } },
           contributors: { orderBy: { display_order: 'asc' } },
           alternate_titles: true,
           links: true,
-          digital_content: true
+          digital_content: true,
+          book_copies: {
+            select: { status: true, archived_at: true }
+          }
         },
         'Book not found'
       )
+
+      // Compute actual copy counts from book_copy table
+      const activeCopies = (book as any).book_copies?.filter((c: any) => !c.archived_at) || []
+      const copiesTotal = activeCopies.length
+      const copiesAvailable = activeCopies.filter((c: any) => c.status === 'AVAILABLE').length
+      ;(book as any).copies_total = copiesTotal
+      ;(book as any).copies_available = copiesAvailable
 
       return this.handleSuccess(book)
     } catch (error) {
@@ -267,8 +341,15 @@ export class BookService extends BaseService {
       // Extract related entities and drop legacy fields not in schema
       const { authors, contributors, alternate_titles, links, digital_content, book_author, ...bookData } = data as any
 
+      // Compute spelled-out title for workmark generation
+      const spelledTitle = generateSpelledTitle((data as any).title || '')
+      bookData.spelledout_title = spelledTitle || undefined
+
       // Get first author name for display
       const firstAuthorName = authors && authors.length > 0 ? authors[0].name : (book_author || 'Unknown')
+
+      // Title used for workmark generation: spelled-out version if available, else raw
+      const workmarkTitle = spelledTitle || (data as any).title || ''
 
       // Update copies validation
       if (bookData.copies_total !== undefined) {
@@ -308,29 +389,99 @@ export class BookService extends BaseService {
           await tx.digitalContent.deleteMany({ where: { book_id: validatedId } })
         }
 
+        // Pre-compute author cutters and workmarks using shelflist interpolation
+        const authorData = authors && authors.length > 0
+          ? await Promise.all(authors.map(async (author: any, index: number) => {
+              // Find existing authors in this classification for shelflist interpolation
+              let cutter: string
+              if (bookData.classification_id) {
+                const existingAuthors = await tx.bookAuthor.findMany({
+                  where: {
+                    book: {
+                      classification_id: bookData.classification_id,
+                      archived_at: null,
+                      book_id: { not: validatedId }
+                    }
+                  },
+                  select: {
+                    name: true,
+                    cutter_number: true,
+                    book: { select: { title: true } }
+                  },
+                  orderBy: { name: 'asc' }
+                })
+                const shelflist = existingAuthors
+                  .filter((a) => a.cutter_number)
+                  .map((a) => {
+                    const parts = a.name.trim().split(/\s+/)
+                    const surname = (parts.pop() || a.name).replace(/[^A-Za-z]/g, '').toLowerCase()
+                    return {
+                      surname,
+                      fullName: a.name.trim(),
+                      cutter: a.cutter_number!
+                    }
+                  })
+                  .sort((a, b) => a.surname.localeCompare(b.surname))
+                cutter = interpolateShelflist(author.name || '', shelflist)
+              } else {
+                cutter = generateCutterNumber(author.name || '')
+              }
+
+              const baseWm = generateBaseWorkmark(workmarkTitle)
+              let finalWm = baseWm
+
+              if (baseWm && bookData.classification_id) {
+                const existing = await tx.bookAuthor.findMany({
+                  where: {
+                    name: author.name,
+                    book: {
+                      classification_id: bookData.classification_id,
+                      archived_at: null,
+                      book_id: { not: validatedId }
+                    }
+                  },
+                  select: { final_workmark: true }
+                })
+                const existingMarks = existing
+                  .map((e) => e.final_workmark)
+                  .filter((m): m is string => !!m)
+                finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+              }
+
+              return {
+                name: author.name,
+                dates: author.dates,
+                cutter_number: cutter,
+                decimal_value: cutterToDecimal(cutter),
+                base_workmark: baseWm || undefined,
+                final_workmark: finalWm || undefined,
+                display_order: index + 1
+              }
+            }))
+          : undefined
+
+        const contributorData = contributors && contributors.length > 0
+          ? contributors.map((contributor: any, index: number) => {
+              const cutter = generateCutterNumber(contributor.name || '')
+              return {
+                name: contributor.name,
+                role: contributor.role || 'Contributor',
+                dates: contributor.dates,
+                cutter_number: cutter,
+                decimal_value: cutterToDecimal(cutter),
+                display_order: index + 1
+              }
+            })
+          : undefined
+
         // Update book with new data
         const updated = await tx.book.update({
           where: { book_id: validatedId },
           data: {
             ...bookData,
             updated_by: updatedBy,
-            // Create new authors
-            authors: authors && authors.length > 0 ? {
-              create: authors.map((author: any, index: number) => ({
-                name: author.name,
-                dates: author.dates,
-                display_order: index + 1
-              }))
-            } : undefined,
-            // Create new contributors
-            contributors: contributors && contributors.length > 0 ? {
-              create: contributors.map((contributor: any, index: number) => ({
-                name: contributor.name,
-                role: contributor.role || 'Contributor',
-                dates: contributor.dates,
-                display_order: index + 1
-              }))
-            } : undefined,
+            authors: authorData ? { create: authorData } : undefined,
+            contributors: contributorData ? { create: contributorData } : undefined,
             // Create new alternate titles
             alternate_titles: alternate_titles && alternate_titles.length > 0 ? {
               create: alternate_titles.map((title: any) => ({

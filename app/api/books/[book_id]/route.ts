@@ -130,6 +130,8 @@ function transformUpdateBookPayload(input: any): UpdateBookData {
     // Library management
     category_id: input.category_id ? Number(input.category_id) : undefined,
     section_id: input.section_id ? Number(input.section_id) : undefined,
+    classification_id: input.classification_id ? Number(input.classification_id) : undefined,
+    call_number: input.call_number || undefined,
     location: input.location || undefined,
     copies_total,
 

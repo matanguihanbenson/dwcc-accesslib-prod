@@ -30,13 +30,12 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    // Availability filter
+    // Availability filter — check actual copies in book_copy table
     if (availableOnly) {
       whereConditions.AND.push({
-        AND: [
-          { copies_available: { gt: 0 } },
-          { status: 'AVAILABLE' }
-        ]
+        book_copies: {
+          some: { status: 'AVAILABLE', archived_at: null }
+        }
       })
     }
 
@@ -164,14 +163,17 @@ export async function GET(request: NextRequest) {
         isbn: true,
         publisher: true,
         year_published: true,
-        copies_available: true,
-        copies_total: true,
         description: true,
         summary: true,
         notes: true,
         material_type: true,
         location: true,
         language: true,
+        _count: {
+          select: {
+            book_copies: { where: { archived_at: null } }
+          }
+        },
         authors: {
           select: {
             name: true
@@ -189,6 +191,10 @@ export async function GET(request: NextRequest) {
           select: {
             name: true
           }
+        },
+        book_copies: {
+          select: { status: true },
+          where: { archived_at: null }
         }
       },
       orderBy: orderBy,
@@ -204,6 +210,8 @@ export async function GET(request: NextRequest) {
       // surface a description on the public /browse page.
       let summary = book.summary || ''
       if (!summary) summary = extractSummaryFromNotes(book.notes)
+      const copiesTotal = book._count.book_copies
+      const copiesAvailable = book.book_copies.filter(c => c.status === 'AVAILABLE').length
       return {
         book_id: book.book_id,
         title: book.title,
@@ -212,12 +220,12 @@ export async function GET(request: NextRequest) {
         authors: book.authors.map(a => a.name),
         category: book.category?.name || 'Uncategorized',
         section: book.section?.name,
-        status: book.copies_available === 0 ? 'UNAVAILABLE' : book.status,
+        status: copiesAvailable === 0 ? 'UNAVAILABLE' : book.status,
         isbn: book.isbn,
         publisher: book.publisher,
         year_published: book.year_published,
-        copies_available: book.copies_available,
-        copies_total: book.copies_total,
+        copies_available: copiesAvailable,
+        copies_total: copiesTotal,
         description: book.description,
         summary,
         material_type: book.material_type,

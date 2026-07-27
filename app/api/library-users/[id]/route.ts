@@ -52,6 +52,27 @@ export async function GET(
             is_active: true
           }
         },
+        grade_level: {
+          select: {
+            grade_level_id: true,
+            name: true,
+            code: true,
+            education_level: true
+          }
+        },
+        section: {
+          select: {
+            section_id: true,
+            name: true
+          }
+        },
+        strand: {
+          select: {
+            strand_id: true,
+            name: true,
+            code: true
+          }
+        },
         book_transactions: {
           select: {
             transaction_id: true,
@@ -255,15 +276,45 @@ export async function PUT(
       ? `${computedFullName}, ${String(data.suffix).trim()}`
       : computedFullName
 
+    // Derive education_level from grade level. For college
+    // students the form sends grade_level_id but no explicit
+    // education_level, so we look it up from the grade_level
+    // table. If the student_category is COLLEGE and we still
+    // have no educationLevel, default to COLLEGE.
+    let educationLevel = data.education_level || data.basic_ed_level || null
+    if (!educationLevel && data.grade_level_id) {
+      try {
+        const gradeLevel = await prisma.gradeLevel.findUnique({
+          where: { grade_level_id: parseInt(data.grade_level_id) },
+          select: { education_level: true }
+        })
+        if (gradeLevel) {
+          educationLevel = gradeLevel.education_level
+        }
+      } catch (err) {
+        console.error('Failed to derive education_level from grade_level_id:', data.grade_level_id, err)
+      }
+    }
+    // Fallback: if student_category is explicitly COLLEGE but
+    // we still have no educationLevel (e.g. no grade_level_id
+    // was sent), force it to COLLEGE so the row stays tagged.
+    if (!educationLevel && data.student_category === 'COLLEGE') {
+      educationLevel = 'COLLEGE'
+    }
+
     const updatedUser = await prisma.user.update({
       where: { user_id: userId },
       data: {
         full_name: finalFullName,
         account_id: data.account_id,
         user_type: data.user_type,
+        education_level: educationLevel,
         department_id: data.department_id || null,
         program_id: data.program_id || null,
         office_id: data.office_id || null,
+        grade_level_id: data.grade_level_id ? parseInt(data.grade_level_id) : null,
+        section_id: data.section_id ? parseInt(data.section_id) : null,
+        strand_id: data.strand_id ? parseInt(data.strand_id) : null,
         year_level: data.year_level || null,
         email: data.email || null,
         contact_number: data.contact_number || null,
@@ -281,6 +332,27 @@ export async function PUT(
         program: {
           select: {
             program_id: true,
+            name: true,
+            code: true
+          }
+        },
+        grade_level: {
+          select: {
+            grade_level_id: true,
+            name: true,
+            code: true,
+            education_level: true
+          }
+        },
+        section: {
+          select: {
+            section_id: true,
+            name: true
+          }
+        },
+        strand: {
+          select: {
+            strand_id: true,
             name: true,
             code: true
           }

@@ -355,6 +355,21 @@ export class UserService extends BaseService {
     } else if ((filters as any).has_rfid === 'no') {
       where.rfid_code = null
     }
+
+    // Education level filter — "COLLEGE" matches users whose
+    // education_level is COLLEGE or GRADUATE_SCHOOL;
+    // "BASIC_EDUCATION" matches KINDERGARTEN, ELEMENTARY,
+    // JUNIOR_HIGH, or SENIOR_HIGH.
+    if ((filters as any).education_level) {
+      const el = (filters as any).education_level
+      if (el === 'COLLEGE') {
+        where.education_level = { in: ['COLLEGE', 'GRADUATE_SCHOOL'] }
+      } else if (el === 'BASIC_EDUCATION') {
+        where.education_level = { in: ['KINDERGARTEN', 'ELEMENTARY', 'JUNIOR_HIGH', 'SENIOR_HIGH'] }
+      } else {
+        where.education_level = el
+      }
+    }
     
     if (filters.dateFrom || filters.dateTo) {
       where.created_at = {}

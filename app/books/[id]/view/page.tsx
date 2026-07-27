@@ -55,7 +55,6 @@ export default function BookViewPage() {
         const b = Array.isArray(data) ? data[0] : (data.data || data)
         setBook(b)
 
-        // Fetch recent transactions for authenticated users
         const trxRes = await fetch('/api/borrowing-transactions', { credentials: 'include' })
         if (trxRes.ok) {
           const trxData = await trxRes.json()
@@ -81,16 +80,11 @@ export default function BookViewPage() {
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
-      case 'AVAILABLE':
-        return 'bg-green-100 text-green-800'
-      case 'BORROWED':
-        return 'bg-blue-100 text-blue-800'
-      case 'LOST':
-        return 'bg-red-100 text-red-800'
-      case 'DAMAGED':
-        return 'bg-orange-100 text-orange-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
+      case 'AVAILABLE': return 'bg-green-100 text-green-800 border-green-200'
+      case 'BORROWED': return 'bg-blue-100 text-blue-800 border-blue-200'
+      case 'LOST': return 'bg-red-100 text-red-800 border-red-200'
+      case 'DAMAGED': return 'bg-orange-100 text-orange-800 border-orange-200'
+      default: return 'bg-gray-100 text-gray-800 border-gray-200'
     }
   }
 
@@ -104,8 +98,7 @@ export default function BookViewPage() {
           const parsed = JSON.parse(t)
           if (Array.isArray(parsed)) return parsed
           if (parsed && typeof parsed === 'object') return [parsed]
-        } catch {
-        }
+        } catch {}
       }
       return [{ type: 'Note', content: n }]
     }
@@ -133,98 +126,109 @@ export default function BookViewPage() {
     )
   }
 
-  const notesList = parseNotes((book as any).notes)
+  const notesList = parseNotes((book as any).notes).filter((n) => n.type !== 'Summary')
   const categoryName = typeof book.category === 'string' ? book.category : (book.category?.name || '—')
   const sectionName = typeof (book as any).section === 'string' ? (book as any).section : ((book as any).section?.name || '—')
   const primaryAuthor = (book as any).authors && (book as any).authors.length > 0 ? (book as any).authors[0].name : (book as any).book_author || 'Unknown'
 
   return (
     <div className="space-y-6">
-      {/* Page Header with Back Button and Breadcrumb */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <button onClick={() => router.back()} className="text-gray-600 hover:text-gray-900 transition-colors">
-            <i className="fas fa-arrow-left text-lg"></i>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4 min-w-0">
+          <button
+            onClick={() => router.back()}
+            className="mt-1 flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-gray-500 hover:text-gray-800 hover:border-gray-300 transition-colors"
+          >
+            <i className="fas fa-arrow-left"></i>
           </button>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Book Details</h1>
-            <nav className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
-              <Link href="/books" className="hover:text-gray-700">Books</Link>
-              <i className="fas fa-chevron-right text-xs"></i>
-              <span className="text-gray-900 font-medium">{book.title}</span>
-            </nav>
-          </div>
-        </div>
-        <Link href={`/books/${book.book_id}/edit`} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
-          <i className="fas fa-edit mr-2"></i>
-          Edit Book
-        </Link>
-      </div>
-
-      {/* Hero Card */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg overflow-hidden">
-        <div className="px-8 py-6">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start space-x-6">
-              <div className="flex-shrink-0">
-                <div className="h-24 w-24 rounded-lg bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-xl">
-                  <i className="fas fa-book text-white text-4xl"></i>
-                </div>
-              </div>
-              <div className="flex-1">
-                <h2 className="text-3xl font-bold text-white mb-2">{book.title}</h2>
-                {(book as any).subtitle && (
-                  <p className="text-lg text-blue-100 mb-2">{(book as any).subtitle}</p>
-                )}
-                <p className="text-blue-100 mb-3">by {primaryAuthor}</p>
-                <div className="flex items-center space-x-3">
-                  <span className={`inline-flex items-center px-3 py-1.5 text-sm font-semibold rounded-full ${getStatusBadgeColor(book.status)} shadow-sm`}>
-                    <i className="fas fa-circle text-xs mr-2"></i>
-                    {book.status}
-                  </span>
-                  <span className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-full bg-white/20 text-white backdrop-blur-sm">
-                    <i className="fas fa-folder text-xs mr-2"></i>
-                    {categoryName}
-                  </span>
-                  {(book as any).material_type && (
-                    <span className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-full bg-white/20 text-white backdrop-blur-sm">
-                      <i className="fas fa-tag text-xs mr-2"></i>
-                      {(book as any).material_type}
-                    </span>
-                  )}
-                </div>
-              </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900 leading-tight truncate">{book.title}</h1>
+            {(book as any).subtitle && (
+              <p className="text-sm text-gray-500 mt-0.5 truncate">{(book as any).subtitle}</p>
+            )}
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusBadgeColor(book.status)}`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                {book.status}
+              </span>
+              <span className="text-sm text-gray-600">by <Link href={`/books/authors/${encodeURIComponent(primaryAuthor)}`} className="hover:text-blue-600 hover:underline transition-colors">{primaryAuthor}</Link></span>
+              <span className="text-gray-300">|</span>
+              <span className="text-sm text-gray-500">{categoryName}</span>
+              {(book as any).material_type && (
+                <>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-sm text-gray-500">{(book as any).material_type}</span>
+                </>
+              )}
             </div>
           </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Link
+            href={`/books/${book.book_id}/edit`}
+            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            <i className="fas fa-edit mr-1.5"></i>Edit
+          </Link>
+          <Link
+            href={`/books/${book.book_id}`}
+            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            <i className="fas fa-eye mr-1.5"></i>Public View
+          </Link>
         </div>
       </div>
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Key Info & Stats */}
+        {/* Left Column */}
         <div className="lg:col-span-1 space-y-6">
-          {/* Quick Stats */}
-          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Quick Info</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Section</span>
+          {/* Quick Info */}
+          <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Quick Info</h3>
+            <div className="space-y-0">
+              {(book as any).call_number && (
+                <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                  <span className="text-sm text-gray-500">Call #</span>
+                  <span className="text-sm font-mono font-medium text-gray-900">{(book as any).call_number}</span>
+                </div>
+              )}
+              {(book as any).classification && (
+                <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                  <span className="text-sm text-gray-500">DDC</span>
+                  <span className="text-sm font-mono font-medium text-gray-900">
+                    {(book as any).classification.code}
+                    {((book as any).classification as any).name && (
+                      <span className="font-sans text-gray-400 ml-1">— {((book as any).classification as any).name}</span>
+                    )}
+                  </span>
+                </div>
+              )}
+              {(book as any).edition && (
+                <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                  <span className="text-sm text-gray-500">Edition</span>
+                  <span className="text-sm font-medium text-gray-900">{(book as any).edition}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                <span className="text-sm text-gray-500">Section</span>
                 <span className="text-sm font-medium text-gray-900">{sectionName}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Language</span>
+              <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                <span className="text-sm text-gray-500">Language</span>
                 <span className="text-sm font-medium text-gray-900">{display((book as any).language)}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Location</span>
+              <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                <span className="text-sm text-gray-500">Location</span>
                 <span className="text-sm font-medium text-gray-900">{display((book as any).location)}</span>
               </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-600">Copies</span>
-                <span className="text-sm font-medium text-gray-900">
+              <div className="flex items-center justify-between py-2.5">
+                <span className="text-sm text-gray-500">Copies</span>
+                <span className="text-sm font-medium">
                   <span className="text-green-600">{display((book as any).copies_available)}</span>
-                  <span className="text-gray-400 mx-1">/</span>
-                  {display((book as any).copies_total)}
+                  <span className="text-gray-300 mx-1">/</span>
+                  <span className="text-gray-900">{display((book as any).copies_total)}</span>
                 </span>
               </div>
             </div>
@@ -232,24 +236,24 @@ export default function BookViewPage() {
 
           {/* Standard Numbers */}
           {((book as any).isbn || (book as any).issn || (book as any).lccn) && (
-            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Standard Numbers</h3>
+            <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Standard Numbers</h3>
               <div className="space-y-3">
                 {(book as any).isbn && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">ISBN</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">ISBN</label>
                     <p className="text-sm text-gray-900 font-mono">{(book as any).isbn}</p>
                   </div>
                 )}
                 {(book as any).issn && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">ISSN</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">ISSN</label>
                     <p className="text-sm text-gray-900 font-mono">{(book as any).issn}</p>
                   </div>
                 )}
                 {(book as any).lccn && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">LCCN</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">LCCN</label>
                     <p className="text-sm text-gray-900 font-mono">{(book as any).lccn}</p>
                   </div>
                 )}
@@ -259,31 +263,25 @@ export default function BookViewPage() {
 
           {/* Physical Description */}
           {((book as any).pages || (book as any).extent || (book as any).size) && (
-            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Physical Description</h3>
-              <div className="space-y-3">
+            <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Physical Description</h3>
+              <div className="space-y-0">
                 {(book as any).pages && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Pages</span>
+                  <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                    <span className="text-sm text-gray-500">Pages</span>
                     <span className="text-sm font-medium text-gray-900">{(book as any).pages}</span>
                   </div>
                 )}
                 {(book as any).extent && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Extent</span>
+                  <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                    <span className="text-sm text-gray-500">Extent</span>
                     <span className="text-sm font-medium text-gray-900">{(book as any).extent}</span>
                   </div>
                 )}
                 {(book as any).size && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Size</span>
+                  <div className="flex items-center justify-between py-2">
+                    <span className="text-sm text-gray-500">Size</span>
                     <span className="text-sm font-medium text-gray-900">{(book as any).size}</span>
-                  </div>
-                )}
-                {(book as any).other_details && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Other Details</label>
-                    <p className="text-sm text-gray-900">{(book as any).other_details}</p>
                   </div>
                 )}
               </div>
@@ -291,73 +289,119 @@ export default function BookViewPage() {
           )}
         </div>
 
-        {/* Right Column - Detailed Info */}
+        {/* Right Column */}
         <div className="lg:col-span-2 space-y-6">
           {/* Publication Information */}
           <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-5 flex items-center">
-              <i className="fas fa-book-open text-blue-600 mr-3"></i>
+            <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                <i className="fas fa-book-open text-blue-600 text-xs"></i>
+              </div>
               Publication Information
             </h3>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Publisher</label>
+                <label className="block text-xs text-gray-400 mb-0.5">Publisher</label>
                 <p className="text-sm text-gray-900">{display((book as any).publisher)}</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Publication Place</label>
+                <label className="block text-xs text-gray-400 mb-0.5">Publication Place</label>
                 <p className="text-sm text-gray-900">{display((book as any).publication_place)}</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Publication Date</label>
+                <label className="block text-xs text-gray-400 mb-0.5">Publication Date</label>
                 <p className="text-sm text-gray-900">{display((book as any).publication_date)}</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Year Published</label>
+                <label className="block text-xs text-gray-400 mb-0.5">Year Published</label>
                 <p className="text-sm text-gray-900">{display((book as any).year_published)}</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Edition</label>
+                <label className="block text-xs text-gray-400 mb-0.5">Edition</label>
                 <p className="text-sm text-gray-900">{display((book as any).edition)}</p>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-0.5">Language</label>
+                <p className="text-sm text-gray-900">{display((book as any).language)}</p>
               </div>
             </div>
           </div>
 
+          {/* Classification */}
+          {((book as any).call_number || (book as any).classification) && (
+            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-tags text-blue-600 text-xs"></i>
+                </div>
+                Classification
+              </h3>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                {(book as any).call_number && (
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-0.5">Call Number</label>
+                    <p className="text-sm text-gray-900 font-mono">{(book as any).call_number}</p>
+                  </div>
+                )}
+                {(book as any).classification && (
+                  <>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-0.5">DDC Code</label>
+                      <p className="text-sm text-gray-900 font-mono">{(book as any).classification.code}</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-0.5">DDC Name</label>
+                      <p className="text-sm text-gray-900">{((book as any).classification as any).name || '—'}</p>
+                    </div>
+                    {((book as any).classification as any).level && (
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-0.5">DDC Level</label>
+                        <p className="text-sm text-gray-900">{((book as any).classification as any).level}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Series & Reading Levels */}
           {((book as any).series_title || (book as any).interest_level || (book as any).lexile_code || (book as any).fountas_pinnell) && (
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-5 flex items-center">
-                <i className="fas fa-layer-group text-blue-600 mr-3"></i>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-layer-group text-blue-600 text-xs"></i>
+                </div>
                 Series & Reading Levels
               </h3>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                 {(book as any).series_title && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Series Title</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">Series Title</label>
                     <p className="text-sm text-gray-900">{(book as any).series_title}</p>
                   </div>
                 )}
                 {(book as any).volume_number && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Volume Number</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">Volume Number</label>
                     <p className="text-sm text-gray-900">{(book as any).volume_number}</p>
                   </div>
                 )}
                 {(book as any).interest_level && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Interest Level</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">Interest Level</label>
                     <p className="text-sm text-gray-900">{(book as any).interest_level}</p>
                   </div>
                 )}
                 {(book as any).lexile_code && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Lexile Code</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">Lexile Code</label>
                     <p className="text-sm text-gray-900">{(book as any).lexile_code}</p>
                   </div>
                 )}
                 {(book as any).fountas_pinnell && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Fountas & Pinnell</label>
+                    <label className="block text-xs text-gray-400 mb-0.5">Fountas & Pinnell</label>
                     <p className="text-sm text-gray-900">{(book as any).fountas_pinnell}</p>
                   </div>
                 )}
@@ -365,40 +409,38 @@ export default function BookViewPage() {
             </div>
           )}
 
-          {/* Description & Summary */}
+          {/* Description */}
           {((book as any).description || (book as any).summary) && (
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-5 flex items-center">
-                <i className="fas fa-align-left text-blue-600 mr-3"></i>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-align-left text-blue-600 text-xs"></i>
+                </div>
                 Description
               </h3>
               {(book as any).description && (
-                <div className="mb-4">
-                  <label className="block text-xs font-medium text-gray-500 mb-2">Description</label>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(book as any).description}</p>
-                </div>
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(book as any).description}</p>
               )}
-              {(book as any).summary && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-2">Summary</label>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(book as any).summary}</p>
-                </div>
+              {!((book as any).description) && (book as any).summary && (
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(book as any).summary}</p>
               )}
             </div>
           )}
 
-          {/* Notes */}
+          {/* Notes — filter out Summary type since it's shown in Description */}
           {notesList.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
-              <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center">
-                <i className="fas fa-sticky-note text-amber-600 mr-2"></i>
+              <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center">
+                  <i className="fas fa-sticky-note text-amber-600 text-xs"></i>
+                </div>
                 Notes
               </h3>
               <ul className="space-y-2">
                 {notesList.map((n, i) => (
                   <li key={i} className="text-sm text-amber-900">
                     {n.type && (
-                      <span className="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-xs font-medium mr-2">
+                      <span className="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-medium mr-2">
                         {n.type}
                       </span>
                     )}
@@ -416,8 +458,10 @@ export default function BookViewPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {Array.isArray((book as any).authors) && (book as any).authors.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <i className="fas fa-user-edit text-blue-600 mr-3"></i>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-user-edit text-blue-600 text-xs"></i>
+                </div>
                 Authors
               </h3>
               <ul className="space-y-2">
@@ -425,7 +469,7 @@ export default function BookViewPage() {
                   <li key={idx} className="flex items-start">
                     <i className="fas fa-circle text-blue-400 text-xs mt-1.5 mr-3"></i>
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{a.name}</p>
+                      <Link href={`/books/authors/${encodeURIComponent(a.name)}`} className="text-sm font-medium text-gray-900 hover:text-blue-600 hover:underline transition-colors">{a.name}</Link>
                       {a.dates && <p className="text-xs text-gray-500">{a.dates}</p>}
                     </div>
                   </li>
@@ -435,8 +479,10 @@ export default function BookViewPage() {
           )}
           {Array.isArray((book as any).contributors) && (book as any).contributors.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <i className="fas fa-users text-blue-600 mr-3"></i>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-users text-blue-600 text-xs"></i>
+                </div>
                 Contributors
               </h3>
               <ul className="space-y-2">
@@ -444,7 +490,7 @@ export default function BookViewPage() {
                   <li key={idx} className="flex items-start">
                     <i className="fas fa-circle text-blue-400 text-xs mt-1.5 mr-3"></i>
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                      <Link href={`/books/authors/${encodeURIComponent(c.name)}`} className="text-sm font-medium text-gray-900 hover:text-blue-600 hover:underline transition-colors">{c.name}</Link>
                       {(c.role || c.dates) && (
                         <p className="text-xs text-gray-500">{[c.role, c.dates].filter(Boolean).join(' • ')}</p>
                       )}
@@ -462,8 +508,10 @@ export default function BookViewPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {Array.isArray((book as any).alternate_titles) && (book as any).alternate_titles.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <i className="fas fa-heading text-blue-600 mr-3"></i>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-heading text-blue-600 text-xs"></i>
+                </div>
                 Alternate Titles
               </h3>
               <ul className="space-y-2">
@@ -481,17 +529,19 @@ export default function BookViewPage() {
           )}
           {Array.isArray((book as any).links) && (book as any).links.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <i className="fas fa-link text-blue-600 mr-3"></i>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+                  <i className="fas fa-link text-blue-600 text-xs"></i>
+                </div>
                 Links
               </h3>
               <ul className="space-y-2">
                 {(book as any).links.map((l: any, idx: number) => (
                   <li key={idx}>
-                    <a 
-                      className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors" 
-                      href={l.url} 
-                      target="_blank" 
+                    <a
+                      className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                      href={l.url}
+                      target="_blank"
                       rel="noreferrer"
                     >
                       <i className="fas fa-external-link-alt text-xs mr-2"></i>
@@ -508,8 +558,10 @@ export default function BookViewPage() {
       {/* Digital Content */}
       {Array.isArray((book as any).digital_content) && (book as any).digital_content.length > 0 && (
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <i className="fas fa-cloud text-blue-600 mr-3"></i>
+          <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+              <i className="fas fa-cloud text-blue-600 text-xs"></i>
+            </div>
             Digital Content
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -525,10 +577,10 @@ export default function BookViewPage() {
                     )}
                   </div>
                   {d.url && (
-                    <a 
-                      className="ml-3 text-blue-600 hover:text-blue-800 transition-colors" 
-                      href={d.url} 
-                      target="_blank" 
+                    <a
+                      className="ml-3 text-blue-600 hover:text-blue-800 transition-colors"
+                      href={d.url}
+                      target="_blank"
                       rel="noreferrer"
                       title="Open"
                     >
@@ -544,8 +596,10 @@ export default function BookViewPage() {
 
       {/* Recent Transactions */}
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-          <i className="fas fa-history text-blue-600 mr-3"></i>
+        <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div className="w-7 h-7 rounded-md bg-blue-50 flex items-center justify-center">
+            <i className="fas fa-history text-blue-600 text-xs"></i>
+          </div>
           Recent Transactions
         </h3>
         {recentTransactions.length === 0 ? (

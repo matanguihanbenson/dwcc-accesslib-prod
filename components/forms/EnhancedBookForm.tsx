@@ -4,9 +4,11 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   forwardRef,
   useImperativeHandle
 } from 'react'
+import SearchableSelect from '@/components/forms/SearchableSelect'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import IsbnLookupModal from './IsbnLookupModal'
@@ -52,7 +54,7 @@ interface EnhancedBookFormProps {
   loading?: boolean
   initialData?: Partial<any>
   categories?: { category_id: number; name: string }[]
-  sections?: { section_id: number; name: string }[]
+  sections?: { section_id: number; name: string; code?: string | null }[]
   isEditing?: boolean
 }
 
@@ -149,11 +151,10 @@ export const EnhancedBookForm = forwardRef<
     language: 'English',
     description: '',
     summary: '',
-    copies: '1'
   })
 
   const [categories, setCategories] = useState<{ category_id: number; name: string }[]>(propCategories || [])
-  const [sections, setSections] = useState<{ section_id: number; name: string }[]>(propSections || [])
+  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null }[]>(propSections || [])
 
   // Dynamic option lists for the hard-coded <select> fields.
   // We start from the same defaults the original form used
@@ -178,6 +179,220 @@ export const EnhancedBookForm = forwardRef<
   const [fountasPinnellOptions, setFountasPinnellOptions] = useState<string[]>([
     'Any Level', 'Level A', 'Level B', 'Level C', 'Level D', 'Level Z'
   ])
+
+  // ── DDC Classification cascading state ────────────────────
+  type ClassificationNode = {
+    id: number
+    code: string
+    name: string
+    level: string
+    is_active: boolean
+  }
+  const [classificationMainClasses, setClassificationMainClasses] = useState<ClassificationNode[]>([])
+  const [classificationDivisions, setClassificationDivisions] = useState<ClassificationNode[]>([])
+  const [classificationSections, setClassificationSections] = useState<ClassificationNode[]>([])
+  const [classificationDecimals, setClassificationDecimals] = useState<ClassificationNode[]>([])
+  const [classificationDeeper, setClassificationDeeper] = useState<ClassificationNode[]>([])
+
+  const [selectedMainClass, setSelectedMainClass] = useState<string>('')
+  const [selectedDivision, setSelectedDivision] = useState<string>('')
+  const [selectedSection, setSelectedSection] = useState<string>('')
+  const [selectedDecimal, setSelectedDecimal] = useState<string>('')
+  const [selectedDeeper, setSelectedDeeper] = useState<string>('')
+
+  // Fetch children of a classification node
+  const fetchClassificationChildren = useCallback(async (parentId: number): Promise<ClassificationNode[]> => {
+    try {
+      const res = await fetch(`/api/book-classifications?parent_id=${parentId}`, { credentials: 'include', cache: 'no-store' })
+      if (!res.ok) return []
+      const data = await res.json()
+      const list = Array.isArray(data) ? data : (data?.data ?? [])
+      return list.filter((c: any) => c?.is_active)
+    } catch {
+      return []
+    }
+  }, [])
+
+  // Load root classifications (Main Classes) on mount
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/book-classifications?roots=true', { credentials: 'include', cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data) ? data : (data?.data ?? [])
+        setClassificationMainClasses(list.filter((c: any) => c?.is_active))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Cascade: when main class changes, load divisions
+  useEffect(() => {
+    if (!selectedMainClass) {
+      setClassificationDivisions([])
+      setSelectedDivision('')
+      setClassificationSections([])
+      setSelectedSection('')
+      setClassificationDecimals([])
+      setSelectedDecimal('')
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+      return
+    }
+    let cancelled = false
+    fetchClassificationChildren(parseInt(selectedMainClass)).then((items) => {
+      if (cancelled) return
+      setClassificationDivisions(items)
+      setSelectedDivision('')
+      setClassificationSections([])
+      setSelectedSection('')
+      setClassificationDecimals([])
+      setSelectedDecimal('')
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+    })
+    return () => { cancelled = true }
+  }, [selectedMainClass, fetchClassificationChildren])
+
+  // Cascade: when division changes, load sections
+  useEffect(() => {
+    if (!selectedDivision) {
+      setClassificationSections([])
+      setSelectedSection('')
+      setClassificationDecimals([])
+      setSelectedDecimal('')
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+      return
+    }
+    let cancelled = false
+    fetchClassificationChildren(parseInt(selectedDivision)).then((items) => {
+      if (cancelled) return
+      setClassificationSections(items)
+      setSelectedSection('')
+      setClassificationDecimals([])
+      setSelectedDecimal('')
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+    })
+    return () => { cancelled = true }
+  }, [selectedDivision, fetchClassificationChildren])
+
+  // Cascade: when section changes, load decimal subdivisions
+  useEffect(() => {
+    if (!selectedSection) {
+      setClassificationDecimals([])
+      setSelectedDecimal('')
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+      return
+    }
+    let cancelled = false
+    fetchClassificationChildren(parseInt(selectedSection)).then((items) => {
+      if (cancelled) return
+      setClassificationDecimals(items)
+      setSelectedDecimal('')
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+    })
+    return () => { cancelled = true }
+  }, [selectedSection, fetchClassificationChildren])
+
+  // Cascade: when decimal changes, load deeper subdivisions
+  useEffect(() => {
+    if (!selectedDecimal) {
+      setClassificationDeeper([])
+      setSelectedDeeper('')
+      return
+    }
+    let cancelled = false
+    fetchClassificationChildren(parseInt(selectedDecimal)).then((items) => {
+      if (cancelled) return
+      setClassificationDeeper(items)
+      setSelectedDeeper('')
+    })
+    return () => { cancelled = true }
+  }, [selectedDecimal, fetchClassificationChildren])
+
+  // Derive the leaf classification ID from the deepest selected node
+  const classificationId = useMemo(() => {
+    return selectedDeeper || selectedDecimal || selectedSection || selectedDivision || selectedMainClass || null
+  }, [selectedDeeper, selectedDecimal, selectedSection, selectedDivision, selectedMainClass])
+
+  // Edit-mode: initialize classification selections from initialData.classification_id
+  useEffect(() => {
+    if (!isEditing || !initialData?.classification_id) return
+    let cancelled = false
+    const leafId = Number(initialData.classification_id)
+    if (!leafId) return
+
+    const initClassification = async () => {
+      try {
+        // Fetch the leaf node and walk up the parent chain
+        const path: { id: number; code: string; name: string; level: string; parent_id: number | null }[] = []
+        let currentId: number | null = leafId
+        while (currentId) {
+          const res = await fetch(`/api/book-classifications/${currentId}`, { credentials: 'include', cache: 'no-store' })
+          if (!res.ok) break
+          const json = await res.json()
+          const node = json.data || json
+          if (!node) break
+          path.unshift({ id: node.id, code: node.code, name: node.name, level: node.level, parent_id: node.parent_id })
+          currentId = node.parent_id
+        }
+        if (cancelled || path.length === 0) return
+
+        // Set selections from root to leaf
+        const byLevel: Record<string, string> = {}
+        for (const p of path) {
+          byLevel[p.level] = String(p.id)
+        }
+
+        if (byLevel.MAIN_CLASS) setSelectedMainClass(byLevel.MAIN_CLASS)
+
+        // Load divisions for the selected main class, then set division, etc.
+        if (byLevel.DIVISION) {
+          const divRes = await fetch(`/api/book-classifications?parent_id=${byLevel.MAIN_CLASS}`, { credentials: 'include', cache: 'no-store' })
+          if (divRes.ok) {
+            const divData = await divRes.json()
+            const divList = Array.isArray(divData) ? divData : (divData?.data ?? [])
+            setClassificationDivisions(divList.filter((c: any) => c?.is_active))
+          }
+          setSelectedDivision(byLevel.DIVISION)
+        }
+        if (byLevel.SECTION) {
+          const secRes = await fetch(`/api/book-classifications?parent_id=${byLevel.DIVISION}`, { credentials: 'include', cache: 'no-store' })
+          if (secRes.ok) {
+            const secData = await secRes.json()
+            const secList = Array.isArray(secData) ? secData : (secData?.data ?? [])
+            setClassificationSections(secList.filter((c: any) => c?.is_active))
+          }
+          setSelectedSection(byLevel.SECTION)
+        }
+        if (byLevel.DECIMAL_SUBDIVISION) {
+          const decRes = await fetch(`/api/book-classifications?parent_id=${byLevel.SECTION}`, { credentials: 'include', cache: 'no-store' })
+          if (decRes.ok) {
+            const decData = await decRes.json()
+            const decList = Array.isArray(decData) ? decData : (decData?.data ?? [])
+            setClassificationDecimals(decList.filter((c: any) => c?.is_active))
+          }
+          setSelectedDecimal(byLevel.DECIMAL_SUBDIVISION)
+        }
+        if (byLevel.DEEPER_SUBDIVISION) {
+          const deepRes = await fetch(`/api/book-classifications?parent_id=${byLevel.DECIMAL_SUBDIVISION}`, { credentials: 'include', cache: 'no-store' })
+          if (deepRes.ok) {
+            const deepData = await deepRes.json()
+            const deepList = Array.isArray(deepData) ? deepData : (deepData?.data ?? [])
+            setClassificationDeeper(deepList.filter((c: any) => c?.is_active))
+          }
+          setSelectedDeeper(byLevel.DEEPER_SUBDIVISION)
+        }
+      } catch {}
+    }
+    initClassification()
+    return () => { cancelled = true }
+  }, [isEditing, initialData?.classification_id])
 
   // Pull the live catalog values from the
   // `book_catalog_value` table so anything an admin added
@@ -435,7 +650,7 @@ export const EnhancedBookForm = forwardRef<
       language: d.language ?? 'English',
       description: d.description ?? '',
       summary: d.summary ?? '',
-      copies: (d.copies != null ? String(d.copies) : (d.copies_total != null ? String(d.copies_total) : formData.copies)),
+      copies: (d.copies != null ? String(d.copies) : (d.copies_total != null ? String(d.copies_total) : '1')),
 
       // Resources
       links,
@@ -755,7 +970,7 @@ export const EnhancedBookForm = forwardRef<
 
       // Title Information
       subtitle: book.subtitle,
-      edition: (book.raw?.edition_statement as string) || prev.edition,
+      edition: (book.raw?.edition_statement as string) || (book.raw?.edition_name as string) || prev.edition,
       lccn,
       isbn: book.isbn,
       issn,
@@ -823,12 +1038,6 @@ export const EnhancedBookForm = forwardRef<
       return
     }
     
-    if (!formData.copies || parseInt(formData.copies) < 1) {
-      alert('Please enter a valid number of copies')
-      setActiveTab('details')
-      return
-    }
-    
     // If book_author is empty but we have coAuthors, use the first coAuthor as the main author
     // Derive `summary` from the first note with type "Summary"
     // so the public /browse page can render it on the card.
@@ -845,7 +1054,8 @@ export const EnhancedBookForm = forwardRef<
     const submissionData = {
       ...formData,
       book_author: formData.book_author.trim() || formData.coAuthors.find(a => a.name.trim())?.name || '',
-      summary: derivedSummary
+      summary: derivedSummary,
+      classification_id: classificationId ? parseInt(classificationId) : null,
     }
     
     await onSubmit(submissionData)
@@ -1268,21 +1478,83 @@ export const EnhancedBookForm = forwardRef<
                       </select>
                     </div>
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Number of Copies <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      name="copies"
-                      value={formData.copies}
-                      onChange={handleInputChange}
-                      min="1"
-                      required
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    />
+                {/* DDC Classification — visible on Brief Title for quick access */}
+                <div className="space-y-4 pt-4 border-t border-gray-200">
+                  <h3 className="font-medium text-gray-900">Classification (DDC)</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Main Class</label>
+                      <SearchableSelect
+                        value={selectedMainClass}
+                        onChange={setSelectedMainClass}
+                        placeholder="None"
+                        options={classificationMainClasses.map((c) => ({
+                          value: String(c.id),
+                          label: `${c.code} — ${c.name}`
+                        }))}
+                      />
+                    </div>
+                    {classificationDivisions.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
+                        <SearchableSelect
+                          value={selectedDivision}
+                          onChange={setSelectedDivision}
+                          placeholder="None"
+                          options={classificationDivisions.map((c) => ({
+                            value: String(c.id),
+                            label: `${c.code} — ${c.name}`
+                          }))}
+                        />
+                      </div>
+                    )}
                   </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {classificationSections.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+                        <SearchableSelect
+                          value={selectedSection}
+                          onChange={setSelectedSection}
+                          placeholder="None"
+                          options={classificationSections.map((c) => ({
+                            value: String(c.id),
+                            label: `${c.code} — ${c.name}`
+                          }))}
+                        />
+                      </div>
+                    )}
+                    {classificationDecimals.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Decimal Subdivision</label>
+                        <SearchableSelect
+                          value={selectedDecimal}
+                          onChange={setSelectedDecimal}
+                          placeholder="None"
+                          options={classificationDecimals.map((c) => ({
+                            value: String(c.id),
+                            label: `${c.code} — ${c.name}`
+                          }))}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {classificationDeeper.length > 0 && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Deeper Subdivision</label>
+                      <SearchableSelect
+                        value={selectedDeeper}
+                        onChange={setSelectedDeeper}
+                        placeholder="None"
+                        options={classificationDeeper.map((c) => ({
+                          value: String(c.id),
+                          label: `${c.code} — ${c.name}`
+                        }))}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1655,24 +1927,86 @@ export const EnhancedBookForm = forwardRef<
                       </option>
                     </select>
                   </div>
-                </div>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Number of Copies <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    name="copies"
-                    value={formData.copies}
-                    onChange={handleInputChange}
-                    min="1"
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  />
+                  {/* DDC Classification — cascading dropdowns with search */}
+                  <div className="pt-4 border-t border-gray-200 space-y-4">
+                    <h3 className="font-medium text-gray-900">Classification (DDC)</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Main Class</label>
+                        <SearchableSelect
+                          value={selectedMainClass}
+                          onChange={setSelectedMainClass}
+                          placeholder="None"
+                          options={classificationMainClasses.map((c) => ({
+                            value: String(c.id),
+                            label: `${c.code} — ${c.name}`
+                          }))}
+                        />
+                      </div>
+                      {classificationDivisions.length > 0 && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
+                          <SearchableSelect
+                            value={selectedDivision}
+                            onChange={setSelectedDivision}
+                            placeholder="None"
+                            options={classificationDivisions.map((c) => ({
+                              value: String(c.id),
+                              label: `${c.code} — ${c.name}`
+                            }))}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      {classificationSections.length > 0 && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+                          <SearchableSelect
+                            value={selectedSection}
+                            onChange={setSelectedSection}
+                            placeholder="None"
+                            options={classificationSections.map((c) => ({
+                              value: String(c.id),
+                              label: `${c.code} — ${c.name}`
+                            }))}
+                          />
+                        </div>
+                      )}
+                      {classificationDecimals.length > 0 && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Decimal Subdivision</label>
+                          <SearchableSelect
+                            value={selectedDecimal}
+                            onChange={setSelectedDecimal}
+                            placeholder="None"
+                            options={classificationDecimals.map((c) => ({
+                              value: String(c.id),
+                              label: `${c.code} — ${c.name}`
+                            }))}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {classificationDeeper.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Deeper Subdivision</label>
+                        <SearchableSelect
+                          value={selectedDeeper}
+                          onChange={setSelectedDeeper}
+                          placeholder="None"
+                          options={classificationDeeper.map((c) => ({
+                            value: String(c.id),
+                            label: `${c.code} — ${c.name}`
+                          }))}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* Added Entries Tab */}
             {activeTab === 'entries' && (
