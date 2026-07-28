@@ -78,7 +78,7 @@ export default function EditBookPage() {
     loadData()
   }, [authLoading, isAuthenticated, isStaff, bookId, router])
 
-  // Intercept form submission: capture data, fetch classification code, show preview
+  // Intercept form submission: capture data, fetch classification code, call cutter API, show preview
   const handleFormSubmit = useCallback(async (data: any) => {
     // Fetch the classification code if we have a classification_id
     let classificationCode = null
@@ -102,19 +102,53 @@ export default function EditBookPage() {
     const section = sections.find((s) => s.section_id === data.section_id)
     const sectionCode = section?.code || null
 
-    // Generate the call number
-    const cn = generateCallNumber({
-      section_code: sectionCode,
-      classification_code: classificationCode,
-      book_author: data.book_author,
-      title: data.title,
-      year_published: data.year_published || data.publication_year || null,
-    })
+    // Call the cutter API for shelflist-interpolated cutter + workmark
+    let cutterPart = ''
+    let finalCallNumber = ''
+    try {
+      const cutterRes = await fetch('/api/cutter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: data.book_author,
+          classification_id: data.classification_id,
+          section_id: data.section_id,
+          title: data.title,
+          book_id: Number(bookId), // exclude this book from shelflist
+        })
+      })
+      if (cutterRes.ok) {
+        const cutterData = await cutterRes.json()
+        const result = cutterData.data || cutterData
+        cutterPart = result.full_cutter || ''
+      }
+    } catch {}
+
+    // Assemble: Section + DDC + CutterWorkmark + Year
+    const parts: string[] = []
+    if (sectionCode) parts.push(sectionCode)
+    if (classificationCode) parts.push(classificationCode)
+    if (cutterPart) parts.push(cutterPart)
+    const year = data.year_published || data.publication_year
+    if (year) parts.push(String(year))
+    finalCallNumber = parts.join(' ')
+
+    // Fallback: if API call failed, use local generation
+    if (!finalCallNumber || finalCallNumber === sectionCode || finalCallNumber === `${sectionCode} ${classificationCode}`) {
+      finalCallNumber = generateCallNumber({
+        section_code: sectionCode,
+        classification_code: classificationCode,
+        book_author: data.book_author,
+        title: data.title,
+        year_published: year || null,
+      })
+    }
 
     setPendingData({ ...data, classification_code: classificationCode })
-    setSuggestedCallNumber(cn)
+    setSuggestedCallNumber(finalCallNumber)
     setShowPreview(true)
-  }, [sections])
+  }, [sections, bookId])
 
   // Save with the (possibly edited) call number
   const handleConfirmSave = useCallback(async (callNumber: string) => {
@@ -224,6 +258,7 @@ export default function EditBookPage() {
         bookData={pendingData || {}}
         suggestedCallNumber={suggestedCallNumber}
         loading={saving}
+        isEditing={true}
       />
     </div>
   )

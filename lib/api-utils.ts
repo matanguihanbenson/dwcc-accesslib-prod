@@ -172,6 +172,8 @@ export function getSearchParams(req: NextRequest) {
     dateFrom: searchParams.get('dateFrom') ? new Date(searchParams.get('dateFrom')!) : undefined,
     dateTo: searchParams.get('dateTo') ? new Date(searchParams.get('dateTo')!) : undefined,
     section_id: searchParams.get('section_id') || '',
+    classification_id: searchParams.get('classification_id') || '',
+    category: searchParams.get('category') || '',
     grade_level_id: searchParams.get('grade_level_id') || '',
     strand_id: searchParams.get('strand_id') || '',
     office_id: searchParams.get('office_id') || '',

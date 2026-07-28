@@ -2929,6 +2929,147 @@ export class PDFReportGenerator {
     }
   }
 
+  /**
+   * Generate a landscape PDF listing all books under a
+   * specific classification. Used by the "Books by
+   * Classification" report.
+   *
+   * Layout:
+   *   Row 1 — Classification name (full-width, centered,
+   *            royal blue bg, white text, all caps)
+   *   Row 2 — Column headers (light green bg, black text,
+   *            title case)
+   *   Data rows with: Call No., Acc. No., Title, Author,
+   *   Edition, Year, No. Titles, No. of Volumes
+   */
+  generateClassificationBookList(
+    classificationName: string,
+    classificationCode: string,
+    books: Array<{
+      call_number: string
+      accession_numbers: string
+      title: string
+      author: string
+      edition: string
+      year_published: string
+      no_titles: string
+      no_volumes: string
+    }>,
+    preparedBy?: string
+  ): void {
+    // Create a fresh landscape A4 document
+    const landscapeDoc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    })
+
+    const pageWidth = landscapeDoc.internal.pageSize.getWidth()
+    const pageHeight = landscapeDoc.internal.pageSize.getHeight()
+    const marginLeft = 10
+    const marginRight = 25
+    const marginTop = 15
+    const usableWidth = pageWidth - marginLeft - marginRight
+
+    // ── Title row ────────────────────────────────────
+    const titleText = `${classificationCode} ${classificationName}`.toUpperCase()
+    const titleRowHeight = 12
+
+    landscapeDoc.setFillColor(65, 85, 180) // royal blue
+    landscapeDoc.rect(marginLeft, marginTop, usableWidth, titleRowHeight, 'F')
+    landscapeDoc.setTextColor(255, 255, 255)
+    landscapeDoc.setFontSize(12)
+    landscapeDoc.setFont('helvetica', 'bold')
+    landscapeDoc.text(titleText, pageWidth / 2, marginTop + titleRowHeight / 2 + 1, {
+      align: 'center'
+    })
+
+    // ── Column definitions ───────────────────────────
+    const columns = [
+      { header: 'Call No.', dataKey: 'call_number' },
+      { header: 'Acc. No', dataKey: 'accession_numbers' },
+      { header: 'Title', dataKey: 'title' },
+      { header: 'Author', dataKey: 'author' },
+      { header: 'Edition', dataKey: 'edition' },
+      { header: 'Year', dataKey: 'year_published' },
+      { header: 'No. Titles', dataKey: 'no_titles' },
+      { header: 'No. of Volumes', dataKey: 'no_volumes' }
+    ]
+
+    // ── Table body ───────────────────────────────────
+    const body = books.map((b) => [
+      b.call_number,
+      b.accession_numbers,
+      b.title,
+      b.author,
+      b.edition,
+      b.year_published,
+      b.no_titles,
+      b.no_volumes
+    ])
+
+    autoTable(landscapeDoc, {
+      head: [columns.map((c) => c.header)],
+      body,
+      startY: marginTop + titleRowHeight + 2,
+      margin: { left: marginLeft, right: marginRight, top: 0, bottom: marginTop },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 0.5,
+        overflow: 'linebreak',
+        font: 'helvetica',
+        textColor: [0, 0, 0],
+        lineColor: [0, 0, 0],
+        lineWidth: 0.2,
+        valign: 'middle'
+      },
+      headStyles: {
+        fillColor: [200, 230, 200], // light green
+        textColor: [0, 0, 0],
+        fontStyle: 'bold',
+        fontSize: 7.5,
+        halign: 'center',
+        valign: 'middle',
+        lineColor: [0, 0, 0],
+        lineWidth: 0.3
+      },
+      columnStyles: {
+        0: { cellWidth: 32 },  // Call No.
+        1: { cellWidth: 30 },  // Acc. No
+        2: { cellWidth: 'auto' }, // Title (flex)
+        3: { cellWidth: 40 },  // Author
+        4: { cellWidth: 20 },  // Edition
+        5: { cellWidth: 14 },  // Year
+        6: { cellWidth: 16, halign: 'center' }, // No. Titles
+        7: { cellWidth: 20, halign: 'center' }  // No. of Volumes
+      },
+      didDrawPage: (data: any) => {
+        // Footer on every page
+        const page_num = data.pageNumber || (landscapeDoc as any).getCurrentPageInfo().pageNumber
+        landscapeDoc.setFontSize(7)
+        landscapeDoc.setFont('helvetica', 'normal')
+        landscapeDoc.setTextColor(128, 128, 128)
+        landscapeDoc.text(
+          `${this.libraryName} · Books by Classification · Page ${page_num}`,
+          marginLeft,
+          pageHeight - 8
+        )
+        if (preparedBy) {
+          landscapeDoc.text(
+            `Prepared by: ${preparedBy}`,
+            pageWidth - marginRight,
+            pageHeight - 8,
+            { align: 'right' }
+          )
+        }
+      }
+    })
+
+    // Save the landscape document directly
+    const filename = `Books_${classificationCode.replace(/\s+/g, '_')}_${classificationName.replace(/\s+/g, '_')}.pdf`
+    landscapeDoc.save(filename)
+  }
+
   save(filename: string): void {
     this.doc.save(filename)
   }

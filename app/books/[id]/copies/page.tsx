@@ -30,6 +30,7 @@ interface Book {
   year_published: number | null
   copies_total: number
   copies_available: number
+  call_number: string | null
   category: { name: string }
   authors: Array<{ name: string }>
 }
@@ -404,6 +405,22 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
     )
   })
 
+  // Assign stable copy numbers (sorted by accession number).
+  // Copy 1 gets no suffix; copy 2+ gets " c.2", " c.3", etc.
+  const sortedCopies = [...copies].sort((a, b) =>
+    a.accession_number.localeCompare(b.accession_number)
+  )
+  const copyNumberMap = new Map<number, number>()
+  sortedCopies.forEach((copy, idx) => {
+    copyNumberMap.set(copy.copy_id, idx + 1)
+  })
+
+  const getCallNumber = (copy: BookCopy) => {
+    if (!book?.call_number) return '—'
+    const n = copyNumberMap.get(copy.copy_id) || 1
+    return n === 1 ? book.call_number : `${book.call_number} c.${n}`
+  }
+
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
       case 'AVAILABLE':
@@ -596,6 +613,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                         className="rounded border-gray-300"
                       />
                     </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Call Number</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Accession Number</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -607,7 +625,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                 <tbody className="bg-white divide-y divide-gray-200">
                   {copies.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center">
+                      <td colSpan={8} className="px-4 py-8 text-center">
                         {book.copies_total > 0 ? (
                           <div className="space-y-3">
                             <p className="text-gray-600">
@@ -633,7 +651,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                     </tr>
                   ) : filteredCopies.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                         No copies match your search.
                       </td>
                     </tr>
@@ -648,6 +666,9 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                             className="rounded border-gray-300"
                             disabled={copy.status === 'BORROWED'}
                           />
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono text-gray-700">
+                          {getCallNumber(copy)}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
                           {copy.accession_number}

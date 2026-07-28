@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   forwardRef,
   useImperativeHandle
 } from 'react'
@@ -200,6 +201,10 @@ export const EnhancedBookForm = forwardRef<
   const [selectedDecimal, setSelectedDecimal] = useState<string>('')
   const [selectedDeeper, setSelectedDeeper] = useState<string>('')
 
+  // When true, cascade effects skip their work so initClassification
+  // can set all levels without being clobbered mid-flight.
+  const classInitRef = useRef(false)
+
   // Fetch children of a classification node
   const fetchClassificationChildren = useCallback(async (parentId: number): Promise<ClassificationNode[]> => {
     try {
@@ -229,6 +234,7 @@ export const EnhancedBookForm = forwardRef<
 
   // Cascade: when main class changes, load divisions
   useEffect(() => {
+    if (classInitRef.current) return
     if (!selectedMainClass) {
       setClassificationDivisions([])
       setSelectedDivision('')
@@ -257,6 +263,7 @@ export const EnhancedBookForm = forwardRef<
 
   // Cascade: when division changes, load sections
   useEffect(() => {
+    if (classInitRef.current) return
     if (!selectedDivision) {
       setClassificationSections([])
       setSelectedSection('')
@@ -281,6 +288,7 @@ export const EnhancedBookForm = forwardRef<
 
   // Cascade: when section changes, load decimal subdivisions
   useEffect(() => {
+    if (classInitRef.current) return
     if (!selectedSection) {
       setClassificationDecimals([])
       setSelectedDecimal('')
@@ -301,6 +309,7 @@ export const EnhancedBookForm = forwardRef<
 
   // Cascade: when decimal changes, load deeper subdivisions
   useEffect(() => {
+    if (classInitRef.current) return
     if (!selectedDecimal) {
       setClassificationDeeper([])
       setSelectedDeeper('')
@@ -328,8 +337,9 @@ export const EnhancedBookForm = forwardRef<
     if (!leafId) return
 
     const initClassification = async () => {
+      classInitRef.current = true
       try {
-        // Fetch the leaf node and walk up the parent chain
+        // 1. Walk up the parent chain from leaf to root
         const path: { id: number; code: string; name: string; level: string; parent_id: number | null }[] = []
         let currentId: number | null = leafId
         while (currentId) {
@@ -343,52 +353,43 @@ export const EnhancedBookForm = forwardRef<
         }
         if (cancelled || path.length === 0) return
 
-        // Set selections from root to leaf
+        // Map levels to IDs
         const byLevel: Record<string, string> = {}
         for (const p of path) {
           byLevel[p.level] = String(p.id)
         }
 
-        if (byLevel.MAIN_CLASS) setSelectedMainClass(byLevel.MAIN_CLASS)
+        // 2. Fetch all child lists in parallel (we already know every parent ID)
+        const fetchChildren = async (pid: string) => {
+          if (!pid) return [] as ClassificationNode[]
+          const res = await fetch(`/api/book-classifications?parent_id=${pid}`, { credentials: 'include', cache: 'no-store' })
+          if (!res.ok) return []
+          const data = await res.json()
+          const list = Array.isArray(data) ? data : (data?.data ?? [])
+          return list.filter((c: any) => c?.is_active)
+        }
 
-        // Load divisions for the selected main class, then set division, etc.
-        if (byLevel.DIVISION) {
-          const divRes = await fetch(`/api/book-classifications?parent_id=${byLevel.MAIN_CLASS}`, { credentials: 'include', cache: 'no-store' })
-          if (divRes.ok) {
-            const divData = await divRes.json()
-            const divList = Array.isArray(divData) ? divData : (divData?.data ?? [])
-            setClassificationDivisions(divList.filter((c: any) => c?.is_active))
-          }
-          setSelectedDivision(byLevel.DIVISION)
-        }
-        if (byLevel.SECTION) {
-          const secRes = await fetch(`/api/book-classifications?parent_id=${byLevel.DIVISION}`, { credentials: 'include', cache: 'no-store' })
-          if (secRes.ok) {
-            const secData = await secRes.json()
-            const secList = Array.isArray(secData) ? secData : (secData?.data ?? [])
-            setClassificationSections(secList.filter((c: any) => c?.is_active))
-          }
-          setSelectedSection(byLevel.SECTION)
-        }
-        if (byLevel.DECIMAL_SUBDIVISION) {
-          const decRes = await fetch(`/api/book-classifications?parent_id=${byLevel.SECTION}`, { credentials: 'include', cache: 'no-store' })
-          if (decRes.ok) {
-            const decData = await decRes.json()
-            const decList = Array.isArray(decData) ? decData : (decData?.data ?? [])
-            setClassificationDecimals(decList.filter((c: any) => c?.is_active))
-          }
-          setSelectedDecimal(byLevel.DECIMAL_SUBDIVISION)
-        }
-        if (byLevel.DEEPER_SUBDIVISION) {
-          const deepRes = await fetch(`/api/book-classifications?parent_id=${byLevel.DECIMAL_SUBDIVISION}`, { credentials: 'include', cache: 'no-store' })
-          if (deepRes.ok) {
-            const deepData = await deepRes.json()
-            const deepList = Array.isArray(deepData) ? deepData : (deepData?.data ?? [])
-            setClassificationDeeper(deepList.filter((c: any) => c?.is_active))
-          }
-          setSelectedDeeper(byLevel.DEEPER_SUBDIVISION)
-        }
+        const [divisions, sections, decimals, deeper] = await Promise.all([
+          byLevel.DIVISION ? fetchChildren(byLevel.MAIN_CLASS) : Promise.resolve([]),
+          byLevel.SECTION ? fetchChildren(byLevel.DIVISION) : Promise.resolve([]),
+          byLevel.DECIMAL_SUBDIVISION ? fetchChildren(byLevel.SECTION) : Promise.resolve([]),
+          byLevel.DEEPER_SUBDIVISION ? fetchChildren(byLevel.DECIMAL_SUBDIVISION) : Promise.resolve([]),
+        ])
+
+        if (cancelled) return
+
+        // 3. Set everything at once — no cascade interference
+        if (byLevel.MAIN_CLASS) setSelectedMainClass(byLevel.MAIN_CLASS)
+        setClassificationDivisions(divisions)
+        if (byLevel.DIVISION) setSelectedDivision(byLevel.DIVISION)
+        setClassificationSections(sections)
+        if (byLevel.SECTION) setSelectedSection(byLevel.SECTION)
+        setClassificationDecimals(decimals)
+        if (byLevel.DECIMAL_SUBDIVISION) setSelectedDecimal(byLevel.DECIMAL_SUBDIVISION)
+        setClassificationDeeper(deeper)
+        if (byLevel.DEEPER_SUBDIVISION) setSelectedDeeper(byLevel.DEEPER_SUBDIVISION)
       } catch {}
+      classInitRef.current = false
     }
     initClassification()
     return () => { cancelled = true }
@@ -931,14 +932,19 @@ export const EnhancedBookForm = forwardRef<
     //    Open Library returned one) is added first as a
     //    "Summary" note so it lands on top of the list; any
     //    subjects are added below as "General" notes.
+    //    Subjects prefixed with "series:" are excluded — they
+    //    are surfaced via the dedicated series field instead.
     const notes: Array<{ type: string; content: string }> = []
     if (book.description) {
       notes.push({ type: 'Summary', content: book.description })
     }
     if (book.subjects.length > 0) {
-      book.subjects.slice(0, 5).forEach((content) => {
-        notes.push({ type: 'General', content })
-      })
+      book.subjects
+        .filter((s) => !s.startsWith('series:'))
+        .slice(0, 5)
+        .forEach((content) => {
+          notes.push({ type: 'General', content })
+        })
     }
 
     // 5. Compute the LCCN / ISSN from the merged identifier
@@ -992,8 +998,7 @@ export const EnhancedBookForm = forwardRef<
       fountasPinnell: fountasPinnell || prev.fountasPinnell,
 
       // Series/Notes
-      // Keep the existing series title; Open Library doesn't
-      // expose a uniform series name.
+      seriesTitle: book.series || prev.seriesTitle,
       notes: notes.length > 0 ? notes : prev.notes,
 
       // Added Entries

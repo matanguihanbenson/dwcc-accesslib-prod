@@ -258,6 +258,13 @@ export async function fetchByISBN(rawIsbn: string): Promise<OpenLibraryBook | nu
         .filter((s: any): s is string => !!s)
     : []
 
+  // Series — Open Library encodes series as subjects with
+  // a "series:" prefix, e.g. "series:Harry_Potter".
+  const seriesNames: string[] = subjects
+    .filter((s) => s.startsWith('series:'))
+    .map((s) => s.slice('series:'.length).replace(/_/g, ' ').trim())
+  const series = seriesNames.length > 0 ? seriesNames[0] : ''
+
   // Description — try, in order: work description, edition
   // description, bibkeys `notes`, first_sentence.
   const description = extractDescription(workRecord, editionRecord, bibRecord)
@@ -297,7 +304,7 @@ export async function fetchByISBN(rawIsbn: string): Promise<OpenLibraryBook | nu
     oclc,
     materialType: inferMaterialType(format),
     subtype: inferSubtype(format),
-    series: '', // Open Library doesn't expose series uniformly
+    series,
     subjects,
     description,
     coverUrl,

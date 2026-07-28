@@ -4,9 +4,9 @@ import React, { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { useApiSWR, useApi } from '@/lib/hooks/useApi'
-import { useCacheManager } from '@/lib/hooks/useCacheManager'
+import { useApiSWR } from '@/lib/hooks/useApi'
 import { notify } from '@/lib/notification'
+import { Pagination } from '@/components/ui/pagination'
 import Swal from 'sweetalert2'
 
 interface Book {
@@ -14,7 +14,10 @@ interface Book {
   title: string
   book_author: string
   isbn?: string
+  call_number?: string
   category: string | { category_id: number; name: string; description?: string; created_at?: string }
+  section?: { section_id: number; name: string; code?: string } | null
+  classification?: { id: number; code: string; name: string } | null
   status: 'AVAILABLE' | 'BORROWED' | 'LOST' | 'DAMAGED' | 'UNAVAILABLE'
   copies_total?: number
   copies_available?: number
@@ -58,9 +61,17 @@ export default function BooksPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [classificationFilter, setClassificationFilter] = useState('')
+  const [sectionFilter, setSectionFilter] = useState('')
+  const [classifications, setClassifications] = useState<Array<{ id: number; code: string; name: string; parent_id?: number | null; level: string }>>([])
+  const [childClassifications, setChildClassifications] = useState<Record<number, Array<{ id: number; code: string; name: string; level: string }>>>({})
+  const [classificationPath, setClassificationPath] = useState<number[]>([])
+  const [sections, setSections] = useState<Array<{ section_id: number; name: string; code?: string }>>([])
+  const [serverTotal, setServerTotal] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage, setItemsPerPage] = useState(20)
-  const [showAddBookModal, setShowAddBookModal] = useState(false)
+  const [itemsPerPage, setItemsPerPage] = useState(10)
   const [showEditBookModal, setShowEditBookModal] = useState(false)
   const [selectedBookForEdit, setSelectedBookForEdit] = useState<Book | null>(null)
   const [editForm, setEditForm] = useState({
@@ -206,20 +217,88 @@ export default function BooksPage() {
 
   useEffect(() => {
     if (authReady) {
-      fetchBooks()
       fetchBorrowedBooks()
     }
   }, [authReady])
+
+  // Refetch books when filters/sort/pagination change
+  useEffect(() => {
+    if (authReady) {
+      fetchBooks()
+    }
+  }, [authReady, currentPage, itemsPerPage, sortBy, sortOrder, searchTerm, statusFilter, categoryFilter, classificationFilter, sectionFilter])
 
   useEffect(() => {
     localStorage.setItem('lastLocation', '/books')
   }, [])
 
+  // Fetch root classifications for the cascading filter
+  useEffect(() => {
+    if (!authReady) return
+    ;(async () => {
+      try {
+        const res = await fetch('/api/book-classifications?roots=true', { credentials: 'include' })
+        if (!res.ok) return
+        const body = await res.json()
+        const items = body.data || []
+        if (Array.isArray(items)) {
+          setClassifications(items.map((c: any) => ({ id: c.id, code: c.code, name: c.name, parent_id: c.parent_id, level: c.level })))
+        }
+      } catch {}
+    })()
+  }, [authReady])
+
+  // Fetch child classifications when a parent is selected
+  useEffect(() => {
+    if (!authReady || classificationPath.length === 0) return
+    const parentId = classificationPath[classificationPath.length - 1]
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/book-classifications?parent_id=${parentId}`, { credentials: 'include' })
+        if (!res.ok) return
+        const body = await res.json()
+        const items = body.data || []
+        if (Array.isArray(items) && items.length > 0) {
+          setChildClassifications(prev => ({ ...prev, [parentId]: items.map((c: any) => ({ id: c.id, code: c.code, name: c.name, level: c.level })) }))
+        } else {
+          setChildClassifications(prev => ({ ...prev, [parentId]: [] }))
+        }
+      } catch {}
+    })()
+  }, [authReady, classificationPath])
+
+  // Fetch sections
+  useEffect(() => {
+    if (!authReady) return
+    ;(async () => {
+      try {
+        const res = await fetch('/api/sections', { credentials: 'include' })
+        if (!res.ok) return
+        const body = await res.json()
+        const items = Array.isArray(body) ? body : (body.data || [])
+        if (Array.isArray(items)) {
+          setSections(items.map((s: any) => ({ section_id: s.section_id, name: s.name, code: s.code })))
+        }
+      } catch {}
+    })()
+  }, [authReady])
+
   const fetchBooks = async () => {
     try {
       setLoading(true)
       
-      const response = await fetch('/api/books', {
+      const params = new URLSearchParams()
+      params.append('page', String(currentPage))
+      params.append('limit', String(itemsPerPage))
+      params.append('sortBy', sortBy)
+      params.append('sortOrder', sortOrder)
+      if (searchTerm) params.append('query', searchTerm)
+      if (statusFilter) params.append('status', statusFilter)
+      if (categoryFilter) params.append('category', categoryFilter)
+      if (classificationFilter) params.append('classification_id', classificationFilter)
+      if (sectionFilter) params.append('section_id', sectionFilter)
+
+      const response = await fetch(`/api/books?${params}`, {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
@@ -230,13 +309,18 @@ export default function BooksPage() {
       
       if (response.ok) {
         const data = await response.json()
-        const list = Array.isArray(data) ? data : (data.data?.data || data.data || data.books || [])
+        const payload = data.data || data
+        const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : [])
+        const total = payload?.total ?? list.length
         const normalized = list.map((b: any) => ({
           book_id: b.book_id,
           title: b.title,
           book_author: b.book_author,
           isbn: b.isbn,
+          call_number: b.call_number || '',
           category: b.category?.name || b.category || '',
+          section: b.section || null,
+          classification: b.classification || null,
           status: b.copies_available === 0 ? 'UNAVAILABLE' : (b.status || 'AVAILABLE'),
           copies_total: b.copies_total || 0,
           copies_available: b.copies_available || 0,
@@ -245,9 +329,8 @@ export default function BooksPage() {
           updated_at: b.updated_at,
         }))
         setBooks(Array.isArray(normalized) ? normalized : [])
+        setServerTotal(total)
       } else {
-        const errorData = await response.text()
-        
         if (response.status === 403) {
           const lastLocation = localStorage.getItem('lastLocation') || '/dashboard'
           router.push(lastLocation)
@@ -468,27 +551,22 @@ export default function BooksPage() {
     }
   }
 
-  const filteredBooks = books.filter(book => {
-    const categoryName = typeof book.category === 'string' ? book.category : book.category?.name || ''
-    const matchesSearch = book.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      book.book_author?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      categoryName.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesStatus = !statusFilter || book.status === statusFilter
-    const matchesCategory =
-      !categoryFilter || categoryName.trim().toLowerCase() === categoryFilter.trim().toLowerCase()
+  // Server-side pagination: books are already filtered/sorted/paginated by the API
+  const totalPages = Math.ceil(serverTotal / itemsPerPage)
 
-    return matchesSearch && matchesStatus && matchesCategory
-  })
+  const handlePageChange = (page: number) => {
+    const safePage = Math.min(Math.max(1, page), totalPages)
+    setCurrentPage(safePage)
+  }
 
-  const totalPages = Math.ceil(filteredBooks.length / itemsPerPage)
-  const startIndex = (currentPage - 1) * itemsPerPage
-  const endIndex = startIndex + itemsPerPage
-  const currentBooks = filteredBooks.slice(startIndex, endIndex)
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage)
+    setCurrentPage(1)
+  }
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, statusFilter, categoryFilter])
+  }, [searchTerm, statusFilter, categoryFilter, classificationFilter, sectionFilter])
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
@@ -592,7 +670,7 @@ export default function BooksPage() {
               }`}
             >
               <i className="fas fa-book mr-2"></i>
-              Books ({filteredBooks.length})
+              Books ({books.length})
             </button>
             <button
               onClick={() => setActiveTab('borrowed')}
@@ -625,7 +703,7 @@ export default function BooksPage() {
             {/* Search and Filters */}
             <div className="mb-6 space-y-4">
               <div className="flex flex-col lg:flex-row gap-4">
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                     <select
@@ -658,18 +736,18 @@ export default function BooksPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Per Page</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
                     <select
-                      value={itemsPerPage}
-                      onChange={(e) => {
-                        setItemsPerPage(Number(e.target.value))
-                        setCurrentPage(1)
-                      }}
+                      value={sectionFilter}
+                      onChange={(e) => setSectionFilter(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value={20}>20 per page</option>
-                      <option value={50}>50 per page</option>
-                      <option value={100}>100 per page</option>
+                      <option value="">All Sections</option>
+                      {sections.map((s) => (
+                        <option key={s.section_id} value={s.section_id}>
+                          {s.code ? `${s.code} — ` : ''}{s.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -685,10 +763,113 @@ export default function BooksPage() {
                   />
                 </div>
               </div>
+
+              {/* Second row: Classification + Sort */}
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Classification (cascading) */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Classification</label>
+                    <select
+                      value={classificationPath[0] ? String(classificationPath[0]) : classificationFilter}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        if (!val) {
+                          setClassificationFilter('')
+                          setClassificationPath([])
+                        } else {
+                          setClassificationFilter(val)
+                          setClassificationPath([Number(val)])
+                        }
+                        setCurrentPage(1)
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">All Classifications</option>
+                      {classifications.map((c) => (
+                        <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Child classification dropdowns (cascade) */}
+                  {classificationPath.map((parentId, idx) => {
+                    const children = childClassifications[parentId]
+                    if (!children || children.length === 0) return null
+                    return (
+                      <div key={`child-${parentId}`}>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Sub-classification</label>
+                        <select
+                          value={classificationPath[idx + 1] ? String(classificationPath[idx + 1]) : ''}
+                          onChange={(e) => {
+                            const val = e.target.value
+                            const newPath = classificationPath.slice(0, idx + 1)
+                            if (val) {
+                              newPath.push(Number(val))
+                              setClassificationFilter(val)
+                            } else {
+                              setClassificationFilter(String(parentId))
+                            }
+                            setClassificationPath(newPath)
+                            setCurrentPage(1)
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">All</option>
+                          {children.map((c) => (
+                            <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )
+                  })}
+
+                  {/* Sort */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
+                    <div className="flex gap-1">
+                      <select
+                        value={sortBy}
+                        onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1) }}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="created_at">Date Added</option>
+                        <option value="title">Title</option>
+                        <option value="author">Author</option>
+                        <option value="call_number">Call Number</option>
+                        <option value="copies_total">Copies</option>
+                      </select>
+                      <button
+                        onClick={() => { setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc'); setCurrentPage(1) }}
+                        className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        title={sortOrder === 'asc' ? 'Ascending (click to toggle)' : 'Descending (click to toggle)'}
+                      >
+                        <i className={`fas fa-sort-${sortOrder === 'asc' ? 'up' : 'down'} mr-1`}></i>
+                        <span className="text-xs font-medium">{sortOrder === 'asc' ? 'ASC' : 'DESC'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Books Table */}
             <div className="bg-white shadow-md rounded-lg overflow-hidden">
+              {/* Top Pagination */}
+              {!loading && serverTotal > 0 && (
+                <div className="px-4 py-3 border-b bg-gray-50">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={serverTotal}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={handlePageChange}
+                    onItemsPerPageChange={handleItemsPerPageChange}
+                    countLabel="books"
+                  />
+                </div>
+              )}
+
               {loading ? (
                 <div className="p-8 text-center">
                   <div className="text-gray-500">Loading books...</div>
@@ -719,14 +900,14 @@ export default function BooksPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {currentBooks.length === 0 ? (
+                      {books.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                             {searchTerm || statusFilter || categoryFilter ? 'No books found matching your filters.' : 'No books found.'}
                           </td>
                         </tr>
                       ) : (
-                        currentBooks.map((book) => (
+                        books.map((book) => (
                           <tr key={book.book_id} className="hover:bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
@@ -736,6 +917,11 @@ export default function BooksPage() {
                                   </div>
                                 </div>
                                 <div className="ml-4">
+                                  {book.call_number && (
+                                    <div className="text-xs font-mono text-blue-600 mb-0.5">
+                                      {book.call_number}
+                                    </div>
+                                  )}
                                   <div className="text-sm font-medium text-gray-900">
                                     {book.title}
                                   </div>
@@ -820,119 +1006,18 @@ export default function BooksPage() {
               )}
             </div>
 
-            {/* Pagination */}
-            {!loading && filteredBooks.length > 0 && totalPages > 1 && (
-              <div className="mt-4 flex items-center justify-between bg-white px-4 py-3 rounded-lg border border-gray-200 shadow-sm">
-                <div className="text-sm font-medium text-gray-700">
-                  Showing {startIndex + 1} to {Math.min(endIndex, filteredBooks.length)} of {filteredBooks.length} books
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <i className="fas fa-chevron-left"></i>
-                  </button>
-
-                  <div className="flex items-center space-x-1">
-                    {(() => {
-                      const pages = [];
-                      const maxPagesToShow = 7;
-                      
-                      if (totalPages <= maxPagesToShow) {
-                        for (let i = 1; i <= totalPages; i++) {
-                          pages.push(
-                            <button
-                              key={i}
-                              onClick={() => setCurrentPage(i)}
-                              className={`px-3 py-2 text-sm font-medium border rounded-md ${
-                                currentPage === i
-                                  ? 'bg-blue-600 text-white border-blue-600'
-                                  : 'border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              {i}
-                            </button>
-                          );
-                        }
-                      } else {
-                        pages.push(
-                          <button
-                            key={1}
-                            onClick={() => setCurrentPage(1)}
-                            className={`px-3 py-2 text-sm font-medium border rounded-md ${
-                              currentPage === 1
-                                ? 'bg-blue-600 text-white border-blue-600'
-                                : 'border-gray-300 hover:bg-gray-50'
-                            }`}
-                          >
-                            1
-                          </button>
-                        );
-
-                        if (currentPage > 3) {
-                          pages.push(
-                            <span key="ellipsis-start" className="px-2 text-gray-500">
-                              ...
-                            </span>
-                          );
-                        }
-
-                        const startPage = Math.max(2, currentPage - 1);
-                        const endPage = Math.min(totalPages - 1, currentPage + 1);
-
-                        for (let i = startPage; i <= endPage; i++) {
-                          pages.push(
-                            <button
-                              key={i}
-                              onClick={() => setCurrentPage(i)}
-                              className={`px-3 py-2 text-sm font-medium border rounded-md ${
-                                currentPage === i
-                                  ? 'bg-blue-600 text-white border-blue-600'
-                                  : 'border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              {i}
-                            </button>
-                          );
-                        }
-
-                        if (currentPage < totalPages - 2) {
-                          pages.push(
-                            <span key="ellipsis-end" className="px-2 text-gray-500">
-                              ...
-                            </span>
-                          );
-                        }
-
-                        pages.push(
-                          <button
-                            key={totalPages}
-                            onClick={() => setCurrentPage(totalPages)}
-                            className={`px-3 py-2 text-sm font-medium border rounded-md ${
-                              currentPage === totalPages
-                                ? 'bg-blue-600 text-white border-blue-600'
-                                : 'border-gray-300 hover:bg-gray-50'
-                            }`}
-                          >
-                            {totalPages}
-                          </button>
-                        );
-                      }
-
-                      return pages;
-                    })()}
-                  </div>
-
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <i className="fas fa-chevron-right"></i>
-                  </button>
-                </div>
+            {/* Bottom Pagination */}
+            {!loading && serverTotal > 0 && (
+              <div className="mt-4 px-4 py-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={serverTotal}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={handlePageChange}
+                  onItemsPerPageChange={handleItemsPerPageChange}
+                  countLabel="books"
+                />
               </div>
             )}
           </>

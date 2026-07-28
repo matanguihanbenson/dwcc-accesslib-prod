@@ -395,7 +395,17 @@ export function interpolateShelflist(
   )
 
   if (sameSurnameEntries.length > 0) {
-    // Same surname — expand using first name
+    // If the exact same full name already exists, this is the same author
+    // (multiple books / series). Return the existing cutter — only the
+    // work mark and year differ for different books by the same author.
+    const sameAuthor = sameSurnameEntries.find(
+      (e) => e.fullName.toLowerCase() === newFullName.trim().toLowerCase()
+    )
+    if (sameAuthor) {
+      return sameAuthor.cutter
+    }
+
+    // Different person with same surname — expand using first name
     const baseCutter = sameSurnameEntries[0].cutter.replace(/[0-9]+$/, '')
     const baseDigits = sameSurnameEntries[0].cutter.slice(1)
     const existingCutterStrings = sameSurnameEntries.map((e) => e.cutter)
@@ -529,4 +539,47 @@ export function generateFinalWorkmark(
 
   // Fallback (should never happen)
   return baseWorkmark + '99'
+}
+
+/**
+ * Normalize a title for edition comparison.
+ *
+ * Strips edition/volume indicators, subtitles after colons,
+ * and normalizes whitespace so that titles from different
+ * editions of the same work compare equal:
+ *
+ *   "Python Crash Course: A Hands-On Project-Based Introduction, 2nd Edition"
+ *   "Python Crash Course, 3rd Edition"
+ *   "Python Crash Course"
+ * all normalize to the same string.
+ */
+export function normalizeTitle(title: string): string {
+  if (!title) return ''
+  let t = title
+    .toLowerCase()
+    .trim()
+    // Remove subtitles after colon or semicolon
+    .replace(/[:;].*$/, '')
+    // Remove edition markers: "1st edition", "2nd ed", "third edition", etc.
+    .replace(/\b\d+(?:st|nd|rd|th)\s*(?:edition|ed\.?|version)\b/gi, '')
+    .replace(
+      /\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s*(?:edition|ed\.?|version)\b/gi,
+      ''
+    )
+    // Remove "edition", "ed.", "vol.", "volume" with optional number
+    .replace(/\b(?:edition|ed\.?|version|vol\.?|volume)\s*\d*\b/gi, '')
+    // Remove bare edition numbers like "2nd", "3rd" at end
+    .replace(/\b\d+(?:st|nd|rd|th)\b\s*$/g, '')
+    // Remove year in parentheses or at end
+    .replace(/\(\d{4}\)/g, '')
+    .replace(/,\s*\d{4}\s*$/g, '')
+    // Clean up residual punctuation left after stripping editions
+    .replace(/\(\s*\)/g, '')    // empty parentheses
+    .replace(/\[\s*\]/g, '')    // empty brackets
+    .replace(/,\s*$/g, '')      // trailing commas
+    .replace(/^\s*,/g, '')      // leading commas
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim()
+  return t
 }

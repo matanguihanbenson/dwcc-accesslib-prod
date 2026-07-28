@@ -116,7 +116,7 @@ export default function AddBookPage() {
     loadOptions()
   }, [authReady])
 
-  // Step 1: Capture form data, generate call number, show preview (NO save yet)
+  // Step 1: Capture form data, generate call number via API (with shelflist interpolation), show preview
   const handleSubmit = useCallback(async (data: any) => {
     let classificationCode = null
     if (data.classification_id) {
@@ -133,21 +133,55 @@ export default function AddBookPage() {
     const section = sections.find((s) => s.section_id === data.section_id)
     const sectionCode = section?.code || null
 
-    const callNumber = generateCallNumber({
-      section_code: sectionCode,
-      classification_code: classificationCode,
-      book_author: data.book_author,
-      title: data.title,
-      year_published: data.year_published || data.publication_year || null,
-    })
+    // Call the cutter API for shelflist-interpolated cutter + workmark
+    let cutterPart = ''
+    let finalCallNumber = ''
+    try {
+      const cutterRes = await fetch('/api/cutter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: data.book_author,
+          classification_id: data.classification_id,
+          section_id: data.section_id,
+          title: data.title,
+        })
+      })
+      if (cutterRes.ok) {
+        const cutterData = await cutterRes.json()
+        const result = cutterData.data || cutterData
+        cutterPart = result.full_cutter || ''
+      }
+    } catch {}
+
+    // Assemble: Section + DDC + CutterWorkmark + Year
+    const parts: string[] = []
+    if (sectionCode) parts.push(sectionCode)
+    if (classificationCode) parts.push(classificationCode)
+    if (cutterPart) parts.push(cutterPart)
+    const year = data.year_published || data.publication_year
+    if (year) parts.push(String(year))
+    finalCallNumber = parts.join(' ')
+
+    // Fallback: if API call failed, use local generation
+    if (!finalCallNumber || finalCallNumber === sectionCode || finalCallNumber === `${sectionCode} ${classificationCode}`) {
+      finalCallNumber = generateCallNumber({
+        section_code: sectionCode,
+        classification_code: classificationCode,
+        book_author: data.book_author,
+        title: data.title,
+        year_published: year || null,
+      })
+    }
 
     setPendingBookData({ ...data, classification_code: classificationCode })
-    setSuggestedCallNumber(callNumber)
+    setSuggestedCallNumber(finalCallNumber)
     setShowPreview(true)
   }, [sections])
 
   // Step 2: User confirms preview → save book + copies → redirect to accession
-  const handlePreviewConfirm = useCallback(async (callNumber: string, copiesCount: number) => {
+  const handlePreviewConfirm = useCallback(async (callNumber: string, copiesCount: number = 1) => {
     if (!pendingBookData) return
     setSaving(true)
     try {

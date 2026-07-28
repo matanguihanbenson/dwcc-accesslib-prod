@@ -706,6 +706,9 @@ export interface SearchFilters {
   programId?: string
   department?: string
   yearLevel?: string
+  classification_id?: string | number
+  classification_ids?: number[]
+  section_id?: string | number
   dateFrom?: Date
   dateTo?: Date
   page?: number

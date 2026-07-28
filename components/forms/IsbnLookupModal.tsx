@@ -363,6 +363,7 @@ function PreviewTable({ book }: { book: OpenLibraryBook }) {
         <Row label="Publisher" value={publishersList} />
         <Row label="Place" value={placesList} />
         <Row label="Publication Date" value={book.publishDateRaw} />
+        <Row label="Series" value={book.series} />
         <Row label="Material Type" value={book.materialType} />
         <Row label="Subtype" value={book.subtype} />
         <Row label="Pages" value={book.numberOfPages} />

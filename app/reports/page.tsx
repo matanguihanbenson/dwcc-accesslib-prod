@@ -5,7 +5,6 @@ import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { notify } from '@/lib/notification'
 import { PDFReportGenerator, type PaperSize } from '@/lib/pdf-report-generator'
@@ -13,9 +12,6 @@ import { ExcelReportGenerator } from '@/lib/excel-report-generator'
 import { formatDateRangeForTitle, formatDateRangeForFilename, campusLibraryLabel } from '@/lib/utils'
 import { ExportButtonGroup } from './components/common/ExportButtonGroup'
 import { NoDataState } from './components/common/NoDataState'
-import { SummaryCardsGrid, type SummaryCardData } from './components/visualizations/SummaryCardsGrid'
-import { PeakHoursChart } from './components/visualizations/PeakHoursChart'
-import { UserTypeDistributionTable } from './components/visualizations/UserTypeDistributionTable'
 import { DatePresetSelector, type DatePreset } from './components/filters/DatePresetSelector'
 import { UserSearchInput } from './components/filters/UserSearchInput'
 
@@ -58,8 +54,7 @@ export default function ReportsPage() {
   const [authReady, setAuthReady] = useState(false)
   
   // Form state
-  const currentDate = new Date()
-  const [reportType, setReportType] = useState<'users-concurrent' | 'users-per-transaction' | 'individual' | 'locker-concurrent' | 'locker-per-transaction' | 'entrance-exit' | 'student-visits-dept-grade' | 'fines-summary'>('entrance-exit')
+  const [reportType, setReportType] = useState<'users-concurrent' | 'users-per-transaction' | 'individual' | 'locker-concurrent' | 'locker-per-transaction' | 'entrance-exit' | 'student-visits-dept-grade' | 'fines-summary' | 'classification-book-list'>('entrance-exit')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [datePreset, setDatePreset] = useState<DatePreset>('month')
@@ -72,13 +67,21 @@ export default function ReportsPage() {
   const [finesType, setFinesType] = useState<'combined' | 'book' | 'locker'>('combined')
   const [showFinesTypeModal, setShowFinesTypeModal] = useState(false)
 
+  // Classification Book List report
+  const [classificationBookListData, setClassificationBookListData] = useState<any>(null)
+  const [bookListClassificationId, setBookListClassificationId] = useState<string>('')
+  const [bookListClassifications, setBookListClassifications] = useState<Array<{ id: number; code: string; name: string }>>([])
+  const [bookListSort, setBookListSort] = useState<string>('call_number')
+
+  // Book category filter (replaces campus filter for reports)
+  const [bookCategories, setBookCategories] = useState<Array<{ category_id: number; name: string }>>([])
+  const [bookCategoryFilter, setBookCategoryFilter] = useState<string>('')
+
   // Campus scope. STAFF users are auto-pinned to their own campus
   // (fetched from /api/staff/me/campus below). ADMIN / SUPER_ADMIN
   // can pick "All Campuses" / "College" / "Basic Education" via the
   // select in the filter bar.
-  const [campus, setCampus] = useState<Campus | ''>('')
   const [myCampus, setMyCampus] = useState<Campus | null>(null)
-  const [myCampusLoaded, setMyCampusLoaded] = useState(false)
 
   // Entrance filter. When a specific campus is selected
   // we narrow the dropdown to entrances on that campus.
@@ -98,12 +101,11 @@ export default function ReportsPage() {
   }>>([])
 
   // Effective campus to send to the API / use in titles. For STAFF,
-  // always pin to their own campus. For ADMIN, honor their selection.
+  // always pin to their own campus. For ADMIN, use null (no campus filter UI).
   const effectiveCampus: Campus | null = useMemo(() => {
     if (myCampus) return myCampus
-    if (campus === 'COLLEGE' || campus === 'BASIC_EDUCATION') return campus
     return null
-  }, [myCampus, campus])
+  }, [myCampus])
 
   // Human label used in CSV / PDF / Excel headers.
   const libraryName = useMemo(
@@ -164,10 +166,7 @@ export default function ReportsPage() {
   useEffect(() => {
     if (status !== 'authenticated' || !session?.user) return
     const userRole = (session.user as any).role
-    if (userRole !== 'STAFF') {
-      setMyCampusLoaded(true)
-      return
-    }
+    if (userRole !== 'STAFF') return
     let cancelled = false
     ;(async () => {
       try {
@@ -176,18 +175,14 @@ export default function ReportsPage() {
           cache: 'no-store',
           headers: { 'Cache-Control': 'no-store' }
         })
-        if (!res.ok) {
-          if (!cancelled) setMyCampusLoaded(true)
-          return
-        }
+        if (!res.ok) return
         const body = await res.json()
         if (cancelled) return
         if (body?.campus === 'COLLEGE' || body?.campus === 'BASIC_EDUCATION') {
           setMyCampus(body.campus)
         }
-        setMyCampusLoaded(true)
       } catch {
-        if (!cancelled) setMyCampusLoaded(true)
+        // ignore
       }
     })()
     return () => { cancelled = true }
@@ -263,6 +258,53 @@ export default function ReportsPage() {
     // can re-validate the still-visible check).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveCampus])
+
+  // Fetch root classifications for the book list report dropdown
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/book-classifications?roots=true', { credentials: 'include' })
+        if (!res.ok) return
+        const body = await res.json()
+        const items = body.data || []
+        if (!cancelled && Array.isArray(items)) {
+          setBookListClassifications(
+            items.map((c: any) => ({
+              id: c.id,
+              code: c.code,
+              name: c.name
+            }))
+          )
+        }
+      } catch {
+        if (!cancelled) setBookListClassifications([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Fetch book categories for the category filter
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/book-categories', { credentials: 'include' })
+        if (!res.ok) return
+        const body = await res.json()
+        const items = body.data || []
+        if (!cancelled && Array.isArray(items)) {
+          setBookCategories(items.map((c: any) => ({
+            category_id: c.category_id,
+            name: c.name
+          })))
+        }
+      } catch {
+        if (!cancelled) setBookCategories([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Debounced user search for individual statistics
   useEffect(() => {
@@ -359,6 +401,7 @@ export default function ReportsPage() {
     if (dateTo) params.append('date_to', dateTo)
     if (includeCampus && effectiveCampus) params.append('campus', effectiveCampus)
     if (entranceId) params.append('entrance_id', entranceId)
+    if (bookCategoryFilter) params.append('category', bookCategoryFilter)
     return params
   }
 
@@ -684,6 +727,38 @@ export default function ReportsPage() {
         } else {
           await notify.error('Error', 'Failed to fetch entry records')
         }
+      } else if (reportType === 'classification-book-list') {
+        if (!bookListClassificationId) {
+          await notify.error('Error', 'Please select a classification')
+          setLoading(false)
+          return
+        }
+
+        const bookListParams = new URLSearchParams({
+          classification_id: String(bookListClassificationId),
+          sort: bookListSort,
+        })
+        if (bookCategoryFilter) bookListParams.append('category', bookCategoryFilter)
+
+        const response = await fetch(
+          `/api/reports/books-by-classification?${bookListParams}`,
+          { credentials: 'include', headers: { 'Content-Type': 'application/json' } }
+        )
+
+        if (response.ok) {
+          const result = await response.json()
+          if (result.error) {
+            await notify.error('Error', result.error)
+          } else {
+            setClassificationBookListData(result)
+            await notify.success(
+              'Success',
+              `Loaded ${result.total} book(s) under ${result.classification.code} ${result.classification.name}`
+            )
+          }
+        } else {
+          await notify.error('Error', 'Failed to fetch books by classification')
+        }
       }
     } catch (error) {
       console.error('Error fetching report data:', error)
@@ -975,6 +1050,30 @@ export default function ReportsPage() {
               : 'Combined'
         const filename = `Fines_Summary_${typeSlug}_${formatDateRangeForFilename(dateFrom, dateTo, datePreset)}.pdf`
         generator.save(filename)
+        notify.success('Success', 'PDF exported successfully')
+      } catch (error) {
+        console.error('PDF export error:', error)
+        notify.error('Error', 'Failed to export PDF')
+      }
+      return
+    }
+
+    if (reportType === 'classification-book-list') {
+      if (!classificationBookListData) {
+        notify.error('Error', 'No data to export. Please generate a report first.')
+        return
+      }
+      try {
+        const generator = new PDFReportGenerator(paperSize, libraryName)
+        const preparedBy = (session?.user as any)?.name || 'Library Staff'
+
+        generator.generateClassificationBookList(
+          classificationBookListData.classification.name,
+          classificationBookListData.classification.code,
+          classificationBookListData.books,
+          preparedBy
+        )
+
         notify.success('Success', 'PDF exported successfully')
       } catch (error) {
         console.error('PDF export error:', error)
@@ -1626,7 +1725,7 @@ export default function ReportsPage() {
                 onExportExcel={exportToExcel}
                 onExportPDF={exportToPDF}
                 onExportCSV={exportToCSV}
-                disabled={!reportData && !usersConcurrentData && !usersPerTransactionData && !entranceExitData && !lockerConcurrentData && !lockerPerTransactionData && !individualReportData && !studentVisitsDeptGradeData}
+                disabled={reportType === 'classification-book-list' || (!reportData && !usersConcurrentData && !usersPerTransactionData && !entranceExitData && !lockerConcurrentData && !lockerPerTransactionData && !individualReportData && !studentVisitsDeptGradeData)}
                 variant="colored"
               />
             </div>
@@ -1663,10 +1762,13 @@ export default function ReportsPage() {
                     <option value="locker-concurrent">Locker Usage (Concurrent)</option>
                     <option value="locker-per-transaction">Locker Usage (Per Transaction)</option>
                   </optgroup>
-                  <optgroup label="Fines">
-                    <option value="fines-summary">Summary of Fines (per borrower)</option>
-                  </optgroup>
-                  <option value="individual">Individual Student Statistics</option>
+                    <optgroup label="Fines">
+                      <option value="fines-summary">Summary of Fines (per borrower)</option>
+                    </optgroup>
+                    <optgroup label="Books">
+                      <option value="classification-book-list">Books by Classification</option>
+                    </optgroup>
+                    <option value="individual">Individual Student Statistics</option>
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
                   {reportType === 'entrance-exit' && 'View hourly entrance/exit control with user type breakdown'}
@@ -1677,48 +1779,27 @@ export default function ReportsPage() {
                   {reportType === 'locker-per-transaction' && 'View locker assignment transactions per hour'}
                   {reportType === 'fines-summary' && 'List of borrowers with their book/locker fines (paid and remaining). You will be asked whether to combine fines or show only one type.'}
                   {reportType === 'individual' && 'View detailed statistics for a specific student/user (borrowing, penalties, visits)'}
+                  {reportType === 'classification-book-list' && 'List all books under a DDC classification tree with call numbers, authors, editions, and copy counts'}
                 </p>
               </div>
 
-              {/* Campus Scope. For ADMIN, this is a dropdown (All / College / Basic Ed).
-                  For STAFF, it's an auto-pinned badge showing the campus their account
-                  is assigned to -- the API auto-scopes every request to that campus. */}
+              {/* Category Filter — Book category dropdown for report scoping */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Campus
+                  Category
                 </label>
-                {myCampus ? (
-                  <div className="w-full px-3 py-2 border border-amber-200 bg-amber-50 rounded-md text-sm flex items-center gap-2 text-amber-800">
-                    <i className="fas fa-school"></i>
-                    <span>
-                      Scoped to <strong>{myCampus === 'COLLEGE' ? 'College Library' : 'Basic Education Library'}</strong>.
-                    
-                    </span>
-                  </div>
-                
-                 ) : (
-                  <select
-                    value={campus}
-                    onChange={(e) => {
-                      setCampus(e.target.value as Campus | '')
-                      // The entrance list is campus-scoped, so
-                      // a campus switch could leave the
-                      // current entrance outside the visible
-                      // list. Drop the entrance selection on
-                      // any campus change; the effect above
-                      // will re-validate it against the new
-                      // list anyway.
-                      setEntranceId('')
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={!myCampusLoaded}
-                  >
-                    <option value="">All Campuses</option>
-                    <option value="COLLEGE">College Library</option>
-                    <option value="BASIC_EDUCATION">Basic Education Library</option>
-                  </select>
-                )}
-
+                <select
+                  value={bookCategoryFilter}
+                  onChange={(e) => setBookCategoryFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Categories</option>
+                  {bookCategories.map((c) => (
+                    <option key={c.category_id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Entrance filter. Sits right under the campus
@@ -1728,7 +1809,10 @@ export default function ReportsPage() {
                   and is already filtered by the effective
                   campus scope, so "All Campuses" surfaces
                   every entrance from both campuses while a
-                  specific campus surfaces only its entrances. */}
+                  specific campus surfaces only its entrances.
+                  Hidden for classification-book-list which
+                  doesn't use entrance data. */}
+              {reportType !== 'classification-book-list' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Entrance
@@ -1757,6 +1841,7 @@ export default function ReportsPage() {
                   </select>
                 )}
               </div>
+              )}
 
               {/* Date Range Filters - For Individual Statistics */}
               {reportType === 'individual' ? (
@@ -1776,8 +1861,8 @@ export default function ReportsPage() {
                 </div>
               ) : null}
 
-              {/* Unified Date Range Selector for all report types except individual */}
-              {reportType !== 'individual' && (
+              {/* Unified Date Range Selector for all report types except individual and classification-book-list */}
+              {reportType !== 'individual' && reportType !== 'classification-book-list' && (
                 <DatePresetSelector
                   preset={datePreset}
                   onPresetChange={setDatePreset}
@@ -1807,6 +1892,50 @@ export default function ReportsPage() {
                   isSearching={searchingUsers}
                   helperText="Search and select a student/user to view their individual statistics"
                 />
+              )}
+
+              {/* Classification Selector for Books by Classification */}
+              {reportType === 'classification-book-list' && (
+                <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Classification
+                  </label>
+                  <select
+                    value={bookListClassificationId}
+                    onChange={(e) => setBookListClassificationId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select a classification</option>
+                    {bookListClassifications.map((c) => (
+                      <option key={c.id} value={c.id.toString()}>
+                        {c.code} — {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Sort By
+                  </label>
+                  <select
+                    value={bookListSort}
+                    onChange={(e) => setBookListSort(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="call_number">Call Number (ascending)</option>
+                    <option value="call_number:desc">Call Number (descending)</option>
+                    <option value="title">Title (ascending)</option>
+                    <option value="title:desc">Title (descending)</option>
+                    <option value="author">Author (ascending)</option>
+                    <option value="author:desc">Author (descending)</option>
+                    <option value="year_published">Year Published (ascending)</option>
+                    <option value="year_published:desc">Year Published (descending)</option>
+                    <option value="edition">Edition (ascending)</option>
+                    <option value="edition:desc">Edition (descending)</option>
+                  </select>
+                </div>
+                </>
               )}
 
               <div className="flex justify-end">
@@ -3408,6 +3537,72 @@ export default function ReportsPage() {
           <NoDataState
             icon="fas fa-coins"
             message='Click "Generate Report" to view fines per borrower. You will be asked whether to combine fines or show only one type.'
+          />
+        )}
+
+        {/* Books by Classification Report */}
+        {reportType === 'classification-book-list' && classificationBookListData && (
+          <div className="space-y-6">
+            <div className="flex gap-2 justify-end mb-2">
+              <Button variant="outline" size="sm" className="h-[50px] bg-gray-100 hover:bg-gray-200 px-4 text-red-600" onClick={exportToPDF}>
+                <i className="fas fa-file-pdf mr-2"></i>
+                Export PDF
+              </Button>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <i className="fas fa-book text-blue-600"></i>
+                  {classificationBookListData.classification.code} — {classificationBookListData.classification.name}
+                </CardTitle>
+                <p className="text-sm text-gray-500">
+                  {classificationBookListData.total} book(s) in this classification tree
+                  {classificationBookListData.books.length > 10 && (
+                    <span className="text-gray-400"> · Showing first 10 in preview</span>
+                  )}
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Call No.</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Acc. No.</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Author</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Edition</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Year</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Titles</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Volumes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {classificationBookListData.books.slice(0, 10).map((book: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{book.call_number}</td>
+                          <td className="px-3 py-2 text-xs whitespace-nowrap">{book.accession_numbers}</td>
+                          <td className="px-3 py-2 text-xs">{book.title}</td>
+                          <td className="px-3 py-2 text-xs">{book.author}</td>
+                          <td className="px-3 py-2 text-xs">{book.edition}</td>
+                          <td className="px-3 py-2 text-xs">{book.year_published}</td>
+                          <td className="px-3 py-2 text-xs text-center">{book.no_titles}</td>
+                          <td className="px-3 py-2 text-xs text-center">{book.no_volumes}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {reportType === 'classification-book-list' && !classificationBookListData && !loading && (
+          <NoDataState
+            icon="fas fa-book"
+            message='Select a classification and click "Generate Report" to list all books under that DDC classification tree.'
           />
         )}
 

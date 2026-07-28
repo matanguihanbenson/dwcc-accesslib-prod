@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 interface BookPreviewModalProps {
   isOpen: boolean
   onClose: () => void
-  onConfirm: (callNumber: string, copiesCount: number) => void
+  onConfirm: (callNumber: string, copiesCount?: number) => void
   bookData: {
     title?: string
     subtitle?: string
@@ -25,6 +25,8 @@ interface BookPreviewModalProps {
   }
   suggestedCallNumber: string
   loading?: boolean
+  /** When true, hides the copies input and changes button text to "Save Book" */
+  isEditing?: boolean
 }
 
 export default function BookPreviewModal({
@@ -33,7 +35,8 @@ export default function BookPreviewModal({
   onConfirm,
   bookData,
   suggestedCallNumber,
-  loading = false
+  loading = false,
+  isEditing = false
 }: BookPreviewModalProps) {
   const [callNumber, setCallNumber] = useState(suggestedCallNumber)
   const [copiesInput, setCopiesInput] = useState('1')
@@ -80,9 +83,13 @@ export default function BookPreviewModal({
               <i className="fas fa-book text-green-600 text-lg"></i>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Preview Book</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {isEditing ? 'Preview Changes' : 'Preview Book'}
+              </h2>
               <p className="text-sm text-gray-500">
-                Review the information, confirm the call number, and set the number of copies.
+                {isEditing
+                  ? 'Review the information and confirm the call number.'
+                  : 'Review the information, confirm the call number, and set the number of copies.'}
               </p>
             </div>
           </div>
@@ -133,23 +140,25 @@ export default function BookPreviewModal({
             </p>
           </div>
 
-          {/* Number of copies */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Number of Copies <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="number"
-              value={copiesInput}
-              onChange={(e) => setCopiesInput(e.target.value)}
-              min="1"
-              max="100"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Accession numbers will be assigned on the next page.
-            </p>
-          </div>
+          {/* Number of copies — only for new books */}
+          {!isEditing && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Number of Copies <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                value={copiesInput}
+                onChange={(e) => setCopiesInput(e.target.value)}
+                min="1"
+                max="100"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Accession numbers will be assigned on the next page.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -165,9 +174,9 @@ export default function BookPreviewModal({
           </Button>
           <Button
             type="button"
-            onClick={() => onConfirm(callNumber, copiesCount)}
+            onClick={() => isEditing ? onConfirm(callNumber) : onConfirm(callNumber, copiesCount)}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white"
-            disabled={loading || !callNumber.trim() || copiesCount < 1 || !copiesInput.trim()}
+            disabled={loading || !callNumber.trim()}
           >
             {loading ? (
               <>
@@ -177,7 +186,7 @@ export default function BookPreviewModal({
             ) : (
               <>
                 <i className="fas fa-check mr-2"></i>
-                Save Book &amp; Add Copies
+                {isEditing ? 'Save Book' : 'Save Book & Add Copies'}
               </>
             )}
           </Button>

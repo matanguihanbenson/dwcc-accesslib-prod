@@ -406,6 +406,7 @@ export default function AccessionPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">#</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Call Number</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Accession Number</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Condition</th>
@@ -416,7 +417,7 @@ export default function AccessionPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {copies.length === 0 ? (
                 <tr>
-                  <td colSpan={editing ? 6 : 5} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={editing ? 7 : 6} className="px-4 py-8 text-center text-sm text-gray-500">
                     {editing ? (
                       <div className="space-y-2">
                         <p>No copies yet.</p>
@@ -436,9 +437,23 @@ export default function AccessionPage() {
                 copies.map((copy, i) => {
                   const isTemp = copy.copy_id < 0
                   const isDeletingThis = deleting === copy.copy_id
+                  // Copy number based on accession order (temp copies use their index)
+                  const stableCopies = copies.filter((c) => c.copy_id > 0)
+                  const sortedStable = [...stableCopies].sort((a, b) =>
+                    a.accession_number.localeCompare(b.accession_number)
+                  )
+                  const copyNum = isTemp
+                    ? copies.length + 1
+                    : (sortedStable.findIndex((c) => c.copy_id === copy.copy_id) + 1) || i + 1
+                  const copyCallNumber = book.call_number
+                    ? (copyNum === 1 ? book.call_number : `${book.call_number} c.${copyNum}`)
+                    : '—'
                   return (
                     <tr key={copy.copy_id} className={`hover:bg-gray-50 ${isTemp ? 'bg-blue-50/30' : ''}`}>
                       <td className="px-4 py-3 text-sm text-gray-500">{i + 1}</td>
+                      <td className="px-4 py-3 text-sm font-mono text-gray-700">
+                        {copyCallNumber}
+                      </td>
                       <td className="px-4 py-3">
                         {editing ? (
                           <input

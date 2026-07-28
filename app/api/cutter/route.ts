@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
-import { interpolateShelflist, generateBaseWorkmark, generateFinalWorkmark } from '@/lib/cutter'
+import { interpolateShelflist, generateBaseWorkmark, generateFinalWorkmark, normalizeTitle } from '@/lib/cutter'
 import { generateSpelledTitle } from '@/lib/spelled-title'
 import { UserRole } from '@/types'
 
@@ -19,7 +19,7 @@ export const POST = withAuth(
   async (req: NextRequest, session, context) => {
     try {
       const body = await req.json()
-      const { name, classification_id, title, book_id } = body
+      const { name, classification_id, section_id, title, book_id } = body
 
       if (!name || !classification_id) {
         return createErrorResponse('name and classification_id are required', 400)
@@ -48,7 +48,8 @@ export const POST = withAuth(
           book: {
             select: {
               title: true,
-              classification_id: true
+              classification_id: true,
+              section_id: true
             }
           }
         },
@@ -69,26 +70,49 @@ export const POST = withAuth(
         })
         .sort((a, b) => a.surname.localeCompare(b.surname))
 
-      // Interpolate cutter using the shelflist algorithm
-      const cutter = interpolateShelflist(name.trim(), sameClassEntries)
+      // Check if this is a new edition of an existing work by the same author.
+      // If so, reuse the existing cutter + workmark (editions share the same
+      // call number stem — only the year differs).
+      const existingSameAuthor = existingAuthors.filter(
+        (a) =>
+          a.name === name &&
+          a.book.classification_id === Number(classification_id) &&
+          (section_id ? a.book.section_id === Number(section_id) : true) &&
+          a.cutter_number
+      )
 
-      // Generate work marks — use spelled-out title so numbers map to phonetic first letters
-      const spelledTitle = title ? generateSpelledTitle(title) : ''
-      const workmarkTitle = spelledTitle || title || ''
-      const baseWm = workmarkTitle ? generateBaseWorkmark(workmarkTitle) : ''
-      let finalWm = baseWm
+      const normalizedNew = normalizeTitle(title || '')
+      const matchedEdition = existingSameAuthor.find((a) => {
+        const normalizedExisting = normalizeTitle(a.book.title || '')
+        return normalizedExisting && normalizedNew && normalizedExisting === normalizedNew
+      })
 
-      if (baseWm) {
-        // Get existing final workmarks for this author in this classification
-        const existingMarks = existingAuthors
-          .filter((a) =>
-            a.name === name &&
-            a.book.classification_id === Number(classification_id)
-          )
-          .map((a) => a.final_workmark)
-          .filter((m): m is string => !!m)
+      let cutter: string
+      let finalWm: string
+      let baseWm: string
 
-        finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+      if (matchedEdition) {
+        // Same work (different edition) — reuse everything, only year changes
+        cutter = matchedEdition.cutter_number!
+        finalWm = matchedEdition.final_workmark || ''
+        baseWm = ''
+      } else {
+        // Different work — interpolate cutter and generate unique workmark
+        cutter = interpolateShelflist(name.trim(), sameClassEntries)
+
+        const spelledTitle = title ? generateSpelledTitle(title) : ''
+        const workmarkTitle = spelledTitle || title || ''
+        baseWm = workmarkTitle ? generateBaseWorkmark(workmarkTitle) : ''
+
+        if (baseWm) {
+          const existingMarks = existingSameAuthor
+            .map((a) => a.final_workmark)
+            .filter((m): m is string => !!m)
+
+          finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+        } else {
+          finalWm = ''
+        }
       }
 
       return createSuccessResponse({
