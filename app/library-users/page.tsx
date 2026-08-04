@@ -1635,7 +1635,6 @@ export default function LibraryUsersPage() {
             setRefreshCounter((c) => c + 1)
           }}
         />
-        
       )}
 
       {/* Borrowing History Modal — opens from the per-row
@@ -2601,6 +2600,12 @@ function FinesSummaryTab({
                             ? ''
                             : ' · Not yet returned'}
                       </div>
+                      {p.return_override_reason && (
+                        <div className="text-[11px] text-orange-600 mt-1 flex items-center gap-1">
+                          <i className="fas fa-clock-rotate-left"></i>
+                          <span>Return overridden: {p.return_override_reason}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-semibold text-gray-900">
@@ -2648,6 +2653,12 @@ function FinesSummaryTab({
                             ? ''
                             : ' · Not yet returned'}
                       </div>
+                      {p.return_override_reason && (
+                        <div className="text-[11px] text-orange-600 mt-1 flex items-center gap-1">
+                          <i className="fas fa-clock-rotate-left"></i>
+                          <span>Return overridden: {p.return_override_reason}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-semibold text-gray-900">

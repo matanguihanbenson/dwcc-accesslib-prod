@@ -109,7 +109,9 @@ export class EntryService extends BaseService {
             // `grade_level_id`.
             grade_level: {
               select: { grade_level_id: true, name: true, code: true }
-            }
+            },
+            section: { select: { section_id: true, name: true } },
+            strand: { select: { strand_id: true, name: true } }
           },
         },
         entrance: { select: { entrance_id: true, name: true, campus: true } },
@@ -171,7 +173,11 @@ export class EntryService extends BaseService {
           user_full_name:        user.full_name ?? null,
           user_department_name:  user.department_ref?.name ?? null,
           user_program_name:     user.program?.name ?? null,
-          user_grade_level_name: user.grade_level?.name ?? null
+          user_grade_level_name: user.grade_level?.name ?? null,
+          user_section_id:       user.section_id ?? null,
+          user_section_name:     (user as any).section?.name ?? null,
+          user_strand_id:        user.strand_id ?? null,
+          user_strand_name:      (user as any).strand?.name ?? null
         }
 
         const entryLog = await this.create<EntryLog>(prisma.entryLog, {

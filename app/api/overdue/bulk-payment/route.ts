@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { calculateActiveHoursOverdue } from '@/lib/timezone'
 import { AuditService } from '@/lib/services/audit.service'
 import { UserRole } from '@/types'
 import { OverdueSettlementStatus } from '@prisma/client'
@@ -138,16 +139,16 @@ export async function POST(request: NextRequest) {
       let calculatedPenalty = 0
       
       if (dueTime) {
-        const exceededMs = currentDate.getTime() - dueTime.getTime()
-        if (exceededMs > 0) {
-          const hoursOverdue = exceededMs / (1000 * 60 * 60)
-          calculatedPenalty = Math.floor(hoursOverdue) * 20
+        if (currentDate > dueTime) {
+          const activeHours = calculateActiveHoursOverdue(dueTime, currentDate)
+          calculatedPenalty = Math.floor(activeHours) * 20
         }
       } else {
         const freeHours = 2
         if (hoursUsed > freeHours) {
-          const hoursOverdue = hoursUsed - freeHours
-          calculatedPenalty = Math.floor(hoursOverdue) * 20
+          const fineStart = new Date(borrowTime.getTime() + freeHours * 60 * 60 * 1000)
+          const activeHours = calculateActiveHoursOverdue(fineStart, currentDate)
+          calculatedPenalty = Math.floor(activeHours) * 20
         }
       }
 

@@ -102,6 +102,20 @@ export async function GET(request: NextRequest) {
               }
             }
           }
+        },
+        payment_records: {
+          include: {
+            processedByUser: {
+              select: {
+                full_name: true,
+                account_id: true,
+                user_account: {
+                  select: { role: true }
+                }
+              }
+            }
+          },
+          orderBy: { created_at: 'asc' }
         }
       },
       orderBy: {
@@ -173,7 +187,17 @@ export async function GET(request: NextRequest) {
           created_at: settlement.created_at,
           settled_at: settlement.settled_at,
           updated_at: settlement.updated_at,
-          transaction_details: transactionDetails
+          transaction_details: transactionDetails,
+          payment_records: settlement.payment_records.map((pr) => ({
+            id: pr.id,
+            type: pr.type,
+            amount: Number(pr.amount),
+            notes: pr.notes,
+            created_at: pr.created_at,
+            processed_by_name: pr.processedByUser?.full_name || null,
+            processed_by_account_id: pr.processedByUser?.account_id || null,
+            processed_by_role: pr.processedByUser?.user_account?.role || null,
+          }))
         }
       })
     )

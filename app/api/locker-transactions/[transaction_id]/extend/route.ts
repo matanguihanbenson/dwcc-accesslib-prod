@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth, createSuccessResponse, createErrorResponse, validateId } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
+import { calculateActiveHoursOverdue } from '@/lib/timezone'
 import { UserRole } from '@/types'
 import { AuditService } from '@/lib/services/audit.service'
 
@@ -77,14 +78,9 @@ export const PATCH = withAuth(
         if (existingDueTime) {
           // Use same logic as return: fines start after due_time + grace minutes
           if (now > fineStartTime) {
-            const exceededMs = now.getTime() - fineStartTime.getTime()
-            const exceededHours = exceededMs / (1000 * 60 * 60)
-            // Immediate-fine policy: any overrun (even 1 second) is billed
-            // as the first full hour, and each started hour after that
-            // adds another fine. Math.ceil matches the return/force-return
-            // behavior so the extend penalty stays consistent.
+            const activeHours = calculateActiveHoursOverdue(fineStartTime, now)
             recalculatedPenalty = Math.min(
-              Math.ceil(exceededHours) * lockerFinePerHour,
+              Math.ceil(activeHours) * lockerFinePerHour,
               maxLockerFine
             )
           }
@@ -93,11 +89,9 @@ export const PATCH = withAuth(
           const implicitDueTime = new Date(borrowTime.getTime() + gracePeriodMs)
           const implicitFineStart = new Date(implicitDueTime.getTime() + gracePeriodMinutes * 60 * 1000)
           if (now > implicitFineStart) {
-            const exceededMs = now.getTime() - implicitFineStart.getTime()
-            const exceededHours = exceededMs / (1000 * 60 * 60)
-            // Same immediate-fine policy as above.
+            const activeHours = calculateActiveHoursOverdue(implicitFineStart, now)
             recalculatedPenalty = Math.min(
-              Math.ceil(exceededHours) * lockerFinePerHour,
+              Math.ceil(activeHours) * lockerFinePerHour,
               maxLockerFine
             )
           }

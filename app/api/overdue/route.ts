@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { calculateActiveHoursOverdue, calculateLockerPenalty } from '@/lib/timezone'
 import jwt from 'jsonwebtoken'
 
 export async function GET(request: NextRequest) {
@@ -353,35 +354,19 @@ export async function GET(request: NextRequest) {
         const timeUsedMs = endTime.getTime() - borrowTime.getTime()
         const hoursUsed = timeUsedMs / (1000 * 60 * 60)
         
-        // Calculate hours overdue and penalty (using system settings)
-        let hoursOverdue = 0
-        let calculatedPenalty = 0
-        
-        if (dueTime) {
-          // If due_time exists (with extensions), add grace_period_minutes after due_time
-          const gracePeriodMs = gracePeriodMinutes * 60 * 1000
-          const fineStartTime = new Date(dueTime.getTime() + gracePeriodMs)
-          const exceededMs = endTime.getTime() - fineStartTime.getTime()
-          if (exceededMs > 0) {
-            hoursOverdue = exceededMs / (1000 * 60 * 60)
-            calculatedPenalty = Math.min(
-              Math.floor(hoursOverdue) * lockerFinePerHour,
-              maxLockerFine
-            )
-          }
-        } else {
-          // No due_time, so apply grace_period (hours + minutes) from borrow_time
-          const gracePeriodMs = (gracePeriodHours * 60 * 60 * 1000) + (gracePeriodMinutes * 60 * 1000)
-          const implicitDueTime = new Date(borrowTime.getTime() + gracePeriodMs)
-          const exceededMs = endTime.getTime() - implicitDueTime.getTime()
-          if (exceededMs > 0) {
-            hoursOverdue = exceededMs / (1000 * 60 * 60)
-            calculatedPenalty = Math.min(
-              Math.floor(hoursOverdue) * lockerFinePerHour,
-              maxLockerFine
-            )
-          }
-        }
+        // Use shared penalty calculator for consistent breakdown
+        const breakdown = calculateLockerPenalty({
+          borrow_time: borrowTime,
+          due_time: dueTime,
+          end_time: endTime,
+          grace_period_hours: gracePeriodHours,
+          grace_period_minutes: gracePeriodMinutes,
+          rate: lockerFinePerHour,
+          max_fine: maxLockerFine
+        })
+
+        const hoursOverdue = breakdown.active_hours
+        const calculatedPenalty = breakdown.penalty
         
         const settlement = lockerSettlementMap.get(transaction.transaction_id)
         
@@ -396,7 +381,22 @@ export async function GET(request: NextRequest) {
           amount_paid: settlement ? Number(settlement.amount_paid) : 0,
           remaining_balance: settlement ? Number(settlement.remaining_balance) : calculatedPenalty,
           is_returned: !!returnTime,
-          return_time: returnTime
+          return_time: returnTime,
+          penalty_breakdown: {
+            borrow_time: breakdown.borrow_time.toISOString(),
+            due_time: breakdown.due_time.toISOString(),
+            fine_start_time: breakdown.fine_start_time.toISOString(),
+            end_time: breakdown.end_time.toISOString(),
+            grace_period_hours: breakdown.grace_period_hours,
+            grace_period_minutes: breakdown.grace_period_minutes,
+            active_hours: breakdown.active_hours,
+            rounded_hours: breakdown.rounded_hours,
+            rate: breakdown.rate,
+            max_fine: breakdown.max_fine,
+            penalty: breakdown.penalty,
+            library_open: breakdown.library_open,
+            library_close: breakdown.library_close
+          }
         }
       })
 

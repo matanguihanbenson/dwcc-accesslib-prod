@@ -450,7 +450,7 @@ export default function EditLibraryUserPage() {
     } else {
       setGradeLevels([])
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [formData.basic_ed_level])
 
   // Auto-fetch programs when the department changes.
@@ -460,7 +460,7 @@ export default function EditLibraryUserPage() {
     } else {
       setPrograms([])
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [formData.department_id])
 
   // Senior-High grade levels expose a strand picker.
@@ -477,7 +477,7 @@ export default function EditLibraryUserPage() {
       setStrands([])
       setFormData((prev) => ({ ...prev, strand_id: '' }))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [formData.grade_level_id, gradeLevels])
 
   // Once both the strand and the grade level are set
@@ -504,7 +504,7 @@ export default function EditLibraryUserPage() {
     } else {
       setSections([])
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [formData.grade_level_id, formData.strand_id, gradeLevels])
 
   const handleSubmit = async (e: React.FormEvent) => {

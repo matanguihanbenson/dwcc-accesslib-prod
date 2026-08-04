@@ -6,12 +6,15 @@ import { Pagination, PaginationControls } from '@/components/ui/pagination'
 import PaymentModal from '@/components/modals/PaymentModal'
 import SendIndividualNotificationModal from '@/components/modals/SendIndividualNotificationModal'
 import PaymentHistoryModal from '@/components/modals/PaymentHistoryModal'
+import PenaltyBreakdownModal, { PenaltyBreakdownData } from '@/components/modals/PenaltyBreakdownModal'
+import OverrideReturnModal from '@/components/modals/OverrideReturnModal'
 
 interface OverdueLocker {
   transaction_id: number
   borrow_time: string
   penalty: number
   hours_used: number
+  hours_overdue: number
   days_used: number
   calculated_penalty: number
   settlement_status?: 'PENDING' | 'PARTIAL' | 'SETTLED'
@@ -35,10 +38,11 @@ interface OverdueLocker {
 interface OverdueLockerTableProps {
   lockers: OverdueLocker[]
   onRefresh: () => void
+  onOverride?: () => void
   userEmail?: string | null
 }
 
-export default function OverdueLockerTable({ lockers, onRefresh, userEmail }: OverdueLockerTableProps) {
+export default function OverdueLockerTable({ lockers, onRefresh, onOverride, userEmail }: OverdueLockerTableProps) {
   const [processingId, setProcessingId] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(25)
@@ -65,6 +69,30 @@ export default function OverdueLockerTable({ lockers, onRefresh, userEmail }: Ov
     isOpen: false,
     transactionId: null,
     transactionType: 'LOCKER'
+  })
+  const [breakdownModal, setBreakdownModal] = useState<{
+    isOpen: boolean
+    data: PenaltyBreakdownData | null
+    lockerNumber: string
+    userName: string
+  }>({
+    isOpen: false,
+    data: null,
+    lockerNumber: '',
+    userName: ''
+  })
+  const [overrideModal, setOverrideModal] = useState<{
+    isOpen: boolean
+    transactionId: number | null
+    itemName: string
+    dueDate: string
+    currentReturnDate?: string | null
+  }>({
+    isOpen: false,
+    transactionId: null,
+    itemName: '',
+    dueDate: '',
+    currentReturnDate: null
   })
 
   // Pagination calculations
@@ -395,12 +423,28 @@ export default function OverdueLockerTable({ lockers, onRefresh, userEmail }: Ov
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${getSeverityColor(locker.days_used)}`}>
-                      {formatDuration(locker.hours_used)}
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${getSeverityColor(locker.hours_overdue)}`}>
+                      {formatDuration(locker.hours_overdue)}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="text-sm font-bold text-red-600">₱{amountDue.toFixed(2)}</div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm font-bold text-red-600">₱{amountDue.toFixed(2)}</span>
+                      {(locker as any).penalty_breakdown && (
+                        <button
+                          onClick={() => setBreakdownModal({
+                            isOpen: true,
+                            data: (locker as any).penalty_breakdown,
+                            lockerNumber: locker.locker.locker_number,
+                            userName: locker.user.full_name
+                          })}
+                          className="text-gray-400 hover:text-blue-600 text-xs font-bold"
+                          title="View penalty breakdown"
+                        >
+                          <sup>₱</sup>
+                        </button>
+                      )}
+                    </div>
                     {locker.settlement_status === 'PARTIAL' && locker.amount_paid && (
                       <div className="text-xs text-gray-500">Paid: ₱{locker.amount_paid.toFixed(2)}</div>
                     )}
@@ -469,6 +513,20 @@ export default function OverdueLockerTable({ lockers, onRefresh, userEmail }: Ov
                           <i className="fas fa-unlock"></i>
                         </button>
                       )}
+                      <button
+                        onClick={() => setOverrideModal({
+                          isOpen: true,
+                          transactionId: locker.transaction_id,
+                          itemName: locker.locker.locker_number,
+                          dueDate: (locker as any).due_time || '',
+                          currentReturnDate: (locker as any).return_time
+                        })}
+                        disabled={processingId === locker.transaction_id}
+                        className="text-orange-600 hover:text-orange-900 px-2 py-1 text-xs border border-orange-600 hover:bg-orange-50 rounded disabled:opacity-50"
+                        title="Override Return Date"
+                      >
+                        <i className="fas fa-clock-rotate-left"></i>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -534,6 +592,25 @@ export default function OverdueLockerTable({ lockers, onRefresh, userEmail }: Ov
           senderEmail={userEmail}
         />
       )}
+
+      <PenaltyBreakdownModal
+        isOpen={breakdownModal.isOpen}
+        onClose={() => setBreakdownModal({ isOpen: false, data: null, lockerNumber: '', userName: '' })}
+        data={breakdownModal.data}
+        lockerNumber={breakdownModal.lockerNumber}
+        userName={breakdownModal.userName}
+      />
+
+      <OverrideReturnModal
+        isOpen={overrideModal.isOpen}
+        onClose={() => setOverrideModal({ isOpen: false, transactionId: null, itemName: '', dueDate: '', currentReturnDate: null })}
+        onOverride={onOverride || onRefresh}
+        transactionType="LOCKER"
+        transactionId={overrideModal.transactionId || 0}
+        itemName={overrideModal.itemName}
+        dueDate={overrideModal.dueDate}
+        currentReturnDate={overrideModal.currentReturnDate}
+      />
     </div>
   )
 }

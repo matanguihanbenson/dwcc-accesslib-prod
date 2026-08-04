@@ -1,7 +1,9 @@
 "use client"
 import React, { useState, useMemo, useEffect } from 'react'
 import { notify } from '@/lib/notification'
+import { calculateActiveHoursOverdue, calculateLockerPenalty } from '@/lib/timezone'
 import { Pagination } from '@/components/ui/pagination'
+import PenaltyBreakdownModal, { PenaltyBreakdownData } from '@/components/modals/PenaltyBreakdownModal'
 
 type Campus = 'COLLEGE' | 'BASIC_EDUCATION'
 
@@ -58,6 +60,24 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
   const [rfidInput, setRfidInput] = useState('')
   const [isScanning, setIsScanning] = useState(false)
 
+  const [systemSettings, setSystemSettings] = useState({
+    grace_period_hours: 2,
+    grace_period_minutes: 15,
+    locker_fine_per_hour: 20,
+    max_locker_fine: 500,
+  })
+  const [breakdownModal, setBreakdownModal] = useState<{
+    isOpen: boolean
+    data: PenaltyBreakdownData | null
+    lockerNumber: string
+    userName: string
+  }>({
+    isOpen: false,
+    data: null,
+    lockerNumber: '',
+    userName: ''
+  })
+
   // Real-time timer
   useEffect(() => {
     const timer = setInterval(() => {
@@ -65,6 +85,27 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
     }, 1000)
     
     return () => clearInterval(timer)
+  }, [])
+
+  // Fetch system settings for fine calculation
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await fetch('/api/settings')
+        const data = await response.json()
+        if (data.success && data.data?.fines) {
+          setSystemSettings({
+            grace_period_hours: data.data.fines.grace_period_hours,
+            grace_period_minutes: data.data.fines.grace_period_minutes || 15,
+            locker_fine_per_hour: data.data.fines.locker_fine_per_hour,
+            max_locker_fine: data.data.fines.max_locker_fine,
+          })
+        }
+      } catch (error) {
+        console.error('Failed to fetch system settings:', error)
+      }
+    }
+    fetchSettings()
   }, [])
 
   // Format time as HH:MM:SS
@@ -88,41 +129,82 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
     const timeUsedMs = now.getTime() - borrowTime.getTime()
     const timeUsedFormatted = formatTimeHMS(timeUsedMs)
     
-    // Determine if overdue with 2 hours free use + extensions
+    // Determine if overdue with grace periods
     let isOvertime = false
     let fine = 0
+    let breakdown: PenaltyBreakdownData | null = null
     
     if (dueTime) {
       // Use the due_time from the transaction (which includes extensions)
-      isOvertime = now > dueTime
+      // Add grace period minutes after due_time before fines start
+      const gracePeriodMs = (systemSettings.grace_period_minutes || 15) * 60 * 1000
+      const fineStartTime = new Date(dueTime.getTime() + gracePeriodMs)
+      isOvertime = now > fineStartTime
 
       if (isOvertime) {
-        const exceededMs = now.getTime() - dueTime.getTime()
-        const exceededHours = exceededMs / (1000 * 60 * 60)
-        // Immediate-fine policy: any overrun (even 1 second) is billed as
-        // the first full hour, and each started hour after that adds
-        // another fine. Math.ceil ensures the first penalty applies
-        // right away, matching the staff view and the return/extend APIs.
-        fine = Math.ceil(exceededHours) * 20
+        // Count only library-active hours (7 AM – 7 PM)
+        const activeHours = calculateActiveHoursOverdue(fineStartTime, now)
+        const rounded = Math.ceil(activeHours)
+        fine = Math.min(
+          rounded * systemSettings.locker_fine_per_hour,
+          systemSettings.max_locker_fine
+        )
+        const raw = calculateLockerPenalty({
+          borrow_time: borrowTime,
+          due_time: dueTime,
+          end_time: now,
+          grace_period_hours: systemSettings.grace_period_hours,
+          grace_period_minutes: systemSettings.grace_period_minutes || 15,
+          rate: systemSettings.locker_fine_per_hour,
+          max_fine: systemSettings.max_locker_fine
+        })
+        breakdown = {
+          ...raw,
+          borrow_time: raw.borrow_time.toISOString(),
+          due_time: raw.due_time.toISOString(),
+          fine_start_time: raw.fine_start_time.toISOString(),
+          end_time: raw.end_time.toISOString()
+        } as PenaltyBreakdownData
       }
     } else {
-      // If no due_time, assume 2 hours free use from borrow time
-      const twoHoursMs = 2 * 60 * 60 * 1000
-      const freeUseEndTime = borrowTime.getTime() + twoHoursMs
+      // If no due_time, use grace period from system settings (hours + minutes)
+      const graceHoursMs = systemSettings.grace_period_hours * 60 * 60 * 1000
+      const graceMinutesMs = (systemSettings.grace_period_minutes || 15) * 60 * 1000
+      const freeUseEndTime = borrowTime.getTime() + graceHoursMs + graceMinutesMs
       isOvertime = now.getTime() > freeUseEndTime
 
       if (isOvertime) {
-        const exceededMs = now.getTime() - freeUseEndTime
-        const exceededHours = exceededMs / (1000 * 60 * 60)
-        // Same immediate-fine policy as above.
-        fine = Math.ceil(exceededHours) * 20
+        const fineStart = new Date(freeUseEndTime)
+        const activeHours = calculateActiveHoursOverdue(fineStart, now)
+        const rounded = Math.ceil(activeHours)
+        fine = Math.min(
+          rounded * systemSettings.locker_fine_per_hour,
+          systemSettings.max_locker_fine
+        )
+        const raw = calculateLockerPenalty({
+          borrow_time: borrowTime,
+          due_time: borrowTime,
+          end_time: now,
+          grace_period_hours: systemSettings.grace_period_hours,
+          grace_period_minutes: systemSettings.grace_period_minutes || 15,
+          rate: systemSettings.locker_fine_per_hour,
+          max_fine: systemSettings.max_locker_fine
+        })
+        breakdown = {
+          ...raw,
+          borrow_time: raw.borrow_time.toISOString(),
+          due_time: raw.due_time.toISOString(),
+          fine_start_time: raw.fine_start_time.toISOString(),
+          end_time: raw.end_time.toISOString()
+        } as PenaltyBreakdownData
       }
     }
     
     return {
       timeUsedFormatted,
       isOvertime,
-      fine
+      fine,
+      breakdown
     }
   }
   
@@ -832,6 +914,20 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
                               <div className="text-xs text-red-600 font-semibold bg-red-50 px-2 py-0.5 rounded inline-flex items-center gap-1">
                                 <i className="fas fa-exclamation-triangle"></i>
                                 Overdue! ₱{timeInfo.fine}
+                                {timeInfo.breakdown && (
+                                  <button
+                                    onClick={() => setBreakdownModal({
+                                      isOpen: true,
+                                      data: timeInfo.breakdown,
+                                      lockerNumber: locker.locker_number,
+                                      userName: locker.activeTransaction.user?.full_name || ''
+                                    })}
+                                    className="font-bold text-gray-400 hover:text-blue-600"
+                                    title="View penalty breakdown"
+                                  >
+                                    <sup>₱</sup>
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1500,6 +1596,14 @@ function AdminView({ lockers, transactions, onRefresh }: AdminViewProps) {
           </div>
         </div>
       )}
+
+      <PenaltyBreakdownModal
+        isOpen={breakdownModal.isOpen}
+        onClose={() => setBreakdownModal({ isOpen: false, data: null, lockerNumber: '', userName: '' })}
+        data={breakdownModal.data}
+        lockerNumber={breakdownModal.lockerNumber}
+        userName={breakdownModal.userName}
+      />
     </div>
   )
 }

@@ -34,6 +34,7 @@ export const GET = withAuth(
       const dateFrom = params.get('date_from')
       const dateTo = params.get('date_to')
       const queryCampus = params.get('campus')
+      const rawEntrance = params.get('entrance_id')
 
       if (!dateFrom || !dateTo) {
         return createErrorResponse('date_from and date_to are required', 400)
@@ -48,62 +49,82 @@ export const GET = withAuth(
       const effectiveCampus = await resolveReportCampus(session, queryCampus)
       const campusWhere = effectiveCampus ? { campus: effectiveCampus } : {}
 
+      // Parse entrance_id filter (supports single number, numeric string,
+      // or comma-separated list of numbers — same as entrance-exit report).
+      const entranceIds: number[] = (() => {
+        if (!rawEntrance) return []
+        const list = String(rawEntrance)
+          .split(',')
+          .map((s) => parseInt(s.trim()))
+          .filter((n) => Number.isFinite(n) && n > 0)
+        return Array.from(new Set(list))
+      })()
+
+      // Use snapshot fields from the entrylog row so
+      // historical reports reflect the user as they were
+      // at entry time, not their current profile.
       const logs = await prisma.entryLog.findMany({
         where: {
           ...campusWhere,
+          ...(entranceIds.length > 0
+            ? { entrance_id: { in: entranceIds } }
+            : {}),
           entry_time: {
             gte: startDate,
             lte: endDate,
           },
         },
-        include: {
-          user: {
-            select: {
-              department_id: true,
-              program_id: true,
-              grade_level_id: true,
-              department_ref: { select: { department_id: true, name: true, code: true } },
-              program: { select: { program_id: true, name: true, code: true, department: { select: { department_id: true, name: true, code: true } } } },
-              grade_level: { select: { grade_level_id: true, name: true, education_level: true } },
-            },
-          },
+        select: {
+          user_department_id: true,
+          user_department_name: true,
+          user_program_id: true,
+          user_program_name: true,
+          user_grade_level_id: true,
+          user_grade_level_name: true,
+          user_education_level: true,
+          user_user_type: true,
         },
         orderBy: { entry_time: 'asc' },
       })
 
-      const deptCounts = new Map<string, { department_id: number, name: string, code: string, count: number }>()
-      const gradeCounts = new Map<string, { grade_level_id: number, name: string, education_level: string, count: number }>()
+      const deptCounts = new Map<string, { department_id: number | null, name: string, code: string, count: number }>()
+      const gradeCounts = new Map<string, { grade_level_id: number | null, name: string, education_level: string, count: number }>()
 
       for (const log of logs) {
-        const u = log.user
-        if (u) {
-          const deptInfo = u.program?.department || u.department_ref || null
-          if (deptInfo) {
-            const key = deptInfo.code || `dept_${deptInfo.department_id}`
-            const prev = deptCounts.get(key)
-            if (prev) {
-              prev.count += 1
-            } else {
-              deptCounts.set(key, { department_id: deptInfo.department_id, name: deptInfo.name, code: deptInfo.code, count: 1 })
-            }
-          }
+        // Only count students
+        if (log.user_user_type !== 'STUDENT') continue
 
-          const gradeInfo = u.grade_level || null
-          if (gradeInfo) {
-            const key = (gradeInfo as any).code || `grade_${gradeInfo.grade_level_id}`
-            const prev = gradeCounts.get(key)
-            if (prev) {
-              prev.count += 1
-            } else {
-              gradeCounts.set(key, { grade_level_id: gradeInfo.grade_level_id, name: gradeInfo.name, education_level: String(gradeInfo.education_level), count: 1 })
-            }
+        // Department grouping: use program's department name or direct department name
+        const deptName = log.user_department_name
+        const deptId = log.user_department_id
+        if (deptName) {
+          const key = deptName
+          const prev = deptCounts.get(key)
+          if (prev) {
+            prev.count += 1
+          } else {
+            deptCounts.set(key, { department_id: deptId, name: deptName, code: deptName, count: 1 })
+          }
+        }
+
+        // Grade level grouping
+        const gradeName = log.user_grade_level_name
+        const gradeId = log.user_grade_level_id
+        const eduLevel = log.user_education_level
+        if (gradeName) {
+          const key = gradeName
+          const prev = gradeCounts.get(key)
+          if (prev) {
+            prev.count += 1
+          } else {
+            gradeCounts.set(key, { grade_level_id: gradeId, name: gradeName, education_level: String(eduLevel || ''), count: 1 })
           }
         }
       }
 
       const byDepartment = Array.from(deptCounts.values()).sort((a, b) => b.count - a.count)
       const byGradeLevel = Array.from(gradeCounts.values()).sort((a, b) => b.count - a.count)
-      const totalVisits = logs.length
+      const totalVisits = logs.filter(l => l.user_user_type === 'STUDENT').length
 
       return createSuccessResponse({
         period: {
@@ -120,4 +141,3 @@ export const GET = withAuth(
   },
   [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF]
 )
-

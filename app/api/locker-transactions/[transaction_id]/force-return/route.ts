@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { AuditService } from '@/lib/services/audit.service'
+import { calculateActiveHoursOverdue } from '@/lib/timezone'
 import { UserRole } from '@/types'
 
 export async function PATCH(
@@ -56,13 +57,9 @@ export async function PATCH(
     if (dueTime) {
       // If due_time exists (with extensions), check if exceeded
       if (returnTime > dueTime) {
-        const exceededMs = returnTime.getTime() - dueTime.getTime()
-        const exceededHours = exceededMs / (1000 * 60 * 60)
-        // Immediate-fine policy: any overrun (even 1 second) is billed as
-        // the first full hour, and each started hour after that adds
-        // another fine. Math.ceil ensures the first penalty applies
-        // right away, matching the locker return/extend behavior.
-        calculatedPenalty = Math.ceil(exceededHours) * 20
+        // Count only library-active hours (7 AM – 7 PM)
+        const activeHours = calculateActiveHoursOverdue(dueTime, returnTime)
+        calculatedPenalty = Math.ceil(activeHours) * 20
       }
     } else {
       // No due_time, check if exceeded 2 hours free use
@@ -70,9 +67,10 @@ export async function PATCH(
       const hoursUsed = timeUsedMs / (1000 * 60 * 60)
 
       if (hoursUsed > 2) {
-        const exceededHours = hoursUsed - 2
-        // Same immediate-fine policy as above.
-        calculatedPenalty = Math.ceil(exceededHours) * 20
+        // Fines start after 2-hour free window; count active hours from there
+        const fineStart = new Date(borrowTime.getTime() + 2 * 60 * 60 * 1000)
+        const activeHours = calculateActiveHoursOverdue(fineStart, returnTime)
+        calculatedPenalty = Math.ceil(activeHours) * 20
       }
     }
     

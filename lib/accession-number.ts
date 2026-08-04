@@ -108,7 +108,7 @@ export async function advanceSequenceIfNeeded(accessionNumber: string): Promise<
   if (!m) return
   const num = parseInt(m[1], 10)
 
-  let sequence = await prisma.accessionNumberSequence.findFirst()
+  const sequence = await prisma.accessionNumberSequence.findFirst()
   if (!sequence) {
     await prisma.accessionNumberSequence.create({
       data: { last_number: Math.max(num, INITIAL_LAST_NUMBER) },

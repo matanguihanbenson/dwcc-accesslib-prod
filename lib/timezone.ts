@@ -362,3 +362,169 @@ export function getMonthBucketsInTz(
   }
   return buckets
 }
+
+// ── Active-hours overdue calculation ────────────────────────
+// Library operating hours: 7 AM – 7 PM PH time (12 h per day).
+// Only hours within this window count toward overdue fines.
+// Hours outside the window (7 PM – 7 AM overnight, 14 h) are
+// treated as non-billable.
+//
+// ALL arithmetic is done in Asia/Manila wall-clock time.
+// The `tz` parameter controls how Date objects are interpreted.
+
+const LIBRARY_OPEN_HOUR = 7   // 7 AM PH time
+const LIBRARY_CLOSE_HOUR = 19 // 7 PM PH time
+
+/**
+ * Count the number of library-active hours between `fineStart`
+ * and `endTime`, using Asia/Manila wall-clock time.
+ *
+ * Only hours within the 7 AM – 7 PM PH time window on each
+ * calendar day are counted. Overnight hours (7 PM – 7 AM) are
+ * excluded from fine calculation.
+ *
+ * @param fineStart  When fines begin accruing (Date, interpreted in tz)
+ * @param endTime    When fines stop accruing (Date, interpreted in tz)
+ * @param tz         IANA timezone — defaults to Asia/Manila
+ * @returns          Number of active (billable) hours
+ */
+export function calculateActiveHoursOverdue(
+  fineStart: Date,
+  endTime: Date,
+  tz: string = TIMEZONE
+): number {
+  if (endTime <= fineStart) return 0
+
+  // Interpret both dates in the target timezone (PH time)
+  const startParts = getDatePartsInTz(fineStart, tz)
+  const endParts = getDatePartsInTz(endTime, tz)
+
+  // Reconstruct as wall-clock ms (arithmetic is in local-time ms,
+  // not real UTC — but since all values use the same tz, the
+  // differences are correct).
+  const startMs = Date.UTC(
+    startParts.year, startParts.month - 1, startParts.day,
+    startParts.hour, startParts.minute, startParts.second
+  )
+  const endMs = Date.UTC(
+    endParts.year, endParts.month - 1, endParts.day,
+    endParts.hour, endParts.minute, endParts.second
+  )
+
+  // Align to midnight of the start time's calendar day so that
+  // dayBase + LIBRARY_OPEN_HOUR lands on the correct open time.
+  const midnightMs = Date.UTC(
+    startParts.year, startParts.month - 1, startParts.day,
+    0, 0, 0
+  )
+
+  // Total calendar days spanned (we'll walk each day)
+  const msPerDay = 86_400_000
+  const totalDays = Math.ceil((endMs - midnightMs) / msPerDay)
+
+  let activeMs = 0
+
+  for (let d = 0; d < totalDays; d++) {
+    // Library open/close for this PH-time calendar day
+    const dayBase = midnightMs + d * msPerDay
+    const openMs  = dayBase + LIBRARY_OPEN_HOUR * 3600_000
+    const closeMs = dayBase + LIBRARY_CLOSE_HOUR * 3600_000
+
+    // Clip the window to [fineStart, endTime]
+    const windowStart = Math.max(openMs, startMs)
+    const windowEnd   = Math.min(closeMs, endMs)
+
+    if (windowEnd > windowStart) {
+      activeMs += windowEnd - windowStart
+    }
+  }
+
+  return activeMs / 3600_000
+}
+
+// ── Full penalty breakdown ──────────────────────────────────
+// Returns every intermediate value so the UI can render a
+// step-by-step penalty breakdown modal.
+
+export interface PenaltyBreakdown {
+  borrow_time: Date
+  due_time: Date
+  fine_start_time: Date
+  end_time: Date
+  grace_period_hours: number
+  grace_period_minutes: number
+  active_hours: number
+  rounded_hours: number
+  rate: number
+  max_fine: number
+  penalty: number
+  library_open: number
+  library_close: number
+}
+
+/**
+ * Compute the full penalty breakdown for a locker transaction.
+ *
+ * Flow:
+ *   borrow_time + grace_period_hours → due_time
+ *   due_time   + grace_period_minutes → fine_start_time
+ *   From fine_start_time, count only library-active hours
+ *   (7 AM – 7 PM PH time) up to endTime.
+ *   Each started hour (ceil) is billed at `rate`.
+ */
+export function calculateLockerPenalty(params: {
+  borrow_time: Date
+  due_time: Date | null
+  end_time: Date
+  grace_period_hours: number
+  grace_period_minutes: number
+  rate: number
+  max_fine: number
+  tz?: string
+}): PenaltyBreakdown {
+  const {
+    borrow_time,
+    due_time,
+    end_time,
+    grace_period_hours,
+    grace_period_minutes,
+    rate,
+    max_fine,
+    tz = TIMEZONE
+  } = params
+
+  // Step 1: Determine due_time
+  const computedDueTime = due_time
+    || new Date(borrow_time.getTime() + (grace_period_hours * 3600_000) + (grace_period_minutes * 60_000))
+
+  // Step 2: Fine starts after grace_period_minutes past due_time
+  const fineStartTime = new Date(computedDueTime.getTime() + (grace_period_minutes * 60_000))
+
+  // Step 3: Count active library hours between fine_start and end
+  let activeHours = 0
+  if (end_time > fineStartTime) {
+    activeHours = calculateActiveHoursOverdue(fineStartTime, end_time, tz)
+  }
+
+  // Step 4: Ceil any started hour (immediate-fine policy)
+  const roundedHours = Math.ceil(activeHours)
+
+  // Step 5: Compute penalty, capped at max
+  const penalty = Math.min(roundedHours * rate, max_fine)
+
+  return {
+    borrow_time,
+    due_time: computedDueTime,
+    fine_start_time: fineStartTime,
+    end_time,
+    grace_period_hours,
+    grace_period_minutes,
+    active_hours: Math.round(activeHours * 100) / 100,
+    rounded_hours: roundedHours,
+    rate,
+    max_fine,
+    penalty,
+    library_open: LIBRARY_OPEN_HOUR,
+    library_close: LIBRARY_CLOSE_HOUR
+  }
+}

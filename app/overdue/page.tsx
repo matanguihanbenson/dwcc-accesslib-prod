@@ -821,6 +821,7 @@ export default function OverdueManagementPage() {
               <OverdueBooksTable 
                 books={filteredBooks}
                 onRefresh={handleRefresh}
+                onOverride={handleRefresh}
                 userEmail={session?.user?.email}
               />
             )}
@@ -828,6 +829,7 @@ export default function OverdueManagementPage() {
               <OverdueLockerTable 
                 lockers={filteredLockers}
                 onRefresh={handleRefresh}
+                onOverride={handleRefresh}
                 userEmail={session?.user?.email}
               />
             )}

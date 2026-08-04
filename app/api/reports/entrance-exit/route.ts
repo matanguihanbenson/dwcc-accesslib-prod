@@ -114,16 +114,6 @@ export const GET = withAuth(async (req: NextRequest, session) => {
         user: {
           select: {
             user_id: true,
-            user_type: true,
-            // The direct `education_level` enum is the
-            // primary signal for student categorisation
-            // (Basic Ed vs College). The FK fields are
-            // kept around as a fallback for legacy rows.
-            education_level: true,
-            grade_level_id: true,
-            section_id: true,
-            department_id: true,
-            program_id: true,
             user_account: {
               select: {
                 role: true,
@@ -207,18 +197,18 @@ export const GET = withAuth(async (req: NextRequest, session) => {
         return
       }
 
-      // Categorize the user. Pass the direct
-      // `education_level` enum first so a college
-      // student with a stale `grade_level_id` from
-      // older data doesn't get bucketed as Basic Ed.
+      // Categorize the user. Use the snapshot fields
+      // from the entrylog row so historical reports
+      // reflect the user as they were at entry time,
+      // not their current profile.
       const category = categorizeUserForEntranceExit({
         role: log.user?.user_account?.role,
-        user_type: log.user?.user_type,
-        education_level: log.user?.education_level,
-        grade_level_id: log.user?.grade_level_id,
-        section_id: log.user?.section_id,
-        department_id: log.user?.department_id,
-        program_id: log.user?.program_id,
+        user_type: log.user_user_type,
+        education_level: log.user_education_level as any,
+        grade_level_id: log.user_grade_level_id,
+        section_id: log.user_section_id,
+        department_id: log.user_department_id,
+        program_id: log.user_program_id,
       })
 
       // Increment the appropriate counter

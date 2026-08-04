@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { calculateActiveHoursOverdue } from '@/lib/timezone'
 
 // GET /api/overdue/user-summary/[user_id] - Get all penalties for a specific user
 export async function GET(
@@ -171,6 +172,9 @@ export async function GET(
       return_date: Date | null | undefined
       created_at: Date
       is_returned: boolean
+      return_override_reason?: string | null
+      return_overridden_by?: number | null
+      return_overridden_at?: Date | null
     }> = []
 
     // Add unreturned overdue books (without settlements yet)
@@ -223,7 +227,10 @@ export async function GET(
         due_date: transaction?.due_date,
         return_date: transaction?.return_date,
         created_at: settlement.created_at,
-        is_returned: !!transaction?.return_date
+        is_returned: !!transaction?.return_date,
+        return_override_reason: (transaction as any)?.return_override_reason,
+        return_overridden_by: (transaction as any)?.return_overridden_by,
+        return_overridden_at: (transaction as any)?.return_overridden_at,
       })
     })
 
@@ -244,6 +251,9 @@ export async function GET(
       created_at: Date
       is_returned: boolean
       hours_overdue?: number
+      return_override_reason?: string | null
+      return_overridden_by?: number | null
+      return_overridden_at?: Date | null
     }> = []
 
     // Add unreturned overdue lockers (without settlements yet)
@@ -269,15 +279,15 @@ export async function GET(
       let calculatedPenalty = 0
       
       if (dueTime) {
-        const exceededMs = currentDate.getTime() - dueTime.getTime()
-        if (exceededMs > 0) {
-          hoursOverdue = exceededMs / (1000 * 60 * 60)
+        if (currentDate > dueTime) {
+          hoursOverdue = calculateActiveHoursOverdue(dueTime, currentDate)
           calculatedPenalty = Math.floor(hoursOverdue) * 20
         }
       } else {
         const freeHours = 2
         if (hoursUsed > freeHours) {
-          hoursOverdue = hoursUsed - freeHours
+          const fineStart = new Date(borrowTime.getTime() + freeHours * 60 * 60 * 1000)
+          hoursOverdue = calculateActiveHoursOverdue(fineStart, currentDate)
           calculatedPenalty = Math.floor(hoursOverdue) * 20
         }
       }
@@ -316,7 +326,10 @@ export async function GET(
         borrow_time: transaction?.borrow_time,
         return_time: transaction?.return_time,
         created_at: settlement.created_at,
-        is_returned: !!transaction?.return_time
+        is_returned: !!transaction?.return_time,
+        return_override_reason: (transaction as any)?.return_override_reason,
+        return_overridden_by: (transaction as any)?.return_overridden_by,
+        return_overridden_at: (transaction as any)?.return_overridden_at,
       })
     })
 

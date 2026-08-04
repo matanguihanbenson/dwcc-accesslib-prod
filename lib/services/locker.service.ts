@@ -1,6 +1,7 @@
 import { BaseService } from './base.service'
 import { AuditService } from './audit.service'
 import { prisma } from '@/lib/prisma'
+import { calculateActiveHoursOverdue } from '@/lib/timezone'
 import {
   ServiceResult,
   CreateLockerData,
@@ -201,11 +202,11 @@ export class LockerService extends BaseService {
       let penalty = 0
 
       if (returnTime > transaction.due_time) {
-        const hoursOverdue = Math.ceil((returnTime.getTime() - transaction.due_time.getTime()) / (1000 * 60 * 60))
+        const activeHours = calculateActiveHoursOverdue(transaction.due_time, returnTime)
         const penaltyConfig = await prisma.penaltyConfig.findFirst({
           where: { type: 'LOCKER', is_active: true }
         })
-        penalty = hoursOverdue * (Number(penaltyConfig?.penalty_per_hour) || 2)
+        penalty = Math.ceil(activeHours) * (Number(penaltyConfig?.penalty_per_hour) || 2)
 
         // Create or update overdue settlement record for tracking
         const existingSettlement = await prisma.overdueSettlement.findFirst({
@@ -276,11 +277,11 @@ export class LockerService extends BaseService {
       }
 
       const returnTime = new Date()
-      const hoursOverdue = Math.ceil((returnTime.getTime() - transaction.due_time.getTime()) / (1000 * 60 * 60))
+      const activeHours = calculateActiveHoursOverdue(transaction.due_time, returnTime)
       const penaltyConfig = await prisma.penaltyConfig.findFirst({
         where: { type: 'LOCKER', is_active: true }
       })
-      const penalty = Math.max(0, hoursOverdue * (Number(penaltyConfig?.penalty_per_hour) || 2))
+      const penalty = Math.max(0, Math.ceil(activeHours) * (Number(penaltyConfig?.penalty_per_hour) || 2))
 
       // Create or update overdue settlement record for tracking
       const existingSettlement = await prisma.overdueSettlement.findFirst({

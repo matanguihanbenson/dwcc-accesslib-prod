@@ -217,6 +217,17 @@ export async function POST(request: NextRequest) {
         })
       }
 
+      // Create payment record for this transaction
+      await tx.paymentRecord.create({
+        data: {
+          settlement_id: settlement.settlement_id,
+          type: 'PAYMENT',
+          amount: Number(amount_paid),
+          notes: `Payment of ₱${Number(amount_paid).toFixed(2)}`,
+          processed_by: currentUserId,
+        }
+      })
+
       return settlement
     })
 

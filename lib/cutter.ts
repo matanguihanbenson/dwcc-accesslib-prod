@@ -581,7 +581,7 @@ export function generateFinalWorkmark(
  */
 export function normalizeTitle(title: string): string {
   if (!title) return ''
-  let t = title
+  const t = title
     .toLowerCase()
     .trim()
     // Remove subtitles after colon or semicolon

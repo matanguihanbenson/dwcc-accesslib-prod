@@ -1750,8 +1750,8 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              {/* Category Filter — hidden for fines-summary which doesn't use categories */}
-              {reportType !== 'fines-summary' && (
+              {/* Category Filter — only shown for book-related reports that use categories */}
+              {!['fines-summary', 'student-visits-dept-grade', 'entrance-exit', 'individual', 'locker-per-transaction'].includes(reportType) && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Category

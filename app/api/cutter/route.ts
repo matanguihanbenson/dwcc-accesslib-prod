@@ -8,14 +8,12 @@ import { UserRole } from '@/types'
 /**
  * POST /api/cutter
  *
- * Generates a Cutter number and workmark for an author within
- * a given classification, interpolating against the existing shelflist.
- *
- * The workmark is scoped by the primary author's cutter_number, not by name.
+ * Generates a Cutter number and work marks for an author within
+ * a given classification, interpolating against existing shelflist.
  *
  * Body: { name: string, classification_id: number, title?: string, book_id?: number }
  *
- * Returns: { cutter_number, decimal_value, workmark, full_cutter }
+ * Returns: { cutter_number, decimal_value, base_workmark, final_workmark, full_cutter }
  */
 export const POST = withAuth(
   async (req: NextRequest, session, context) => {
@@ -30,7 +28,7 @@ export const POST = withAuth(
       // Get all classification IDs (this node + descendants)
       const classificationIds = await getDescendantIds(Number(classification_id))
 
-      // ── Query: existing authors for shelflist interpolation ──
+      // Find all authors in books under this classification
       const whereClause: any = {
         book: {
           classification_id: { in: classificationIds },
@@ -46,6 +44,7 @@ export const POST = withAuth(
         select: {
           name: true,
           cutter_number: true,
+          final_workmark: true,
           book: {
             select: {
               title: true,
@@ -71,72 +70,48 @@ export const POST = withAuth(
         })
         .sort((a, b) => a.surname.localeCompare(b.surname))
 
-      // ── Query: existing books for workmark scope ──
-      const existingBooks = await prisma.book.findMany({
-        where: {
-          classification_id: Number(classification_id),
-          archived_at: null,
-          ...(book_id ? { book_id: { not: Number(book_id) } } : {}),
-        },
-        select: {
-          book_id: true,
-          title: true,
-          workmark: true,
-          section_id: true,
-          authors: {
-            select: { name: true, cutter_number: true }
-          }
-        }
-      })
+      // Check if this is a new edition of an existing work by the same author.
+      // If so, reuse the existing cutter + workmark (editions share the same
+      // call number stem — only the year differs).
+      const existingSameAuthor = existingAuthors.filter(
+        (a) =>
+          a.name === name &&
+          a.book.classification_id === Number(classification_id) &&
+          (section_id ? a.book.section_id === Number(section_id) : true) &&
+          a.cutter_number
+      )
 
       const normalizedNew = normalizeTitle(title || '')
-
-      // ── Step 1: Determine the cutter number ──
-      // Edition match uses author name (same person writing different editions)
-      const cutterMatchedEdition = existingBooks.find((b: any) =>
-        b.authors.some((a: any) => a.name === name && a.cutter_number) &&
-        (section_id ? b.section_id === Number(section_id) : true) &&
-        normalizeTitle(b.title || '') === normalizedNew &&
-        normalizedNew !== ''
-      )
+      const matchedEdition = existingSameAuthor.find((a) => {
+        const normalizedExisting = normalizeTitle(a.book.title || '')
+        return normalizedExisting && normalizedNew && normalizedExisting === normalizedNew
+      })
 
       let cutter: string
-      if (cutterMatchedEdition) {
-        const matchedAuthor = cutterMatchedEdition.authors.find((a: any) => a.name === name)
-        cutter = matchedAuthor!.cutter_number!
+      let finalWm: string
+      let baseWm: string
+
+      if (matchedEdition) {
+        // Same work (different edition) — reuse everything, only year changes
+        cutter = matchedEdition.cutter_number!
+        finalWm = matchedEdition.final_workmark || ''
+        baseWm = ''
       } else {
+        // Different work — interpolate cutter and generate unique workmark
         cutter = interpolateShelflist(name.trim(), sameClassEntries)
-      }
 
-      // ── Step 2: Determine the workmark, scoped by cutter_number ──
-      // Workmark edition match uses cutter_number (same author block, same title)
-      const workmarkMatchedEdition = existingBooks.find((b: any) =>
-        b.authors.some((a: any) => a.cutter_number === cutter) &&
-        (section_id ? b.section_id === Number(section_id) : true) &&
-        normalizeTitle(b.title || '') === normalizedNew &&
-        normalizedNew !== ''
-      )
-
-      let workmark: string
-      if (workmarkMatchedEdition) {
-        workmark = workmarkMatchedEdition.workmark || ''
-      } else {
         const spelledTitle = title ? generateSpelledTitle(title) : ''
         const workmarkTitle = spelledTitle || title || ''
-        const baseWm = workmarkTitle ? generateBaseWorkmark(workmarkTitle) : ''
+        baseWm = workmarkTitle ? generateBaseWorkmark(workmarkTitle) : ''
 
         if (baseWm) {
-          const existingMarks = existingBooks
-            .filter((b: any) =>
-              b.authors.some((a: any) => a.cutter_number === cutter) &&
-              (section_id ? b.section_id === Number(section_id) : true)
-            )
-            .map((b: any) => b.workmark)
-            .filter((m: any): m is string => !!m)
+          const existingMarks = existingSameAuthor
+            .map((a) => a.final_workmark)
+            .filter((m): m is string => !!m)
 
-          workmark = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+          finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
         } else {
-          workmark = ''
+          finalWm = ''
         }
       }
 
@@ -145,8 +120,9 @@ export const POST = withAuth(
         decimal_value: parseFloat(
           ('0.' + cutter.slice(1).padEnd(3, '0').slice(0, 3))
         ),
-        workmark,
-        full_cutter: cutter + workmark
+        base_workmark: baseWm,
+        final_workmark: finalWm,
+        full_cutter: cutter + finalWm
       })
     } catch (error) {
       console.error('Error generating cutter number:', error)

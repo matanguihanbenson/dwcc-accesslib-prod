@@ -1,7 +1,9 @@
 "use client";
 import React, { useState, useEffect, useMemo } from 'react'
 import { notify } from '@/lib/notification'
+import { calculateActiveHoursOverdue, calculateLockerPenalty } from '@/lib/timezone'
 import Swal from 'sweetalert2'
+import PenaltyBreakdownModal, { PenaltyBreakdownData } from '@/components/modals/PenaltyBreakdownModal'
 
 interface StaffViewProps {
   lockers: any[]
@@ -164,6 +166,17 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
   // <campus>".
   const [myCampus, setMyCampus] = useState<'COLLEGE' | 'BASIC_EDUCATION' | null>(null)
   const [myCampusLoaded, setMyCampusLoaded] = useState(false)
+  const [breakdownModal, setBreakdownModal] = useState<{
+    isOpen: boolean
+    data: PenaltyBreakdownData | null
+    lockerNumber: string
+    userName: string
+  }>({
+    isOpen: false,
+    data: null,
+    lockerNumber: '',
+    userName: ''
+  })
 
   useEffect(() => {
     setIsClient(true)
@@ -267,6 +280,7 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
     let fine = 0
     let exceededMs = 0
     let exceededFormatted = '00:00:00'
+    let breakdown: PenaltyBreakdownData | null = null
     
     if (dueTime) {
       // Use the due_time from the transaction (which includes extensions)
@@ -276,18 +290,32 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
       isOvertime = now > fineStartTime
 
       if (isOvertime) {
-        // Calculate exceeded time in hours after grace period
+        // Count only library-active hours (7 AM – 7 PM)
+        const activeHours = calculateActiveHoursOverdue(fineStartTime, now)
         exceededMs = now.getTime() - fineStartTime.getTime()
         exceededFormatted = formatTimeHMS(exceededMs)
-        const exceededHours = exceededMs / (1000 * 60 * 60)
-        // Fines start immediately once the grace window is exceeded: any
-        // overrun (even 1 second) is billed as the first full hour, and each
-        // started hour after that adds another fine. Use Math.ceil so the
-        // first peso applies right away.
+        const rounded = Math.ceil(activeHours)
         fine = Math.min(
-          Math.ceil(exceededHours) * systemSettings.locker_fine_per_hour,
+          rounded * systemSettings.locker_fine_per_hour,
           systemSettings.max_locker_fine
         )
+        // Build breakdown for modal
+        const raw = calculateLockerPenalty({
+          borrow_time: borrowTime,
+          due_time: dueTime,
+          end_time: now,
+          grace_period_hours: systemSettings.grace_period_hours,
+          grace_period_minutes: systemSettings.grace_period_minutes || 15,
+          rate: systemSettings.locker_fine_per_hour,
+          max_fine: systemSettings.max_locker_fine
+        })
+        breakdown = {
+          ...raw,
+          borrow_time: raw.borrow_time.toISOString(),
+          due_time: raw.due_time.toISOString(),
+          fine_start_time: raw.fine_start_time.toISOString(),
+          end_time: raw.end_time.toISOString()
+        } as PenaltyBreakdownData
       }
     } else {
       // If no due_time, use grace period from system settings (hours + minutes)
@@ -297,14 +325,32 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
       isOvertime = now.getTime() > freeUseEndTime
 
       if (isOvertime) {
+        const fineStart = new Date(freeUseEndTime)
+        const activeHours = calculateActiveHoursOverdue(fineStart, now)
         exceededMs = now.getTime() - freeUseEndTime
         exceededFormatted = formatTimeHMS(exceededMs)
-        const exceededHours = exceededMs / (1000 * 60 * 60)
-        // Same immediate-fine policy as above.
+        const rounded = Math.ceil(activeHours)
         fine = Math.min(
-          Math.ceil(exceededHours) * systemSettings.locker_fine_per_hour,
+          rounded * systemSettings.locker_fine_per_hour,
           systemSettings.max_locker_fine
         )
+        // Build breakdown for modal (no separate due_time, fine starts after full grace)
+        const raw = calculateLockerPenalty({
+          borrow_time: borrowTime,
+          due_time: borrowTime,
+          end_time: now,
+          grace_period_hours: systemSettings.grace_period_hours,
+          grace_period_minutes: systemSettings.grace_period_minutes || 15,
+          rate: systemSettings.locker_fine_per_hour,
+          max_fine: systemSettings.max_locker_fine
+        })
+        breakdown = {
+          ...raw,
+          borrow_time: raw.borrow_time.toISOString(),
+          due_time: raw.due_time.toISOString(),
+          fine_start_time: raw.fine_start_time.toISOString(),
+          end_time: raw.end_time.toISOString()
+        } as PenaltyBreakdownData
       }
     }
     
@@ -314,7 +360,8 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
       isOvertime,
       fine,
       dueTime,
-      exceededFormatted
+      exceededFormatted,
+      breakdown
     }
   }
 
@@ -1059,9 +1106,23 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
                             <strong>Time Used:</strong> <span className="font-mono">{status.timeUsedFormatted}</span>
                           </div>
                           {locker.activeTransaction?.penalty > 0 && (
-                            <div className="text-orange-600 font-medium">
+                            <div className="text-orange-600 font-medium flex items-center gap-1">
                               <i className="fas fa-exclamation-triangle mr-1"></i>
                               Fine: ₱{Number(locker.activeTransaction.penalty).toFixed(2)}
+                              {status.breakdown && (
+                                <button
+                                  onClick={() => setBreakdownModal({
+                                    isOpen: true,
+                                    data: status.breakdown,
+                                    lockerNumber: locker.locker_number,
+                                    userName: locker.activeTransaction.user?.full_name || ''
+                                  })}
+                                  className="text-xs font-bold text-gray-400 hover:text-blue-600"
+                                  title="View penalty breakdown"
+                                >
+                                  <sup>₱</sup>
+                                </button>
+                              )}
                             </div>
                           )}
                         </>
@@ -1442,6 +1503,14 @@ function StaffView({ lockers, onRefresh }: StaffViewProps) {
           </div>
         </div>
       )}
+
+      <PenaltyBreakdownModal
+        isOpen={breakdownModal.isOpen}
+        onClose={() => setBreakdownModal({ isOpen: false, data: null, lockerNumber: '', userName: '' })}
+        data={breakdownModal.data}
+        lockerNumber={breakdownModal.lockerNumber}
+        userName={breakdownModal.userName}
+      />
     </div>
   )
 }

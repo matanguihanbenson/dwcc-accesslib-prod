@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { prisma } from '@/lib/prisma'
+import { calculateActiveHoursOverdue } from '@/lib/timezone'
 import { UserRole } from '@/types'
 
 /**
@@ -168,11 +169,14 @@ export async function GET(req: NextRequest) {
       })
       for (const tx of lockerTxns) {
         if (!tx.user) continue
-        const hoursOverdue = Math.max(0, Math.ceil(
-          (currentDate.getTime() - new Date(tx.due_time!).getTime()) / (1000 * 60 * 60)
-        ))
+        const dueTime = tx.due_time ? new Date(tx.due_time) : null
+
+        // Count only library-active hours (7 AM – 7 PM)
+        const activeHours = dueTime && currentDate > dueTime
+          ? calculateActiveHoursOverdue(dueTime, currentDate)
+          : 0
         const calculatedPenalty = Math.min(
-          Math.max(Number(tx.penalty), hoursOverdue * lockerFinePerHour),
+          Math.max(Number(tx.penalty), Math.ceil(activeHours) * lockerFinePerHour),
           maxLockerFine
         )
         if (calculatedPenalty <= 0) continue

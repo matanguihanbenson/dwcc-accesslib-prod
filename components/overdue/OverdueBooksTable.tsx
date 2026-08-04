@@ -6,6 +6,7 @@ import { notify } from '@/lib/notification'
 import PaymentModal from '@/components/modals/PaymentModal'
 import SendIndividualNotificationModal from '@/components/modals/SendIndividualNotificationModal'
 import PaymentHistoryModal from '@/components/modals/PaymentHistoryModal'
+import OverrideReturnModal from '@/components/modals/OverrideReturnModal'
 
 interface OverdueBook {
   transaction_id: number
@@ -45,10 +46,11 @@ interface OverdueBook {
 interface OverdueBooksTableProps {
   books: OverdueBook[]
   onRefresh: () => void
+  onOverride?: () => void
   userEmail?: string | null
 }
 
-export default function OverdueBooksTable({ books, onRefresh, userEmail }: OverdueBooksTableProps) {
+export default function OverdueBooksTable({ books, onRefresh, onOverride, userEmail }: OverdueBooksTableProps) {
   const [processingId, setProcessingId] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(25)
@@ -75,6 +77,19 @@ export default function OverdueBooksTable({ books, onRefresh, userEmail }: Overd
     isOpen: false,
     transactionId: null,
     transactionType: 'BOOK'
+  })
+  const [overrideModal, setOverrideModal] = useState<{
+    isOpen: boolean
+    transactionId: number | null
+    itemName: string
+    dueDate: string
+    currentReturnDate?: string | null
+  }>({
+    isOpen: false,
+    transactionId: null,
+    itemName: '',
+    dueDate: '',
+    currentReturnDate: null
   })
 
   // Pagination calculations
@@ -418,6 +433,20 @@ export default function OverdueBooksTable({ books, onRefresh, userEmail }: Overd
                           <i className="fas fa-envelope"></i>
                         </button>
                       )}
+                      <button
+                        onClick={() => setOverrideModal({
+                          isOpen: true,
+                          transactionId: book.transaction_id,
+                          itemName: book.book.title,
+                          dueDate: book.due_date,
+                          currentReturnDate: null
+                        })}
+                        disabled={processingId === book.transaction_id}
+                        className="text-orange-600 hover:text-orange-900 px-2 py-1 text-xs border border-orange-600 hover:bg-orange-50 rounded disabled:opacity-50"
+                        title="Override Return Date"
+                      >
+                        <i className="fas fa-clock-rotate-left"></i>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -497,6 +526,17 @@ export default function OverdueBooksTable({ books, onRefresh, userEmail }: Overd
           senderEmail={userEmail}
         />
       )}
+
+      <OverrideReturnModal
+        isOpen={overrideModal.isOpen}
+        onClose={() => setOverrideModal({ isOpen: false, transactionId: null, itemName: '', dueDate: '', currentReturnDate: null })}
+        onOverride={onOverride}
+        transactionType="BOOK"
+        transactionId={overrideModal.transactionId || 0}
+        itemName={overrideModal.itemName}
+        dueDate={overrideModal.dueDate}
+        currentReturnDate={overrideModal.currentReturnDate}
+      />
     </div>
   )
 }

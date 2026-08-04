@@ -243,6 +243,13 @@ export default function CatalogingSetupPage() {
 }
 
 function TabBody({ tab }: { tab: TabDef }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(false)
+    const id = requestAnimationFrame(() => setMounted(true))
+    return () => cancelAnimationFrame(id)
+  }, [tab.key])
+
   return (
     <Card>
       <CardHeader>
@@ -253,27 +260,15 @@ function TabBody({ tab }: { tab: TabDef }) {
         <p className="text-xs text-gray-500 mt-1">{tab.description}</p>
       </CardHeader>
       <CardContent>
-        {tab.key === 'section' ? (
+        {!mounted ? (
+          <ListSkeleton />
+        ) : tab.key === 'section' ? (
           <SectionManager />
         ) : tab.key === 'category' ? (
           <CategoryManager />
         ) : tab.key === 'classification' ? (
-          // Hierarchical DDC-like tree. The 5 levels
-          // (Main Class → Division → Section → Decimal
-          // Subdivision → Deeper Subdivision) all live
-          // in a single self-referencing table, so the
-          // tree view + Add Child flow is the same for
-          // every level.
           <ClassificationManager />
         ) : tab.catalogType ? (
-          // Six "live value" tabs (Classification, Material
-          // Type, Subtype, Interest Level, Lexile, Fountas &
-          // Pinnell) all go through the same manager. The
-          // values are now stored in the `book_catalog_value`
-          // table (one row per catalog value) so this page
-          // can offer real CRUD, and the add-book form's
-          // dropdowns read from the same table so a value
-          // added here shows up immediately.
           <CatalogValueManager
             type={tab.catalogType}
             singular={tab.singular}
@@ -579,7 +574,12 @@ function CategoryManager() {
       )
     } catch (err) {
       const msg = (err as Error)?.message || 'Toggle failed'
-      notify.error('Toggle failed', msg)
+      notify.error(
+        'Toggle failed',
+        msg.includes('is_active')
+          ? 'The is_active column is missing on book_category. Run: ALTER TABLE book_category ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;'
+          : msg
+      )
     }
   }
 
@@ -1527,16 +1527,13 @@ const LEVEL_BADGE_CLASS: Record<ClassificationLevel, string> = {
 }
 
 function ClassificationManager() {
+  const router = useRouter()
   const [roots, setRoots] = useState<ClassificationRow[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<ClassificationRow | null>(null)
   const [parentForNew, setParentForNew] = useState<ClassificationRow | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
-  const [viewingBooksFor, setViewingBooksFor] = useState<ClassificationRow | null>(null)
-  const [books, setBooks] = useState<any[]>([])
-  const [booksTotal, setBooksTotal] = useState(0)
-  const [booksLoading, setBooksLoading] = useState(false)
 
   const loadRoots = async () => {
     setLoading(true)
@@ -1710,26 +1707,6 @@ function ClassificationManager() {
     }
   }
 
-  const handleViewBooks = async (row: ClassificationRow) => {
-    setViewingBooksFor(row)
-    setBooksLoading(true)
-    try {
-      const res = await fetch(
-        `/api/book-classifications/${row.id}/books?limit=500`,
-        { credentials: 'include', cache: 'no-store' }
-      )
-      if (!res.ok) throw new Error('Failed to load books')
-      const data = await res.json()
-      const payload = data?.data ?? data
-      setBooks(payload?.books ?? [])
-      setBooksTotal(payload?.total ?? 0)
-    } catch (err) {
-      notify.error('Failed to load books', (err as Error)?.message)
-    } finally {
-      setBooksLoading(false)
-    }
-  }
-
   // Render a single row + (optionally) its immediate
   // children. Recursion is one level deep per render
   // because the user has to click "expand" to see
@@ -1799,7 +1776,7 @@ function ClassificationManager() {
             </button>
             <button
               type="button"
-              onClick={() => handleViewBooks(row)}
+              onClick={() => router.push(`/cataloging-setup/classification-books/${row.id}`)}
               className="px-2.5 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded"
               title="View books under this classification"
             >
@@ -1883,20 +1860,6 @@ function ClassificationManager() {
                 [parentForNew.id]: c
               }))
             }
-          }}
-        />
-      )}
-
-      {viewingBooksFor && (
-        <BooksUnderClassificationModal
-          classification={viewingBooksFor}
-          books={books}
-          total={booksTotal}
-          loading={booksLoading}
-          onClose={() => {
-            setViewingBooksFor(null)
-            setBooks([])
-            setBooksTotal(0)
           }}
         />
       )}
@@ -2062,94 +2025,5 @@ function ClassificationFormModal({
         </div>
       </div>
     </FormModal>
-  )
-}
-
-// "View Books" modal — shows every book whose
-// classification is the node OR any descendant. The
-// recursive-CTE query on the server already returns the
-// union, so we just render the flat list here.
-function BooksUnderClassificationModal({
-  classification,
-  books,
-  total,
-  loading,
-  onClose
-}: {
-  classification: ClassificationRow
-  books: any[]
-  total: number
-  loading: boolean
-  onClose: () => void
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-[1000] w-screen h-screen m-0 p-0 bg-black/50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div
-        className="relative bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b">
-          <div className="flex items-center gap-2">
-            <i className="fas fa-book text-primary-600"></i>
-            <div>
-              <h2 className="text-base font-semibold text-gray-900">
-                Books under {classification.code} {classification.name}
-              </h2>
-              <p className="text-xs text-gray-500">
-                Subtree total: <strong>{total}</strong> book
-                {total === 1 ? '' : 's'} (every book whose
-                classification is this node or any
-                descendant)
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1"
-            aria-label="Close"
-          >
-            <i className="fas fa-times"></i>
-          </button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-          {loading ? (
-            <p className="text-sm text-gray-500">Loading books…</p>
-          ) : books.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              No books assigned to this classification or
-              any of its descendants.
-            </p>
-          ) : (
-            <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg">
-              {books.map((b: any) => (
-                <li
-                  key={b.book_id}
-                  className="px-3 py-2 text-sm flex items-start gap-3 hover:bg-gray-50"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 truncate">
-                      {b.title}
-                    </div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {b.isbn || b.publisher || '—'}
-                    </div>
-                  </div>
-                  {b.classification && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary-50 text-primary-700 border border-primary-200 shrink-0">
-                      <i className="fas fa-bookmark text-[9px]"></i>
-                      {b.classification.code} · {LEVEL_LABEL[b.classification.level as ClassificationLevel]}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
   )
 }
