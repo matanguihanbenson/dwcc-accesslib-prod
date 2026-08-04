@@ -2844,19 +2844,19 @@ export class PDFReportGenerator {
     // empty columns.
     const showBook = type !== 'locker'
     const showLocker = type !== 'book'
-    const head: string[] = ['#', 'Borrower', 'ID Number']
-    if (showBook) head.push('Book Remaining')
-    if (showLocker) head.push('Locker Remaining')
+    const head: string[] = ['#', 'ID Number', 'Borrower']
+    if (showBook) head.push('Book Penalty')
+    if (showLocker) head.push('Locker Penalty')
     if (type === 'combined') {
-      head.push('Total Remaining')
+      head.push('Total Penalty')
     }
 
     const body = data.rows.map((r, i) => {
       const u = r.user || {}
       const row: any[] = [
         i + 1,
-        u.full_name || 'Unknown',
-        u.account_id || '—'
+        u.account_id || '—',
+        u.full_name || 'Unknown'
       ]
       if (showBook) {
         row.push(fmt(r.book.remaining))
@@ -2873,17 +2873,17 @@ export class PDFReportGenerator {
     autoTable(this.doc, {
       startY: 46,
       head: [head],
-      body: body.length ? body : [['—', 'No borrowers with fines in this range', '', '', '', '', ''].slice(0, head.length)],
+      body: body.length ? body : [['—', '', 'No borrowers with fines in this range', '', '', '', ''].slice(0, head.length)],
       theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 2, halign: 'left' },
-      headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center' },
+      styles: { fontSize: 8, cellPadding: 2, halign: 'left', lineColor: [0, 0, 0], lineWidth: 0.1 },
+      headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'left', lineColor: [0, 0, 0], lineWidth: 0.1 },
       columnStyles: {
         0: { halign: 'center', cellWidth: 10 },
-        1: { halign: 'left' },
-        2: { halign: 'left', cellWidth: 28 }
+        1: { halign: 'left', cellWidth: 28 },
+        2: { halign: 'left' }
       },
       didParseCell: (data) => {
-        // Right-align the remaining-balance columns (book=3, locker=4, total=5).
+        // Right-align the penalty columns (book=3, locker=4, total=5).
         if (data.section === 'body' && data.column.index >= 3) {
           data.cell.styles.halign = 'right'
         }
@@ -2904,7 +2904,7 @@ export class PDFReportGenerator {
     this.doc.text('Grand Totals', 20, finalY)
     this.doc.setFont('helvetica', 'normal')
     this.doc.text(
-      `Total Remaining: ${fmt(grand.remaining)}    Borrowers: ${grand.borrower_count}    Items: ${grand.settlement_count}`,
+      `Total Penalty: ${fmt(grand.remaining)}    Borrowers: ${grand.borrower_count}    Items: ${grand.settlement_count}`,
       20,
       finalY + 6
     )

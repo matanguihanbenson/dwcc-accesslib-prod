@@ -20,6 +20,9 @@ import { UserRole } from '@/types'
  *   - `date_to`    : ISO date
  *   - `department_id` : optional
  *   - `user_type`  : optional
+ *   - `entrance_id`: optional (accepted for future use; fines
+ *                     don't currently have a direct entrance
+ *                     relationship in the schema)
  *
  * Restricted to ADMIN and SUPER_ADMIN.
  */
@@ -60,6 +63,7 @@ export async function GET(req: NextRequest) {
     const dateTo = url.searchParams.get('date_to')
     const departmentId = url.searchParams.get('department_id')
     const userType = url.searchParams.get('user_type')
+    const entranceId = url.searchParams.get('entrance_id')
 
     // Load fine settings for dynamic penalty calculation
     const fineSettings = await prisma.systemConfig.findMany({
@@ -307,7 +311,8 @@ export async function GET(req: NextRequest) {
         date_from: dateFrom,
         date_to: dateTo,
         department_id: departmentId,
-        user_type: userType
+        user_type: userType,
+        entrance_id: entranceId
       },
       grand,
       rows

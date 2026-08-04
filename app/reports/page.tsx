@@ -512,6 +512,7 @@ export default function ReportsPage() {
         params.append('type', finesType)
         if (dateFrom) params.append('date_from', dateFrom)
         if (dateTo) params.append('date_to', dateTo)
+        if (entranceId) params.append('entrance_id', entranceId)
 
         const response = await fetch(`/api/reports/fines-summary?${params}`, {
           credentials: 'include',
@@ -1418,10 +1419,10 @@ export default function ReportsPage() {
         csvContent += `Summary of Fines - ${typeLabel} for ${dateRangeTitle}\n\n`
 
         const header: string[] = ['#', 'Borrower', 'ID Number']
-        if (showBook) header.push('Book Remaining')
-        if (showLocker) header.push('Locker Remaining')
+        if (showBook) header.push('Book Penalty')
+        if (showLocker) header.push('Locker Penalty')
         if (finesType === 'combined') {
-          header.push('Total Remaining')
+          header.push('Total Penalty')
         }
         csvContent += header.join(',') + '\n'
 
@@ -1451,7 +1452,7 @@ export default function ReportsPage() {
         // Grand totals footer
         const g = finesSummaryData.grand
         csvContent += `\nGrand Totals\n`
-        csvContent += `Total Remaining,${Number(g.remaining).toFixed(2)}\n`
+        csvContent += `Total Penalty,${Number(g.remaining).toFixed(2)}\n`
         csvContent += `Borrowers with Fines,${g.borrower_count}\n`
         csvContent += `Total Settlements,${g.settlement_count}\n`
 
@@ -1749,7 +1750,8 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              {/* Category Filter — Book category dropdown for report scoping */}
+              {/* Category Filter — hidden for fines-summary which doesn't use categories */}
+              {reportType !== 'fines-summary' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Category
@@ -1767,6 +1769,7 @@ export default function ReportsPage() {
                   ))}
                 </select>
               </div>
+              )}
 
               {/* Entrance filter. Sits right under the campus
                   picker so the user reads them as a pair:
@@ -3405,7 +3408,7 @@ export default function ReportsPage() {
                           )}
                           {finesType === 'combined' && (
                             <th className="px-3 py-2 text-right text-xs font-semibold text-purple-600 uppercase tracking-wide">
-                              Total Remaining
+                              Total Penalty
                             </th>
                           )}
                         </tr>

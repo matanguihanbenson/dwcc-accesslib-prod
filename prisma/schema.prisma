@@ -694,7 +694,7 @@ model Department {
 model Program {
   program_id    Int        @id @default(autoincrement())
   name          String     @unique @db.VarChar(100)
-  code          String     @unique @db.VarChar(10)
+  code          String     @unique @db.VarChar(100)
   description   String?    @db.Text
   department_id Int
   is_active     Boolean    @default(true)

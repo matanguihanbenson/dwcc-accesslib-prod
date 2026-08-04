@@ -951,10 +951,10 @@ export class ExcelReportGenerator {
     main.push([])
 
     const head: string[] = ['#', 'Borrower', 'ID Number']
-    if (showBook) head.push('Book Remaining')
-    if (showLocker) head.push('Locker Remaining')
+    if (showBook) head.push('Book Penalty')
+    if (showLocker) head.push('Locker Penalty')
     if (type === 'combined') {
-      head.push('Total Remaining')
+      head.push('Total Penalty')
     }
     main.push(head)
 
