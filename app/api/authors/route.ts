@@ -11,9 +11,13 @@ import { UserRole } from '@/types'
  * a single entry with multiple roles.
  *
  * Query params:
- *   ?search=NAME    — filter by name (case-insensitive contains)
- *   ?role=ROLE      — filter by role (Author, Contributor, Editor, etc.)
- *   ?category=NAME  — filter by category name
+ *   ?search=NAME      — filter by name (case-insensitive contains)
+ *   ?role=ROLE        — filter by role (Author, Contributor, Editor, etc.)
+ *   ?category=NAME    — filter by category name
+ *   ?sort=cutter_asc  — sort by cutter number (cutter_asc | cutter_desc)
+ *   ?page=N           — page number (default 1)
+ *   ?limit=N          — items per page (default 25)
+ *   ?active=true|false — filter by is_active (default: all)
  */
 export const GET = withAuth(
   async (req: NextRequest, session) => {
@@ -22,6 +26,11 @@ export const GET = withAuth(
       const search = searchParams.get('search')?.trim() || ''
       const roleFilter = searchParams.get('role')?.trim() || ''
       const categoryFilter = searchParams.get('category')?.trim() || ''
+      const sortParam = searchParams.get('sort')?.trim() || ''
+      const activeFilter = searchParams.get('active')?.trim() || ''
+      const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
+      const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25')))
+      const offset = (page - 1) * limit
 
       // Fetch all book authors
       const bookAuthors = await prisma.bookAuthor.findMany({
@@ -31,6 +40,7 @@ export const GET = withAuth(
           dates: true,
           cutter_number: true,
           decimal_value: true,
+          is_active: true,
           book: {
             select: {
               book_id: true,
@@ -53,6 +63,7 @@ export const GET = withAuth(
           dates: true,
           cutter_number: true,
           decimal_value: true,
+          is_active: true,
           book: {
             select: {
               book_id: true,
@@ -73,6 +84,7 @@ export const GET = withAuth(
         roles: string[]
         books: Array<{ book_id: number; title: string; role: string; category?: { name: string }; classification?: { code: string; name?: string } }>
         cutter_numbers: string[]
+        is_active: boolean
       }>()
 
       for (const a of bookAuthors) {
@@ -93,6 +105,8 @@ export const GET = withAuth(
               classification: a.book.classification || undefined,
             })
           }
+          // Active if ANY record is active
+          if (a.is_active) existing.is_active = true
         } else {
           personMap.set(key, {
             name: a.name.trim(),
@@ -105,7 +119,8 @@ export const GET = withAuth(
               category: a.book.category || undefined,
               classification: a.book.classification || undefined,
             }],
-            cutter_numbers: a.cutter_number ? [a.cutter_number] : []
+            cutter_numbers: a.cutter_number ? [a.cutter_number] : [],
+            is_active: a.is_active,
           })
         }
       }
@@ -129,6 +144,7 @@ export const GET = withAuth(
               classification: c.book.classification || undefined,
             })
           }
+          if (c.is_active) existing.is_active = true
         } else {
           personMap.set(key, {
             name: c.name.trim(),
@@ -141,15 +157,14 @@ export const GET = withAuth(
               category: c.book.category || undefined,
               classification: c.book.classification || undefined,
             }],
-            cutter_numbers: c.cutter_number ? [c.cutter_number] : []
+            cutter_numbers: c.cutter_number ? [c.cutter_number] : [],
+            is_active: c.is_active,
           })
         }
       }
 
       // Convert to sorted array
-      let people = Array.from(personMap.values()).sort((a, b) =>
-        a.name.localeCompare(b.name)
-      )
+      let people = Array.from(personMap.values())
 
       // Apply post-merge filters
       if (roleFilter) {
@@ -162,10 +177,36 @@ export const GET = withAuth(
           p.books.some((b) => b.category?.name?.toLowerCase() === categoryFilter.toLowerCase())
         )
       }
+      if (activeFilter === 'true') {
+        people = people.filter((p) => p.is_active)
+      } else if (activeFilter === 'false') {
+        people = people.filter((p) => !p.is_active)
+      }
+
+      // Sort by cutter number if requested
+      if (sortParam === 'cutter_asc' || sortParam === 'cutter_desc') {
+        people.sort((a, b) => {
+          const aCutter = a.cutter_numbers[0] || 'zzz'
+          const bCutter = b.cutter_numbers[0] || 'zzz'
+          const cmp = aCutter.localeCompare(bCutter)
+          return sortParam === 'cutter_asc' ? cmp : -cmp
+        })
+      } else {
+        // Default sort by name
+        people.sort((a, b) => a.name.localeCompare(b.name))
+      }
+
+      const total = people.length
+
+      // Apply pagination
+      const paginatedPeople = people.slice(offset, offset + limit)
 
       return createSuccessResponse({
-        people,
-        total: people.length,
+        people: paginatedPeople,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
         categories: Array.from(new Set(
           people.flatMap((p) => p.books.map((b) => b.category?.name).filter(Boolean))
         )).sort() as string[],

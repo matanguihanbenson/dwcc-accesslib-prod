@@ -51,33 +51,112 @@ export class BookService extends BaseService {
 
       // Create book with all relations in a transaction
       const book = await this.executeTransaction(async (tx) => {
-        // Pre-compute author cutters and workmarks using shelflist interpolation
+        // ── Query existing data for shelflist + workmark scope ──
+        const existingAuthors = bookData.classification_id
+          ? await tx.bookAuthor.findMany({
+              where: {
+                book: {
+                  classification_id: bookData.classification_id,
+                  archived_at: null,
+                }
+              },
+              select: {
+                name: true,
+                cutter_number: true,
+                book: { select: { title: true, section_id: true, classification_id: true } }
+              },
+              orderBy: { name: 'asc' }
+            })
+          : []
+
+        const existingBooks = bookData.classification_id
+          ? await tx.book.findMany({
+              where: {
+                classification_id: bookData.classification_id,
+                archived_at: null,
+              },
+              select: {
+                book_id: true,
+                title: true,
+                workmark: true,
+                section_id: true,
+                authors: {
+                  select: { name: true, cutter_number: true }
+                }
+              }
+            })
+          : []
+
+        // Build the shelflist once (shared by all authors)
+        const shelflist = existingAuthors
+          .filter((a: any) => a.cutter_number)
+          .map((a: any) => {
+            const parts = a.name.trim().split(/\s+/)
+            const surname = (parts.pop() || a.name).replace(/[^A-Za-z]/g, '').toLowerCase()
+            return { surname, fullName: a.name.trim(), cutter: a.cutter_number! }
+          })
+          .sort((a: any, b: any) => a.surname.localeCompare(b.surname))
+
+        // ── Compute book-level workmark (scoped by primary author's cutter) ──
+        let bookWorkmark = ''
+
+        if (bookData.classification_id) {
+          const firstAuthor = authors?.[0]
+          const firstAuthorName = firstAuthor?.name
+          const normalizedNew = normalizeTitle(data.title || '')
+
+          if (firstAuthorName) {
+            // Determine primary author's cutter first (edition match or interpolation)
+            let primaryAuthorCutter: string | null = null
+            const cutterEditionMatch = existingAuthors.find((a: any) =>
+              a.name === firstAuthorName &&
+              a.cutter_number &&
+              a.book.classification_id === bookData.classification_id &&
+              a.book.section_id === (bookData.section_id || null) &&
+              normalizeTitle(a.book.title || '') === normalizedNew &&
+              normalizedNew !== ''
+            )
+
+            if (cutterEditionMatch) {
+              primaryAuthorCutter = cutterEditionMatch.cutter_number!
+            } else {
+              primaryAuthorCutter = interpolateShelflist(firstAuthorName, shelflist)
+            }
+
+            // Now compute workmark using the cutter for scope
+            const workmarkEditionMatch = existingBooks.find((b: any) =>
+              b.authors.some((a: any) => a.cutter_number === primaryAuthorCutter) &&
+              b.section_id === (bookData.section_id || null) &&
+              normalizeTitle(b.title || '') === normalizedNew &&
+              normalizedNew !== ''
+            )
+
+            if (workmarkEditionMatch) {
+              bookWorkmark = workmarkEditionMatch.workmark || ''
+            } else {
+              const baseWm = generateBaseWorkmark(workmarkTitle)
+              if (baseWm) {
+                const existingMarks = existingBooks
+                  .filter((b: any) =>
+                    b.authors.some((a: any) => a.cutter_number === primaryAuthorCutter) &&
+                    b.section_id === (bookData.section_id || null)
+                  )
+                  .map((b: any) => b.workmark)
+                  .filter((m: any): m is string => !!m)
+                bookWorkmark = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+              }
+            }
+          }
+        }
+
+        // ── Pre-compute author cutters using shelflist interpolation ──
         const authorData = authors && authors.length > 0
           ? await Promise.all(authors.map(async (author: any, index: number) => {
-              // Find existing authors in this classification for shelflist interpolation
               let cutter: string
-              let finalWm: string
 
               if (bookData.classification_id) {
-                const existingAuthors = await tx.bookAuthor.findMany({
-                  where: {
-                    book: {
-                      classification_id: bookData.classification_id,
-                      archived_at: null
-                    }
-                  },
-                  select: {
-                    name: true,
-                    cutter_number: true,
-                    final_workmark: true,
-                    book: { select: { title: true, section_id: true } }
-                  },
-                  orderBy: { name: 'asc' }
-                })
-
-                // Check if this is a new edition of an existing work (same section)
                 const normalizedNew = normalizeTitle(data.title || '')
-                const matchedEdition = existingAuthors.find((a) =>
+                const matchedEdition = existingAuthors.find((a: any) =>
                   a.name === author.name &&
                   a.cutter_number &&
                   a.book.classification_id === bookData.classification_id &&
@@ -87,42 +166,12 @@ export class BookService extends BaseService {
                 )
 
                 if (matchedEdition) {
-                  // Same work (different edition) — reuse cutter + workmark
                   cutter = matchedEdition.cutter_number!
-                  finalWm = matchedEdition.final_workmark || ''
                 } else {
-                  // Different work — interpolate cutter
-                  const shelflist = existingAuthors
-                    .filter((a: any) => a.cutter_number)
-                    .map((a: any) => {
-                      const parts = a.name.trim().split(/\s+/)
-                      const surname = (parts.pop() || a.name).replace(/[^A-Za-z]/g, '').toLowerCase()
-                      return {
-                        surname,
-                        fullName: a.name.trim(),
-                        cutter: a.cutter_number!
-                      }
-                    })
-                    .sort((a: any, b: any) => a.surname.localeCompare(b.surname))
                   cutter = interpolateShelflist(author.name || '', shelflist)
-
-                  const baseWm = generateBaseWorkmark(workmarkTitle)
-                  if (baseWm) {
-                    const existingMarks = existingAuthors
-                      .filter((a: any) =>
-                        a.name === author.name &&
-                        a.book.section_id === (bookData.section_id || null)
-                      )
-                      .map((a: any) => a.final_workmark)
-                      .filter((m: any): m is string => !!m)
-                    finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
-                  } else {
-                    finalWm = ''
-                  }
                 }
               } else {
                 cutter = generateCutterNumber(author.name || '')
-                finalWm = ''
               }
 
               return {
@@ -130,14 +179,12 @@ export class BookService extends BaseService {
                 dates: author.dates,
                 cutter_number: cutter,
                 decimal_value: cutterToDecimal(cutter),
-                base_workmark: undefined,
-                final_workmark: finalWm || undefined,
                 display_order: index + 1
               }
             }))
           : undefined
 
-        // Pre-compute contributor workmarks
+        // Pre-compute contributor cutters
         const contributorData = contributors && contributors.length > 0
           ? contributors.map((contributor: any, index: number) => {
               const cutter = generateCutterNumber(contributor.name || '')
@@ -155,6 +202,7 @@ export class BookService extends BaseService {
         const createdBook = await tx.book.create({
           data: {
             ...bookData,
+            workmark: bookWorkmark || undefined,
             created_by: createdBy,
             updated_by: createdBy,
             authors: authorData ? { create: authorData } : undefined,
@@ -409,6 +457,125 @@ export class BookService extends BaseService {
 
       // Update book with all relations in a transaction
       const updatedBook = await this.executeTransaction(async (tx) => {
+        // Snapshot the current author rows BEFORE deleting them so
+        // we can include the book's own entry in the shelflist for
+        // edition detection and cutter interpolation.
+        const snapshotAuthors = authors !== undefined
+          ? await tx.bookAuthor.findMany({
+              where: { book_id: validatedId },
+              select: {
+                name: true,
+                cutter_number: true,
+                book: { select: { title: true, section_id: true, classification_id: true } }
+              },
+              orderBy: { display_order: 'asc' }
+            })
+          : []
+
+        // ── Query existing data for shelflist + workmark scope ──
+        const otherAuthors = bookData.classification_id
+          ? await tx.bookAuthor.findMany({
+              where: {
+                book: {
+                  classification_id: bookData.classification_id,
+                  archived_at: null,
+                }
+              },
+              select: {
+                name: true,
+                cutter_number: true,
+                book: { select: { title: true, section_id: true, classification_id: true } }
+              },
+              orderBy: { name: 'asc' }
+            })
+          : []
+
+        const otherBooks = bookData.classification_id
+          ? await tx.book.findMany({
+              where: {
+                classification_id: bookData.classification_id,
+                archived_at: null,
+                book_id: { not: validatedId }
+              },
+              select: {
+                book_id: true,
+                title: true,
+                workmark: true,
+                section_id: true,
+                authors: {
+                  select: { name: true, cutter_number: true }
+                }
+              }
+            })
+          : []
+
+        // Merge snapshot into existing authors so shelflist is stable during edits
+        const existingAuthors = [...otherAuthors, ...snapshotAuthors]
+
+        // Build the shelflist once (shared by all authors)
+        const shelflist = existingAuthors
+          .filter((a: any) => a.cutter_number)
+          .map((a: any) => {
+            const parts = a.name.trim().split(/\s+/)
+            const surname = (parts.pop() || a.name).replace(/[^A-Za-z]/g, '').toLowerCase()
+            return { surname, fullName: a.name.trim(), cutter: a.cutter_number! }
+          })
+          .sort((a: any, b: any) => a.surname.localeCompare(b.surname))
+
+        // ── Pre-compute book-level workmark (scoped by primary author's cutter) ──
+        let bookWorkmark = existingBook.workmark || ''
+
+        if (bookData.classification_id) {
+          const firstAuthor = authors?.[0]
+          const firstAuthorName = firstAuthor?.name
+          const normalizedNew = normalizeTitle((data as any).title || '')
+
+          if (firstAuthorName) {
+            // Determine primary author's cutter first (edition match or interpolation)
+            let primaryAuthorCutter: string | null = null
+            const cutterEditionMatch = existingAuthors.find((a: any) =>
+              a.name === firstAuthorName &&
+              a.cutter_number &&
+              a.book.classification_id === bookData.classification_id &&
+              a.book.section_id === (bookData.section_id || null) &&
+              normalizeTitle(a.book.title || '') === normalizedNew &&
+              normalizedNew !== ''
+            )
+
+            if (cutterEditionMatch) {
+              primaryAuthorCutter = cutterEditionMatch.cutter_number!
+            } else {
+              primaryAuthorCutter = interpolateShelflist(firstAuthorName, shelflist)
+            }
+
+            // Now compute workmark using the cutter for scope
+            const workmarkEditionMatch = otherBooks.find((b: any) =>
+              b.authors.some((a: any) => a.cutter_number === primaryAuthorCutter) &&
+              b.section_id === (bookData.section_id || null) &&
+              normalizeTitle(b.title || '') === normalizedNew &&
+              normalizedNew !== ''
+            )
+
+            if (workmarkEditionMatch) {
+              bookWorkmark = workmarkEditionMatch.workmark || ''
+            } else {
+              const baseWm = generateBaseWorkmark(workmarkTitle)
+              if (baseWm) {
+                const existingMarks = otherBooks
+                  .filter((b: any) =>
+                    b.authors.some((a: any) => a.cutter_number === primaryAuthorCutter) &&
+                    b.section_id === (bookData.section_id || null)
+                  )
+                  .map((b: any) => b.workmark)
+                  .filter((m: any): m is string => !!m)
+                // Include the current book's own workmark in uniqueness check
+                if (bookWorkmark) existingMarks.push(bookWorkmark)
+                bookWorkmark = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
+              }
+            }
+          }
+        }
+
         // Delete existing related entities if new ones are provided
         if (authors !== undefined) {
           await tx.bookAuthor.deleteMany({ where: { book_id: validatedId } })
@@ -426,34 +593,14 @@ export class BookService extends BaseService {
           await tx.digitalContent.deleteMany({ where: { book_id: validatedId } })
         }
 
-        // Pre-compute author cutters and workmarks using shelflist interpolation
+        // ── Pre-compute author cutters using shelflist interpolation ──
         const authorData = authors && authors.length > 0
           ? await Promise.all(authors.map(async (author: any, index: number) => {
-              // Find existing authors in this classification for shelflist interpolation
               let cutter: string
-              let finalWm: string
 
               if (bookData.classification_id) {
-                const existingAuthors = await tx.bookAuthor.findMany({
-                  where: {
-                    book: {
-                      classification_id: bookData.classification_id,
-                      archived_at: null,
-                      book_id: { not: validatedId }
-                    }
-                  },
-                  select: {
-                    name: true,
-                    cutter_number: true,
-                    final_workmark: true,
-                    book: { select: { title: true, section_id: true } }
-                  },
-                  orderBy: { name: 'asc' }
-                })
-
-                // Check if this is a new edition of an existing work (same section)
                 const normalizedNew = normalizeTitle((data as any).title || '')
-                const matchedEdition = existingAuthors.find((a) =>
+                const matchedEdition = existingAuthors.find((a: any) =>
                   a.name === author.name &&
                   a.cutter_number &&
                   a.book.classification_id === bookData.classification_id &&
@@ -463,42 +610,12 @@ export class BookService extends BaseService {
                 )
 
                 if (matchedEdition) {
-                  // Same work (different edition) — reuse cutter + workmark
                   cutter = matchedEdition.cutter_number!
-                  finalWm = matchedEdition.final_workmark || ''
                 } else {
-                  // Different work — interpolate cutter
-                  const shelflist = existingAuthors
-                    .filter((a: any) => a.cutter_number)
-                    .map((a: any) => {
-                      const parts = a.name.trim().split(/\s+/)
-                      const surname = (parts.pop() || a.name).replace(/[^A-Za-z]/g, '').toLowerCase()
-                      return {
-                        surname,
-                        fullName: a.name.trim(),
-                        cutter: a.cutter_number!
-                      }
-                    })
-                    .sort((a: any, b: any) => a.surname.localeCompare(b.surname))
                   cutter = interpolateShelflist(author.name || '', shelflist)
-
-                  const baseWm = generateBaseWorkmark(workmarkTitle)
-                  if (baseWm) {
-                    const existingMarks = existingAuthors
-                      .filter((a: any) =>
-                        a.name === author.name &&
-                        a.book.section_id === (bookData.section_id || null)
-                      )
-                      .map((a: any) => a.final_workmark)
-                      .filter((m: any): m is string => !!m)
-                    finalWm = generateFinalWorkmark(baseWm, workmarkTitle, existingMarks)
-                  } else {
-                    finalWm = ''
-                  }
                 }
               } else {
                 cutter = generateCutterNumber(author.name || '')
-                finalWm = ''
               }
 
               return {
@@ -506,8 +623,6 @@ export class BookService extends BaseService {
                 dates: author.dates,
                 cutter_number: cutter,
                 decimal_value: cutterToDecimal(cutter),
-                base_workmark: undefined,
-                final_workmark: finalWm || undefined,
                 display_order: index + 1
               }
             }))
@@ -532,6 +647,7 @@ export class BookService extends BaseService {
           where: { book_id: validatedId },
           data: {
             ...bookData,
+            workmark: bookWorkmark || undefined,
             updated_by: updatedBy,
             authors: authorData ? { create: authorData } : undefined,
             contributors: contributorData ? { create: contributorData } : undefined,

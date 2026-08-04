@@ -15,23 +15,49 @@ import AddOptionModal, {
 import BookPreviewModal from '@/components/forms/BookPreviewModal'
 import { generateCallNumber } from '@/lib/call-number'
 
+// The five "live value" quick actions all write through the
+// `book_catalog_value` table via the same endpoint; they only
+// differ in the `type` discriminator. Sections and categories
+// keep their own dedicated tables.
+type CatalogApiType =
+  | 'MATERIAL_TYPE'
+  | 'SUBTYPE'
+  | 'INTEREST_LEVEL'
+  | 'LEXILE'
+  | 'FOUNTAS_PINNELL'
+
 type QuickAction = {
   label: string
   icon: string
   mode: 'name-only' | 'name-and-description'
-} & (
-  | { kind: 'server'; endpoint: string }
-  | { kind: 'local'; optionKind: OptionKind }
-)
+  endpoint: string
+  catalogType?: CatalogApiType
+}
+
+const CATALOG_TO_OPTION: Record<CatalogApiType, OptionKind> = {
+  MATERIAL_TYPE: 'materialType',
+  SUBTYPE: 'subtype',
+  INTEREST_LEVEL: 'interestLevel',
+  LEXILE: 'lexile',
+  FOUNTAS_PINNELL: 'fountasPinnell'
+}
+
+const CATALOG_TYPES: CatalogApiType[] = [
+  'MATERIAL_TYPE',
+  'SUBTYPE',
+  'INTEREST_LEVEL',
+  'LEXILE',
+  'FOUNTAS_PINNELL'
+]
 
 const QUICK_ACTIONS: QuickAction[] = [
-  { label: 'Section', icon: 'fa-layer-group', kind: 'server', endpoint: '/api/sections', mode: 'name-and-description' },
-  { label: 'Category', icon: 'fa-folder', kind: 'server', endpoint: '/api/book-categories', mode: 'name-and-description' },
-  { label: 'Material Type', icon: 'fa-book', kind: 'local', optionKind: 'materialType', mode: 'name-only' },
-  { label: 'Subtype', icon: 'fa-bookmark', kind: 'local', optionKind: 'subtype', mode: 'name-only' },
-  { label: 'Interest Level', icon: 'fa-signal', kind: 'local', optionKind: 'interestLevel', mode: 'name-only' },
-  { label: 'Lexile', icon: 'fa-chart-line', kind: 'local', optionKind: 'lexile', mode: 'name-only' },
-  { label: 'Fountas & Pinnell', icon: 'fa-layer-group', kind: 'local', optionKind: 'fountasPinnell', mode: 'name-only' }
+  { label: 'Section', icon: 'fa-layer-group', endpoint: '/api/sections', mode: 'name-and-description' },
+  { label: 'Category', icon: 'fa-folder', endpoint: '/api/book-categories', mode: 'name-and-description' },
+  { label: 'Material Type', icon: 'fa-book', endpoint: '/api/book-catalog-values', catalogType: 'MATERIAL_TYPE', mode: 'name-only' },
+  { label: 'Subtype', icon: 'fa-bookmark', endpoint: '/api/book-catalog-values', catalogType: 'SUBTYPE', mode: 'name-only' },
+  { label: 'Interest Level', icon: 'fa-signal', endpoint: '/api/book-catalog-values', catalogType: 'INTEREST_LEVEL', mode: 'name-only' },
+  { label: 'Lexile', icon: 'fa-chart-line', endpoint: '/api/book-catalog-values', catalogType: 'LEXILE', mode: 'name-only' },
+  { label: 'Fountas & Pinnell', icon: 'fa-layer-group', endpoint: '/api/book-catalog-values', catalogType: 'FOUNTAS_PINNELL', mode: 'name-only' }
 ]
 
 export default function AddBookPage() {
@@ -40,14 +66,24 @@ export default function AddBookPage() {
   const formRef = useRef<BookFormHandle>(null)
   const [authReady, setAuthReady] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [categories, setCategories] = useState<{ category_id: number; name: string }[]>([])
-  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null }[]>([])
+  const [categories, setCategories] = useState<{ category_id: number; name: string; description?: string | null; is_active?: boolean }[]>([])
+  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null; description?: string | null; is_active?: boolean }[]>([])
+  // Source of truth for the five "live value" quick actions.
+  // Rows mirror `book_catalog_value` (id / name / is_active).
+  const [catalogValues, setCatalogValues] = useState<Record<CatalogApiType, AddOptionItem[]>>({
+    MATERIAL_TYPE: [],
+    SUBTYPE: [],
+    INTEREST_LEVEL: [],
+    LEXILE: [],
+    FOUNTAS_PINNELL: []
+  })
   const [quickAdd, setQuickAdd] = useState<QuickAction | null>(null)
 
   // ── Preview Modal state ─────────────────────────────────
   const [showPreview, setShowPreview] = useState(false)
   const [pendingBookData, setPendingBookData] = useState<any>(null)
   const [suggestedCallNumber, setSuggestedCallNumber] = useState('')
+  const [generateData, setGenerateData] = useState<any>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -90,31 +126,81 @@ export default function AddBookPage() {
 
   useEffect(() => {
     if (!authReady) return
+    let cancelled = false
     const loadOptions = async () => {
       try {
         setLoading(true)
+        // `all=true` on sections so the quick-action modal can
+        // show inactive rows (the form filters them out of its
+        // dropdowns).
         const [catRes, secRes] = await Promise.all([
           fetch('/api/book-categories', { credentials: 'include' }),
-          fetch('/api/sections', { credentials: 'include' })
+          fetch('/api/sections?all=true', { credentials: 'include' })
         ])
         if (catRes.ok) {
           const catData = await catRes.json()
           const list = Array.isArray(catData) ? catData : (catData.data || [])
-          setCategories(list)
+          if (!cancelled) {
+            setCategories(list.map((c: any) => ({
+              category_id: c.category_id,
+              name: c.name,
+              description: c.description ?? null,
+              is_active: c.is_active !== false
+            })))
+          }
         }
         if (secRes.ok) {
           const secData = await secRes.json()
           const list = Array.isArray(secData) ? secData : (secData.data || [])
-          setSections(list)
+          if (!cancelled) {
+            setSections(list.map((s: any) => ({
+              section_id: s.section_id,
+              name: s.name,
+              code: s.code ?? null,
+              description: s.description ?? null,
+              is_active: s.is_active !== false
+            })))
+          }
         }
       } catch (err) {
         console.error('Failed to load categories/sections', err)
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     loadOptions()
+    return () => { cancelled = true }
   }, [authReady])
+
+  // Load the five live-value catalogs from the shared
+  // `book_catalog_value` table (all rows so the quick-action
+  // modal shows inactive ones too).
+  useEffect(() => {
+    if (!authReady) return
+    let cancelled = false
+    Promise.all(
+      CATALOG_TYPES.map((t) =>
+        fetch(`/api/book-catalog-values?type=${t}&all=true`, {
+          credentials: 'include'
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => [])
+      )
+    ).then((results) => {
+      if (cancelled) return
+      const next = { ...catalogValues }
+      CATALOG_TYPES.forEach((t, i) => {
+        const raw = results[i]
+        const list: any[] = Array.isArray(raw) ? raw : (raw as any)?.data || []
+        next[t] = list.map((v: any) => ({
+          id: v.id,
+          name: String(v.value || ''),
+          description: v.description ?? null,
+          is_active: v.is_active !== false
+        }))
+      })
+      setCatalogValues(next)
+    })
+    return () => { cancelled = true }
+  }, [authReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Step 1: Capture form data, generate call number via API (with shelflist interpolation), show preview
   const handleSubmit = useCallback(async (data: any) => {
@@ -177,6 +263,15 @@ export default function AddBookPage() {
 
     setPendingBookData({ ...data, classification_code: classificationCode })
     setSuggestedCallNumber(finalCallNumber)
+    setGenerateData({
+      authorName: data.book_author,
+      classificationId: data.classification_id,
+      classificationCode,
+      sectionId: data.section_id,
+      sectionCode,
+      title: data.title,
+      year: data.year_published || data.publication_year,
+    })
     setShowPreview(true)
   }, [sections])
 
@@ -242,94 +337,104 @@ export default function AddBookPage() {
     }
   }, [pendingBookData, router])
 
-  const [localOptions, setLocalOptions] = useState<Record<OptionKind, string[]>>({
-    materialType: ['Book', 'eBook', 'Audiobook', 'DVD', 'Magazine'],
-    subtype: ['Paperback', 'Hardcover', 'Board Book'],
-    interestLevel: ['Adult', 'Young Adult', 'Middle Grade', 'Early Readers'],
-    lexile: ['No Code', 'BR (Beginning Reader)', 'NP (Non-Prose)', 'HL (High-Low)'],
-    fountasPinnell: ['Any Level', 'Level A', 'Level B', 'Level C', 'Level D', 'Level Z']
-  })
-
-  useEffect(() => {
-    let cancelled = false
-    const merge = (current: string[], next: string[]) => {
-      const seen = new Set<string>()
-      const out: string[] = []
-      for (const v of current) { if (!seen.has(v)) { seen.add(v); out.push(v) } }
-      for (const v of next) { if (!seen.has(v)) { seen.add(v); out.push(v) } }
-      return out
-    }
-    const types: Array<{
-      api: 'MATERIAL_TYPE' | 'SUBTYPE' | 'INTEREST_LEVEL' | 'LEXILE' | 'FOUNTAS_PINNELL'
-      kind: OptionKind
-    }> = [
-      { api: 'MATERIAL_TYPE', kind: 'materialType' },
-      { api: 'SUBTYPE', kind: 'subtype' },
-      { api: 'INTEREST_LEVEL', kind: 'interestLevel' },
-      { api: 'LEXILE', kind: 'lexile' },
-      { api: 'FOUNTAS_PINNELL', kind: 'fountasPinnell' }
-    ]
-    Promise.all(
-      types.map((t) =>
-        fetch(`/api/book-catalog-values?type=${t.api}&all=true`, {
-          credentials: 'include',
-        }).then((r) => (r.ok ? r.json() : [])).catch(() => [])
-      )
-    ).then((results) => {
-      if (cancelled) return
-      const merged = { ...localOptions }
-      types.forEach((t, i) => {
-        const raw = results[i]
-        const values: string[] = Array.isArray(raw)
-          ? raw.map((v: any) => (typeof v === 'string' ? v : v?.value || v?.name || '')).filter(Boolean)
-          : []
-        merged[t.kind] = merge(merged[t.kind], values)
-      })
-      setLocalOptions(merged)
-    })
-    return () => { cancelled = true }
-  }, [])
-
   const closeQuickAdd = useCallback(() => setQuickAdd(null), [])
 
   const openQuickAdd = useCallback((action: QuickAction) => {
     setQuickAdd(action)
   }, [])
 
-  const getQuickAddExistingOptions = useCallback(() => {
+  const getQuickAddExistingOptions = useCallback((): AddOptionItem[] => {
     if (!quickAdd) return []
-    if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/sections') {
-      return sections.map((s) => ({ id: s.section_id, name: s.name }))
+    if (quickAdd.endpoint === '/api/sections') {
+      return sections.map((s) => ({
+        id: s.section_id,
+        name: s.name,
+        description: s.description,
+        is_active: s.is_active
+      }))
     }
-    if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/book-categories') {
-      return categories.map((c) => ({ id: c.category_id, name: c.name }))
+    if (quickAdd.endpoint === '/api/book-categories') {
+      return categories.map((c) => ({
+        id: c.category_id,
+        name: c.name,
+        description: c.description,
+        is_active: c.is_active
+      }))
     }
-    if (quickAdd.kind === 'local') {
-      return localOptions[quickAdd.optionKind].map((name) => ({ name }))
+    if (quickAdd.catalogType) {
+      return catalogValues[quickAdd.catalogType]
     }
     return []
-  }, [quickAdd, sections, categories, localOptions])
+  }, [quickAdd, sections, categories, catalogValues])
 
   const handleQuickAdd = useCallback(
-    async (item: AddOptionItem) => {
+    (item: AddOptionItem) => {
       if (!quickAdd) return
-      if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/sections') {
+      if (quickAdd.endpoint === '/api/sections') {
         formRef.current?.addSection({ section_id: item.id as number, name: item.name })
         setSections((prev) =>
-          prev.some((s) => s.section_id === item.id) ? prev : [...prev, { section_id: item.id as number, name: item.name }]
+          prev.some((s) => s.section_id === item.id)
+            ? prev
+            : [...prev, { section_id: item.id as number, name: item.name, description: item.description ?? null, is_active: true }]
         )
-      } else if (quickAdd.kind === 'server' && quickAdd.endpoint === '/api/book-categories') {
+      } else if (quickAdd.endpoint === '/api/book-categories') {
         formRef.current?.addCategory({ category_id: item.id as number, name: item.name })
         setCategories((prev) =>
-          prev.some((c) => c.category_id === item.id) ? prev : [...prev, { category_id: item.id as number, name: item.name }]
+          prev.some((c) => c.category_id === item.id)
+            ? prev
+            : [...prev, { category_id: item.id as number, name: item.name, description: item.description ?? null, is_active: true }]
         )
-      } else if (quickAdd.kind === 'local') {
-        const kind = quickAdd.optionKind
-        formRef.current?.addOption(kind, item.name)
-        setLocalOptions((prev) => ({
+      } else if (quickAdd.catalogType) {
+        const kind = quickAdd.catalogType
+        const optionKind = CATALOG_TO_OPTION[kind]
+        formRef.current?.addOption(optionKind, item.name)
+        setCatalogValues((prev) => {
+          if (prev[kind].some((v) => v.name.toLowerCase() === item.name.toLowerCase())) return prev
+          return {
+            ...prev,
+            [kind]: [...prev[kind], { ...item, is_active: item.is_active !== false }]
+          }
+        })
+      }
+    },
+    [quickAdd]
+  )
+
+  // Edit / activate / deactivate from the quick-action modal's
+  // existing-options list. The modal already persisted the
+  // change; here we keep the page's lists and the form's
+  // dropdowns in sync with the server.
+  const handleQuickUpdated = useCallback(
+    (item: AddOptionItem) => {
+      if (!quickAdd) return
+      if (quickAdd.endpoint === '/api/sections') {
+        setSections((prev) =>
+          prev.map((s) =>
+            s.section_id === item.id
+              ? { ...s, name: item.name, description: item.description ?? s.description, is_active: item.is_active ?? s.is_active }
+              : s
+          )
+        )
+      } else if (quickAdd.endpoint === '/api/book-categories') {
+        setCategories((prev) =>
+          prev.map((c) =>
+            c.category_id === item.id
+              ? { ...c, name: item.name, description: item.description ?? c.description, is_active: item.is_active ?? c.is_active }
+              : c
+          )
+        )
+      } else if (quickAdd.catalogType) {
+        const kind = quickAdd.catalogType
+        const optionKind = CATALOG_TO_OPTION[kind]
+        setCatalogValues((prev) => ({
           ...prev,
-          [kind]: prev[kind].some((v) => v.toLowerCase() === item.name.toLowerCase()) ? prev[kind] : [...prev[kind], item.name]
+          [kind]: prev[kind].map((v) => (v.id === item.id ? { ...v, ...item } : v))
         }))
+        formRef.current?.syncCatalogValue(optionKind, {
+          id: Number(item.id),
+          value: item.name,
+          is_active: item.is_active !== false
+        })
       }
     },
     [quickAdd]
@@ -395,12 +500,14 @@ export default function AddBookPage() {
           isOpen={true}
           onClose={closeQuickAdd}
           title={`Add New ${quickAdd.label}`}
-          description={quickAdd.kind === 'server' ? 'Saved to the library and immediately available for new book records.' : 'Added to the form\'s dropdown so you can pick it for the new book.'}
+          description="Saved to the library and immediately available for new book records."
           icon={quickAdd.icon}
-          endpoint={quickAdd.kind === 'server' ? quickAdd.endpoint : undefined}
+          endpoint={quickAdd.endpoint}
+          catalogType={quickAdd.catalogType}
           mode={quickAdd.mode}
           existingOptions={getQuickAddExistingOptions()}
           onAdded={handleQuickAdd}
+          onUpdated={handleQuickUpdated}
         />
       )}
 
@@ -411,6 +518,7 @@ export default function AddBookPage() {
         onConfirm={handlePreviewConfirm}
         bookData={pendingBookData || {}}
         suggestedCallNumber={suggestedCallNumber}
+        generateData={generateData}
         loading={saving}
       />
     </div>

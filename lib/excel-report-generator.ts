@@ -950,57 +950,40 @@ export class ExcelReportGenerator {
     main.push([`For ${dateRangeTitle}`])
     main.push([])
 
-    const head: string[] = ['#', 'Borrower', 'ID Number', 'User Type']
-    if (showBook) head.push('Book Penalty', 'Book Paid', 'Book Remaining', '# Book')
-    if (showLocker)
-      head.push('Locker Penalty', 'Locker Paid', 'Locker Remaining', '# Locker')
+    const head: string[] = ['#', 'Borrower', 'ID Number']
+    if (showBook) head.push('Book Remaining')
+    if (showLocker) head.push('Locker Remaining')
     if (type === 'combined') {
-      head.push('Total Penalty', 'Total Paid', 'Total Remaining')
+      head.push('Total Remaining')
     }
     main.push(head)
 
     if (data.rows.length === 0) {
-      main.push(['—', 'No borrowers with fines in this range', '', '', '', '', '', '', '', '', '', '', ''].slice(0, head.length))
+      main.push(['—', 'No borrowers with fines in this range', '', '', '', ''].slice(0, head.length))
     } else {
       data.rows.forEach((r, i) => {
         const u = r.user || {}
-        const row: any[] = [i + 1, u.full_name || 'Unknown', u.account_id || '—', u.user_type || '—']
+        const row: any[] = [i + 1, u.full_name || 'Unknown', u.account_id || '—']
         if (showBook) {
-          row.push(
-            Number(r.book.total),
-            Number(r.book.paid),
-            Number(r.book.remaining),
-            r.book.count
-          )
+          row.push(Number(r.book.remaining))
         }
         if (showLocker) {
-          row.push(
-            Number(r.locker.total),
-            Number(r.locker.paid),
-            Number(r.locker.remaining),
-            r.locker.count
-          )
+          row.push(Number(r.locker.remaining))
         }
         if (type === 'combined') {
-          row.push(
-            Number(r.combined.total),
-            Number(r.combined.paid),
-            Number(r.combined.remaining)
-          )
+          row.push(Number(r.combined.remaining))
         }
         main.push(row)
       })
     }
 
     const mainSheet = XLSX.utils.aoa_to_sheet(main)
-    // Set column widths for readability. Compute the # of columns dynamically.
     const totalCols = head.length
     const colWidths: any[] = []
     colWidths[0] = { wch: 4 } // #
     colWidths[1] = { wch: 30 } // Borrower
     colWidths[2] = { wch: 18 } // ID
-    colWidths[3] = { wch: 14 } // Type
-    for (let i = 4; i < totalCols; i++) colWidths[i] = { wch: 16 }
+    for (let i = 3; i < totalCols; i++) colWidths[i] = { wch: 16 }
     mainSheet['!cols'] = colWidths
     XLSX.utils.book_append_sheet(workbook, mainSheet, 'Fines Summary')
 

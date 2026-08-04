@@ -30,7 +30,6 @@ interface Book {
   year_published: number | null
   copies_total: number
   copies_available: number
-  call_number: string | null
   category: { name: string }
   authors: Array<{ name: string }>
 }
@@ -49,9 +48,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showInitializeModal, setShowInitializeModal] = useState(false)
-  const [showStatusModal, setShowStatusModal] = useState(false)
-  const [showConditionModal, setShowConditionModal] = useState(false)
-  const [showLocationModal, setShowLocationModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [showArchiveModal, setShowArchiveModal] = useState(false)
   const [showBulkEditModal, setShowBulkEditModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
@@ -207,29 +204,6 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  const handleUpdateCopyStatus = async (copyId: number, newStatus: string) => {
-    try {
-      const response = await fetch(`/api/books/${bookId}/copies/${copyId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ status: newStatus })
-      })
-      
-      if (response.ok) {
-        await notify.success('Success', 'Copy status updated')
-        setShowStatusModal(false)
-        setSelectedCopy(null)
-        fetchBookAndCopies()
-      } else {
-        const errorData = await response.json()
-        await notify.error('Error', errorData.error || 'Failed to update copy status')
-      }
-    } catch (error) {
-      await notify.error('Error', 'Network error occurred')
-    }
-  }
-
   const handleArchiveCopy = async (copyId: number) => {
     try {
       const response = await fetch(`/api/books/${bookId}/copies/${copyId}`, {
@@ -352,30 +326,6 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  // Update a single copy's location
-  const handleUpdateCopyLocation = async (copyId: number, newLocation: string) => {
-    try {
-      const response = await fetch(`/api/books/${bookId}/copies/${copyId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ location: newLocation })
-      })
-      
-      if (response.ok) {
-        await notify.success('Success', 'Location updated')
-        setShowLocationModal(false)
-        setSelectedCopy(null)
-        fetchBookAndCopies()
-      } else {
-        const errorData = await response.json()
-        await notify.error('Error', errorData.error || 'Failed to update location')
-      }
-    } catch (error) {
-      await notify.error('Error', 'Network error occurred')
-    }
-  }
-
   const toggleSelectAll = () => {
     if (selectedCopyIds.length === copies.length) {
       setSelectedCopyIds([])
@@ -404,22 +354,6 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
       copy.condition.toLowerCase().includes(term)
     )
   })
-
-  // Assign stable copy numbers (sorted by accession number).
-  // Copy 1 gets no suffix; copy 2+ gets " c.2", " c.3", etc.
-  const sortedCopies = [...copies].sort((a, b) =>
-    a.accession_number.localeCompare(b.accession_number)
-  )
-  const copyNumberMap = new Map<number, number>()
-  sortedCopies.forEach((copy, idx) => {
-    copyNumberMap.set(copy.copy_id, idx + 1)
-  })
-
-  const getCallNumber = (copy: BookCopy) => {
-    if (!book?.call_number) return '—'
-    const n = copyNumberMap.get(copy.copy_id) || 1
-    return n === 1 ? book.call_number : `${book.call_number} c.${n}`
-  }
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
@@ -613,7 +547,6 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                         className="rounded border-gray-300"
                       />
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Call Number</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Accession Number</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -625,7 +558,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                 <tbody className="bg-white divide-y divide-gray-200">
                   {copies.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center">
+                      <td colSpan={7} className="px-4 py-8 text-center">
                         {book.copies_total > 0 ? (
                           <div className="space-y-3">
                             <p className="text-gray-600">
@@ -651,7 +584,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                     </tr>
                   ) : filteredCopies.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                         No copies match your search.
                       </td>
                     </tr>
@@ -666,9 +599,6 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                             className="rounded border-gray-300"
                             disabled={copy.status === 'BORROWED'}
                           />
-                        </td>
-                        <td className="px-4 py-3 text-sm font-mono text-gray-700">
-                          {getCallNumber(copy)}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
                           {copy.accession_number}
@@ -694,34 +624,12 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
                             <button
                               onClick={() => {
                                 setSelectedCopy(copy)
-                                setShowStatusModal(true)
+                                setShowEditModal(true)
                               }}
                               className="inline-flex items-center justify-center w-9 h-9 text-blue-600 bg-blue-100 hover:bg-blue-50 rounded-md transition-colors"
-                              title="Update Status"
-                              disabled={copy.status === 'BORROWED'}
+                              title="Edit Copy"
                             >
-                              <i className="fas fa-sync-alt"></i>
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedCopy(copy)
-                                setShowConditionModal(true)
-                              }}
-                              className="inline-flex items-center justify-center w-9 h-9 bg-orange-100 text-orange-600 hover:bg-orange-50 rounded-md transition-colors"
-                              title="Update Condition"
-                              disabled={copy.status === 'BORROWED'}
-                            >
-                              <i className="fas fa-star-half-alt"></i>
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedCopy(copy)
-                                setShowLocationModal(true)
-                              }}
-                              className="inline-flex items-center justify-center w-9 h-9 bg-green-100 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
-                              title="Edit Location"
-                            >
-                              <i className="fas fa-map-marker-alt"></i>
+                              <i className="fas fa-pen-to-square"></i>
                             </button>
                             <button
                               onClick={() => {
@@ -883,276 +791,24 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
-      {/* Status Update Modal */}
-      {showStatusModal && selectedCopy && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Update Copy Status</h2>
-            <div className="space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                <p className="text-sm text-gray-700">
-                  <strong>Accession Number:</strong> {selectedCopy.accession_number}
-                </p>
-                <p className="text-sm text-gray-700 mt-1">
-                  <strong>Current Status:</strong> <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${getStatusBadgeColor(selectedCopy.status)}`}>
-                    {selectedCopy.status}
-                  </span>
-                </p>
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-3">Select New Status:</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => handleUpdateCopyStatus(selectedCopy.copy_id, 'AVAILABLE')}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="flex items-center justify-center gap-2 p-4 border-2 border-green-300 bg-green-50 hover:bg-green-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <i className="fas fa-check-circle text-green-600 text-xl"></i>
-                    <span className="font-medium text-green-800">Available</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => handleUpdateCopyStatus(selectedCopy.copy_id, 'BORROWED')}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="flex items-center justify-center gap-2 p-4 border-2 border-blue-300 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <i className="fas fa-book text-blue-600 text-xl"></i>
-                    <span className="font-medium text-blue-800">Borrowed</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => handleUpdateCopyStatus(selectedCopy.copy_id, 'LOST')}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="flex items-center justify-center gap-2 p-4 border-2 border-red-300 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <i className="fas fa-times-circle text-red-600 text-xl"></i>
-                    <span className="font-medium text-red-800">Lost</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => handleUpdateCopyStatus(selectedCopy.copy_id, 'DAMAGED')}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="flex items-center justify-center gap-2 p-4 border-2 border-orange-300 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <i className="fas fa-exclamation-triangle text-orange-600 text-xl"></i>
-                    <span className="font-medium text-orange-800">Damaged</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => handleUpdateCopyStatus(selectedCopy.copy_id, 'MAINTENANCE')}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="flex items-center justify-center gap-2 p-4 border-2 border-yellow-300 bg-yellow-50 hover:bg-yellow-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed col-span-2"
-                  >
-                    <i className="fas fa-wrench text-yellow-600 text-xl"></i>
-                    <span className="font-medium text-yellow-800">Maintenance</span>
-                  </button>
-                </div>
-              </div>
-              
-              {selectedCopy.status === 'BORROWED' && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                  <p className="text-sm text-blue-800">
-                    <i className="fas fa-info-circle mr-2"></i>
-                    Cannot change status of borrowed copy. Please return the book first.
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="mt-6 flex justify-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowStatusModal(false)
-                  setSelectedCopy(null)
-                }}
-                className='bg-gray-200 px-4 py-5'
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
+      {/* Edit Copy Modal */}
+      {showEditModal && selectedCopy && (
+        <EditCopyModal
+          copy={selectedCopy}
+          bookId={bookId}
+          onClose={() => {
+            setShowEditModal(false)
+            setSelectedCopy(null)
+          }}
+          onSave={() => {
+            setShowEditModal(false)
+            setSelectedCopy(null)
+            fetchBookAndCopies()
+          }}
+        />
       )}
 
-      {/* Condition Update Modal */}
-      {showConditionModal && selectedCopy && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Update Copy Condition</h2>
-            <div className="space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                <p className="text-sm text-gray-700">
-                  <strong>Accession Number:</strong> {selectedCopy.accession_number}
-                </p>
-                <p className="text-sm text-gray-700 mt-1">
-                  <strong>Current Condition:</strong> <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${getConditionBadgeColor(selectedCopy.condition)}`}>
-                    {selectedCopy.condition}
-                  </span>
-                </p>
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-3">Select New Condition:</p>
-                <div className="space-y-2">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const response = await fetch(`/api/books/${bookId}/copies/${selectedCopy.copy_id}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          credentials: 'include',
-                          body: JSON.stringify({ condition: 'GOOD' })
-                        })
-                        
-                        if (response.ok) {
-                          await notify.success('Success', 'Condition updated to Good')
-                          setShowConditionModal(false)
-                          setSelectedCopy(null)
-                          fetchBookAndCopies()
-                        } else {
-                          const errorData = await response.json()
-                          await notify.error('Error', errorData.error || 'Failed to update condition')
-                        }
-                      } catch (error) {
-                        await notify.error('Error', 'Network error occurred')
-                      }
-                    }}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="w-full flex items-center justify-between p-3 border-2 border-green-300 bg-green-50 hover:bg-green-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="flex items-center gap-2">
-                      <i className="fas fa-check-circle text-green-600"></i>
-                      <span className="font-medium text-green-800">Good</span>
-                    </span>
-                    <span className="text-xs text-green-700">Excellent condition, fully functional</span>
-                  </button>
-                  
-                  <button
-                    onClick={async () => {
-                      try {
-                        const response = await fetch(`/api/books/${bookId}/copies/${selectedCopy.copy_id}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          credentials: 'include',
-                          body: JSON.stringify({ condition: 'FAIR' })
-                        })
-                        
-                        if (response.ok) {
-                          await notify.success('Success', 'Condition updated to Fair')
-                          setShowConditionModal(false)
-                          setSelectedCopy(null)
-                          fetchBookAndCopies()
-                        } else {
-                          const errorData = await response.json()
-                          await notify.error('Error', errorData.error || 'Failed to update condition')
-                        }
-                      } catch (error) {
-                        await notify.error('Error', 'Network error occurred')
-                      }
-                    }}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="w-full flex items-center justify-between p-3 border-2 border-yellow-300 bg-yellow-50 hover:bg-yellow-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="flex items-center gap-2">
-                      <i className="fas fa-exclamation-circle text-yellow-600"></i>
-                      <span className="font-medium text-yellow-800">Fair</span>
-                    </span>
-                    <span className="text-xs text-yellow-700">Shows wear, still usable</span>
-                  </button>
-                  
-                  <button
-                    onClick={async () => {
-                      try {
-                        const response = await fetch(`/api/books/${bookId}/copies/${selectedCopy.copy_id}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          credentials: 'include',
-                          body: JSON.stringify({ condition: 'POOR' })
-                        })
-                        
-                        if (response.ok) {
-                          await notify.success('Success', 'Condition updated to Poor')
-                          setShowConditionModal(false)
-                          setSelectedCopy(null)
-                          fetchBookAndCopies()
-                        } else {
-                          const errorData = await response.json()
-                          await notify.error('Error', errorData.error || 'Failed to update condition')
-                        }
-                      } catch (error) {
-                        await notify.error('Error', 'Network error occurred')
-                      }
-                    }}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="w-full flex items-center justify-between p-3 border-2 border-orange-300 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="flex items-center gap-2">
-                      <i className="fas fa-times-circle text-orange-600"></i>
-                      <span className="font-medium text-orange-800">Poor</span>
-                    </span>
-                    <span className="text-xs text-orange-700">Heavily worn, needs attention</span>
-                  </button>
-                  
-                  <button
-                    onClick={async () => {
-                      try {
-                        const response = await fetch(`/api/books/${bookId}/copies/${selectedCopy.copy_id}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          credentials: 'include',
-                          body: JSON.stringify({ condition: 'DAMAGED' })
-                        })
-                        
-                        if (response.ok) {
-                          await notify.success('Success', 'Condition updated to Damaged')
-                          setShowConditionModal(false)
-                          setSelectedCopy(null)
-                          fetchBookAndCopies()
-                        } else {
-                          const errorData = await response.json()
-                          await notify.error('Error', errorData.error || 'Failed to update condition')
-                        }
-                      } catch (error) {
-                        await notify.error('Error', 'Network error occurred')
-                      }
-                    }}
-                    disabled={selectedCopy.status === 'BORROWED'}
-                    className="w-full flex items-center justify-between p-3 border-2 border-red-300 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="flex items-center gap-2">
-                      <i className="fas fa-ban text-red-600"></i>
-                      <span className="font-medium text-red-800">Damaged</span>
-                    </span>
-                    <span className="text-xs text-red-700">Not usable, requires repair</span>
-                  </button>
-                </div>
-              </div>
-              
-              {selectedCopy.status === 'BORROWED' && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                  <p className="text-sm text-blue-800">
-                    <i className="fas fa-info-circle mr-2"></i>
-                    Cannot change condition of borrowed copy.
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="mt-6 flex justify-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowConditionModal(false)
-                  setSelectedCopy(null)
-                }}
-                className='bg-gray-200 px-4 py-5'
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Archive Confirmation Modal */}
       {showArchiveModal && selectedCopy && (
@@ -1204,17 +860,7 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
-      {/* Edit Location Modal (single copy) */}
-      {showLocationModal && selectedCopy && (
-        <LocationEditModal
-          copy={selectedCopy}
-          onClose={() => {
-            setShowLocationModal(false)
-            setSelectedCopy(null)
-          }}
-          onSave={(value) => handleUpdateCopyLocation(selectedCopy.copy_id, value)}
-        />
-      )}
+
 
       {/* Bulk Edit Modal — one place to choose status,
           location, or archive for the selected copies. */}
@@ -1259,16 +905,121 @@ export default function BookCopiesPage({ params }: { params: Promise<{ id: strin
 // ============================================================
 // Location edit modal (single copy)
 // ============================================================
-function LocationEditModal({
+function EditCopyModal({
   copy,
+  bookId,
   onClose,
   onSave
 }: {
   copy: BookCopy
+  bookId: number
   onClose: () => void
-  onSave: (value: string) => void
+  onSave: () => void
 }) {
-  const [value, setValue] = useState(copy.location || '')
+  const [accessionNumber, setAccessionNumber] = useState(copy.accession_number)
+  const [status, setStatus] = useState(copy.status)
+  const [condition, setCondition] = useState(copy.condition)
+  const [location, setLocation] = useState(copy.location || '')
+  const [acquisitionDate, setAcquisitionDate] = useState(
+    copy.acquisition_date ? copy.acquisition_date.split('T')[0] : ''
+  )
+  const [saving, setSaving] = useState(false)
+
+  // Accession number real-time checking
+  const [accessionCheck, setAccessionCheck] = useState<{
+    checking: boolean
+    exists: boolean
+    message: string
+  }>({ checking: false, exists: false, message: '' })
+
+  useEffect(() => {
+    const trimmed = accessionNumber.trim().toUpperCase()
+    if (!trimmed || trimmed === copy.accession_number) {
+      setAccessionCheck({ checking: false, exists: false, message: '' })
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      setAccessionCheck(prev => ({ ...prev, checking: true }))
+      try {
+        const res = await fetch(
+          `/api/books/${bookId}/copies/check-accession?accession_number=${encodeURIComponent(trimmed)}`,
+          { credentials: 'include', signal: controller.signal }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          setAccessionCheck({
+            checking: false,
+            exists: data.data.exists,
+            message: data.data.exists
+              ? `Accession number "${trimmed}" is already in use`
+              : ''
+          })
+        }
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setAccessionCheck({ checking: false, exists: false, message: '' })
+        }
+      }
+    }, 400)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [accessionNumber, copy.accession_number, bookId])
+
+  const isBorrowed = copy.status === 'BORROWED'
+  const hasChanges =
+    accessionNumber.trim().toUpperCase() !== copy.accession_number ||
+    status !== copy.status ||
+    condition !== copy.condition ||
+    location.trim() !== (copy.location || '') ||
+    acquisitionDate !== (copy.acquisition_date ? copy.acquisition_date.split('T')[0] : '')
+
+  const canSave = hasChanges && !accessionCheck.exists && !accessionCheck.checking && !saving
+
+  const handleSave = async () => {
+    if (!canSave) return
+    setSaving(true)
+    try {
+      const body: any = {}
+      const trimmedAN = accessionNumber.trim().toUpperCase()
+      if (trimmedAN !== copy.accession_number) body.accession_number = trimmedAN
+      if (status !== copy.status) body.status = status
+      if (condition !== copy.condition) body.condition = condition
+      if (location.trim() !== (copy.location || '')) body.location = location.trim()
+      const origDate = copy.acquisition_date ? copy.acquisition_date.split('T')[0] : ''
+      if (acquisitionDate !== origDate) {
+        body.acquisition_date = acquisitionDate || null
+      }
+
+      if (Object.keys(body).length === 0) {
+        onClose()
+        return
+      }
+
+      const res = await fetch(`/api/books/${bookId}/copies/${copy.copy_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      })
+
+      if (res.ok) {
+        await notify.success('Success', 'Copy updated')
+        onSave()
+      } else {
+        const err = await res.json()
+        await notify.error('Error', err.error || 'Failed to update copy')
+      }
+    } catch {
+      await notify.error('Error', 'Network error occurred')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div
@@ -1276,61 +1027,137 @@ function LocationEditModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-md"
+        className="bg-white rounded-lg shadow-xl w-full max-w-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <i className="fas fa-map-marker-alt text-emerald-600"></i>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Edit Location
-            </h2>
+            <i className="fas fa-pen-to-square text-blue-600"></i>
+            <h2 className="text-lg font-semibold text-gray-900">Edit Copy</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1"
-            aria-label="Close"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1" aria-label="Close">
             <i className="fas fa-times"></i>
           </button>
         </div>
 
-        <div className="p-5 space-y-3">
-          <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm">
-            <p className="text-gray-700">
-              <strong>Accession #:</strong> {copy.accession_number}
-            </p>
-            <p className="text-gray-500 text-xs mt-1">
-              Current: {copy.location || '— no location set —'}
-            </p>
-          </div>
+        <div className="p-5 space-y-4">
+          {/* Accession Number */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              New location
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Accession Number</label>
+            <div className="relative">
+              <Input
+                value={accessionNumber}
+                onChange={(e) => setAccessionNumber(e.target.value.toUpperCase())}
+                placeholder="e.g., 2024-0001"
+                maxLength={20}
+                className={
+                  accessionCheck.exists
+                    ? 'border-red-500 focus:ring-red-500'
+                    : accessionNumber.trim().toUpperCase() !== copy.accession_number && !accessionCheck.exists && !accessionCheck.checking
+                      ? 'border-green-500 focus:ring-green-500'
+                      : ''
+                }
+              />
+              {accessionCheck.checking && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <i className="fas fa-spinner fa-spin text-gray-400"></i>
+                </div>
+              )}
+              {!accessionCheck.checking && accessionNumber.trim().toUpperCase() !== copy.accession_number && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {accessionCheck.exists ? (
+                    <i className="fas fa-times-circle text-red-500"></i>
+                  ) : (
+                    <i className="fas fa-check-circle text-green-500"></i>
+                  )}
+                </div>
+              )}
+            </div>
+            {accessionCheck.message && (
+              <p className="text-xs text-red-600 mt-1">{accessionCheck.message}</p>
+            )}
+          </div>
+
+          {/* Status & Condition row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as BookCopy['status'])}
+                disabled={isBorrowed}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                <option value="AVAILABLE">Available</option>
+                <option value="BORROWED">Borrowed</option>
+                <option value="LOST">Lost</option>
+                <option value="DAMAGED">Damaged</option>
+                <option value="MAINTENANCE">Maintenance</option>
+              </select>
+              {isBorrowed && (
+                <p className="text-xs text-amber-600 mt-1">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  Return the book first to change status.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
+              <select
+                value={condition}
+                onChange={(e) => setCondition(e.target.value as BookCopy['condition'])}
+                disabled={isBorrowed}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                <option value="EXCELLENT">Excellent</option>
+                <option value="GOOD">Good</option>
+                <option value="FAIR">Fair</option>
+                <option value="POOR">Poor</option>
+                <option value="DAMAGED">Damaged</option>
+                <option value="MISSING">Missing</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Location */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
             <Input
-              autoFocus
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
               placeholder="e.g., Shelf A-5"
               maxLength={120}
             />
-            <p className="text-[11px] text-gray-500 mt-1">
-              Leave blank to clear the location.
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Leave blank to clear.</p>
+          </div>
+
+          {/* Acquisition Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Acquisition Date</label>
+            <input
+              type="date"
+              value={acquisitionDate}
+              onChange={(e) => setAcquisitionDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-xs text-gray-500 mt-1">Leave blank if unknown.</p>
           </div>
         </div>
 
-        <div className="px-4 py-5 border-t bg-gray-50 flex items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose} className='bg-gray-200 px-4 py-5'>
+        <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="bg-gray-200 px-4 py-5">
             Cancel
           </Button>
           <Button
-            className="bg-emerald-600 text-white px-4 py-5 hover:bg-emerald-700"
-            onClick={() => onSave(value.trim())}
+            onClick={handleSave}
+            disabled={!canSave}
+            className="bg-blue-600 text-white px-4 py-5 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <i className="fas fa-save mr-1.5"></i>
-            Save Location
+            {saving ? (
+              <><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>
+            ) : (
+              <><i className="fas fa-save mr-2"></i>Save Changes</>
+            )}
           </Button>
         </div>
       </div>

@@ -60,6 +60,7 @@ interface Copy {
   status: 'AVAILABLE' | 'BORROWED' | 'LOST' | 'DAMAGED' | 'MAINTENANCE'
   condition: 'GOOD' | 'FAIR' | 'POOR' | 'DAMAGED'
   location: string | null
+  section: string | null
   acquisition_date: string | null
 }
 
@@ -815,6 +816,12 @@ function CopiesTab({
               <span className="font-mono text-[10px] text-gray-500">
                 {c.condition}
               </span>
+              {c.section && (
+                <span className="inline-flex items-center gap-1">
+                  <i className="fas fa-layer-group text-gray-400"></i>
+                  {c.section}
+                </span>
+              )}
               {c.location && (
                 <span className="inline-flex items-center gap-1">
                   <i className="fas fa-map-marker-alt text-gray-400"></i>
@@ -847,6 +854,9 @@ function CopiesTab({
                 Location
               </th>
               <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                Sublocation
+              </th>
+              <th className="px-3 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 Acquired
               </th>
             </tr>
@@ -874,6 +884,9 @@ function CopiesTab({
                 </td>
                 <td className="px-3 py-2 text-gray-700">
                   {c.location || <span className="text-gray-400">—</span>}
+                </td>
+                <td className="px-3 py-2 text-gray-700">
+                  {c.section || <span className="text-gray-400">—</span>}
                 </td>
                 <td className="px-3 py-2 text-gray-600">
                   {c.acquisition_date

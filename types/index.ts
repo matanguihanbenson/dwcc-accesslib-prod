@@ -285,6 +285,12 @@ export interface Book {
   archived_at?: Date
   created_by?: number
   updated_by?: number
+
+  // Classification & Call Number
+  classification_id?: number
+  call_number?: string
+  spelledout_title?: string
+  workmark?: string
   
   // Legacy field (kept for backward compatibility)
   book_author?: string
@@ -581,6 +587,8 @@ export interface CreateBookData {
   // Library Management
   category_id: number
   section_id?: number
+  classification_id?: number
+  call_number?: string
   location?: string
   copies_total?: number
   
@@ -642,6 +650,8 @@ export interface UpdateBookData {
   // Library Management
   category_id?: number
   section_id?: number
+  classification_id?: number
+  call_number?: string
   location?: string
   copies_total?: number
   copies_available?: number

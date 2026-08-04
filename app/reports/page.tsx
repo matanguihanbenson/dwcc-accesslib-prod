@@ -1417,64 +1417,32 @@ export default function ReportsPage() {
         csvContent = `Divine Word College of Calapan - ${libraryName}\n`
         csvContent += `Summary of Fines - ${typeLabel} for ${dateRangeTitle}\n\n`
 
-        const header: string[] = ['#', 'Borrower', 'ID Number', 'User Type']
-        if (showBook)
-          header.push(
-            'Book Penalty',
-            'Book Paid',
-            'Book Remaining',
-            '# Book'
-          )
-        if (showLocker)
-          header.push(
-            'Locker Penalty',
-            'Locker Paid',
-            'Locker Remaining',
-            '# Locker'
-          )
+        const header: string[] = ['#', 'Borrower', 'ID Number']
+        if (showBook) header.push('Book Remaining')
+        if (showLocker) header.push('Locker Remaining')
         if (finesType === 'combined') {
-          header.push('Total Penalty', 'Total Paid', 'Total Remaining')
+          header.push('Total Remaining')
         }
         csvContent += header.join(',') + '\n'
 
         if (finesSummaryData.rows.length === 0) {
-          csvContent +=
-            '—,"No borrowers with fines in this range",,,,,' +
-            (showBook ? ',,,' : '') +
-            (showLocker ? ',,,' : '') +
-            (finesType === 'combined' ? ',,,' : '') +
-            '\n'
+          csvContent += '—,"No borrowers with fines in this range",""\n'
         } else {
           finesSummaryData.rows.forEach((r: any, i: number) => {
             const u = r.user || {}
             const cells: any[] = [
               i + 1,
               `"${(u.full_name || 'Unknown').replace(/"/g, '""')}"`,
-              u.account_id || '—',
-              u.user_type || '—'
+              u.account_id || '—'
             ]
             if (showBook) {
-              cells.push(
-                Number(r.book.total).toFixed(2),
-                Number(r.book.paid).toFixed(2),
-                Number(r.book.remaining).toFixed(2),
-                r.book.count
-              )
+              cells.push(Number(r.book.remaining).toFixed(2))
             }
             if (showLocker) {
-              cells.push(
-                Number(r.locker.total).toFixed(2),
-                Number(r.locker.paid).toFixed(2),
-                Number(r.locker.remaining).toFixed(2),
-                r.locker.count
-              )
+              cells.push(Number(r.locker.remaining).toFixed(2))
             }
             if (finesType === 'combined') {
-              cells.push(
-                Number(r.combined.total).toFixed(2),
-                Number(r.combined.paid).toFixed(2),
-                Number(r.combined.remaining).toFixed(2)
-              )
+              cells.push(Number(r.combined.remaining).toFixed(2))
             }
             csvContent += cells.join(',') + '\n'
           })
@@ -1483,9 +1451,7 @@ export default function ReportsPage() {
         // Grand totals footer
         const g = finesSummaryData.grand
         csvContent += `\nGrand Totals\n`
-        csvContent += `Total Penalty,${Number(g.total).toFixed(2)}\n`
-        csvContent += `Total Paid,${Number(g.paid).toFixed(2)}\n`
-        csvContent += `Remaining Unpaid,${Number(g.remaining).toFixed(2)}\n`
+        csvContent += `Total Remaining,${Number(g.remaining).toFixed(2)}\n`
         csvContent += `Borrowers with Fines,${g.borrower_count}\n`
         csvContent += `Total Settlements,${g.settlement_count}\n`
 
@@ -3418,53 +3384,29 @@ export default function ReportsPage() {
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead>
                         <tr>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-10">
+                            #
+                          </th>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                             Borrower
                           </th>
                           <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                            ID
-                          </th>
-                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                            Type
+                            ID Number
                           </th>
                           {finesType !== 'locker' && (
-                            <>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Book Penalty
-                              </th>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Book Paid
-                              </th>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Book Rem.
-                              </th>
-                            </>
+                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              Book Penalty
+                            </th>
                           )}
                           {finesType !== 'book' && (
-                            <>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Locker Penalty
-                              </th>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Locker Paid
-                              </th>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Locker Rem.
-                              </th>
-                            </>
+                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              Locker Penalty
+                            </th>
                           )}
                           {finesType === 'combined' && (
-                            <>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-purple-600 uppercase tracking-wide">
-                                Total Penalty
-                              </th>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-green-600 uppercase tracking-wide">
-                                Total Paid
-                              </th>
-                              <th className="px-3 py-2 text-right text-xs font-semibold text-red-600 uppercase tracking-wide">
-                                Total Rem.
-                              </th>
-                            </>
+                            <th className="px-3 py-2 text-right text-xs font-semibold text-purple-600 uppercase tracking-wide">
+                              Total Remaining
+                            </th>
                           )}
                         </tr>
                       </thead>
@@ -3473,53 +3415,29 @@ export default function ReportsPage() {
                           const u = r.user || {}
                           return (
                             <tr key={u.user_id || i} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 text-gray-500">
+                                {i + 1}
+                              </td>
                               <td className="px-3 py-2 font-medium text-gray-900">
                                 {u.full_name || 'Unknown'}
                               </td>
                               <td className="px-3 py-2 font-mono text-gray-600">
                                 {u.account_id || '—'}
                               </td>
-                              <td className="px-3 py-2 text-gray-600">
-                                {u.user_type || '—'}
-                              </td>
                               {finesType !== 'locker' && (
-                                <>
-                                  <td className="px-3 py-2 text-right">
-                                    ₱{Number(r.book.total).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right text-green-700">
-                                    ₱{Number(r.book.paid).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right text-red-700">
-                                    ₱{Number(r.book.remaining).toFixed(2)}
-                                  </td>
-                                </>
+                                <td className="px-3 py-2 text-right text-red-700">
+                                  ₱{Number(r.book.remaining).toFixed(2)}
+                                </td>
                               )}
                               {finesType !== 'book' && (
-                                <>
-                                  <td className="px-3 py-2 text-right">
-                                    ₱{Number(r.locker.total).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right text-green-700">
-                                    ₱{Number(r.locker.paid).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right text-red-700">
-                                    ₱{Number(r.locker.remaining).toFixed(2)}
-                                  </td>
-                                </>
+                                <td className="px-3 py-2 text-right text-red-700">
+                                  ₱{Number(r.locker.remaining).toFixed(2)}
+                                </td>
                               )}
                               {finesType === 'combined' && (
-                                <>
-                                  <td className="px-3 py-2 text-right font-semibold">
-                                    ₱{Number(r.combined.total).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right font-semibold text-green-700">
-                                    ₱{Number(r.combined.paid).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2 text-right font-semibold text-red-700">
-                                    ₱{Number(r.combined.remaining).toFixed(2)}
-                                  </td>
-                                </>
+                                <td className="px-3 py-2 text-right font-semibold text-red-700">
+                                  ₱{Number(r.combined.remaining).toFixed(2)}
+                                </td>
                               )}
                             </tr>
                           )

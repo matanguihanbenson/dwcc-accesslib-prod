@@ -35,20 +35,34 @@ export const POST = withAuth(
       const skipped: any[] = []
 
       for (const holiday of recurringHolidays) {
-        const originalDate = new Date(holiday.date)
-        const newDate = new Date(yearNum, originalDate.getMonth(), originalDate.getDate())
+        // Parse the original date components as strings to avoid
+        // timezone-related date shifting (e.g. Jun 12 becoming Jun 11).
+        const dateStr = holiday.date instanceof Date
+          ? holiday.date.toISOString().slice(0, 10)
+          : String(holiday.date).slice(0, 10)
+        const [, origMonth, origDay] = dateStr.split('-')
 
-        // Check if already exists for this year
+        // Build the target date as a UTC midnight Date to avoid
+        // local-timezone shifts when Prisma compares DateTime values.
+        const newDate = new Date(Date.UTC(yearNum, parseInt(origMonth) - 1, parseInt(origDay)))
+
+        // Check if a holiday with the same name already exists on
+        // the target date (any time on that calendar day). Using
+        // gte/lt on the UTC day avoids mismatches caused by time
+        // components or timezone offsets stored in the DB.
+        const dayStart = new Date(Date.UTC(yearNum, parseInt(origMonth) - 1, parseInt(origDay), 0, 0, 0))
+        const dayEnd = new Date(Date.UTC(yearNum, parseInt(origMonth) - 1, parseInt(origDay), 23, 59, 59, 999))
+
         const existing = await prisma.holiday.findFirst({
           where: {
             name: holiday.name,
-            date: newDate,
+            date: { gte: dayStart, lte: dayEnd },
             is_active: true
           }
         })
 
         if (existing) {
-          skipped.push({ name: holiday.name, date: newDate, reason: 'Already exists' })
+          skipped.push({ name: holiday.name, date: newDate.toISOString(), reason: 'Already exists' })
           continue
         }
 
@@ -58,7 +72,7 @@ export const POST = withAuth(
             name: holiday.name,
             date: newDate,
             description: holiday.description,
-            is_recurring: false,
+            is_recurring: holiday.is_recurring,
             start_time: holiday.start_time,
             end_time: holiday.end_time
           }

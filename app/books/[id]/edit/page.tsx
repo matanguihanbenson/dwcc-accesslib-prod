@@ -25,6 +25,7 @@ export default function EditBookPage() {
   const [showPreview, setShowPreview] = useState(false)
   const [pendingData, setPendingData] = useState<any>(null)
   const [suggestedCallNumber, setSuggestedCallNumber] = useState('')
+  const [generateData, setGenerateData] = useState<any>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -115,7 +116,6 @@ export default function EditBookPage() {
           classification_id: data.classification_id,
           section_id: data.section_id,
           title: data.title,
-          book_id: Number(bookId), // exclude this book from shelflist
         })
       })
       if (cutterRes.ok) {
@@ -147,6 +147,15 @@ export default function EditBookPage() {
 
     setPendingData({ ...data, classification_code: classificationCode })
     setSuggestedCallNumber(finalCallNumber)
+    setGenerateData({
+      authorName: data.book_author,
+      classificationId: data.classification_id,
+      classificationCode,
+      sectionId: data.section_id,
+      sectionCode,
+      title: data.title,
+      year: data.year_published || data.publication_year,
+    })
     setShowPreview(true)
   }, [sections, bookId])
 
@@ -257,6 +266,7 @@ export default function EditBookPage() {
         onConfirm={handleConfirmSave}
         bookData={pendingData || {}}
         suggestedCallNumber={suggestedCallNumber}
+        generateData={generateData}
         loading={saving}
         isEditing={true}
       />

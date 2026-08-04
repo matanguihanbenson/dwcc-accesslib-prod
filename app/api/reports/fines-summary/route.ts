@@ -9,19 +9,17 @@ import { UserRole } from '@/types'
  * Returns a per-borrower breakdown of overdue fines. Used by
  * the "Summary of Fines" report in the Reports page.
  *
+ * Sources:
+ *   1. overdue_settlement rows (returned items with fines)
+ *   2. Active overdue transactions (still checked out past due,
+ *      penalty calculated dynamically from due_date)
+ *
  * Query params:
  *   - `type`       : 'combined' (default) | 'book' | 'locker'
- *   - `date_from`  : ISO date, only settlements updated on/after
- *   - `date_to`    : ISO date, only settlements updated on/before
- *   - `department_id` : optional, restrict to one department
- *   - `user_type`  : optional, restrict to one user_type
- *
- * Each row is one borrower (User) with:
- *   - book fine total (₱), paid (₱), remaining (₱), count
- *   - locker fine total (₱), paid (₱), remaining (₱), count
- *   - combined totals (when `type=combined`)
- *   - a `settlements` list of the underlying rows so the
- *     PDF / Excel reports can show transaction-level detail.
+ *   - `date_from`  : ISO date
+ *   - `date_to`    : ISO date
+ *   - `department_id` : optional
+ *   - `user_type`  : optional
  *
  * Restricted to ADMIN and SUPER_ADMIN.
  */
@@ -63,57 +61,143 @@ export async function GET(req: NextRequest) {
     const departmentId = url.searchParams.get('department_id')
     const userType = url.searchParams.get('user_type')
 
-    // Date range filter applies to `updated_at` (the timestamp
-    // that changes on every payment / status update), so we
-    // catch any fines that were paid off within the window.
-    const updatedAtFilter: { gte?: Date; lte?: Date } = {}
-    if (dateFrom) updatedAtFilter.gte = new Date(dateFrom)
-    if (dateTo) {
-      const end = new Date(dateTo)
-      end.setHours(23, 59, 59, 999)
-      updatedAtFilter.lte = end
-    }
-
-    // Build the type filter from the `type` param. Note we
-    // include the voided settlements too because they were
-    // once part of the payable balance; the report user can
-    // ignore them downstream if not relevant.
-    const where: any = {
-      notes: { not: { startsWith: 'VOIDED' } }
-    }
-    if (type === 'book') where.transaction_type = 'BOOK'
-    if (type === 'locker') where.transaction_type = 'LOCKER'
-    if (Object.keys(updatedAtFilter).length > 0) {
-      where.updated_at = updatedAtFilter
-    }
-
-    // User filter (department / user_type) is applied at the
-    // group stage via the include, not the where, so we can
-    // group on User.user_id. We do that below.
-    const settlements = await prisma.overdueSettlement.findMany({
-      where,
-      include: {
-        user: {
-          select: {
-            user_id: true,
-            account_id: true,
-            full_name: true,
-            user_type: true,
-            status: true,
-            email: true,
-            department_id: true,
-            department_ref: { select: { department_id: true, name: true, code: true } },
-            program: { select: { name: true } },
-            year_level: true
-          }
+    // Load fine settings for dynamic penalty calculation
+    const fineSettings = await prisma.systemConfig.findMany({
+      where: {
+        key: {
+          in: ['book_fine_per_day', 'locker_fine_per_hour', 'max_book_fine', 'max_locker_fine']
         }
-      },
-      orderBy: [{ user_id: 'asc' }, { transaction_type: 'asc' }, { updated_at: 'desc' }]
+      }
+    })
+    const bookFinePerDay = parseFloat(fineSettings.find(s => s.key === 'book_fine_per_day')?.value || '5')
+    const lockerFinePerHour = parseFloat(fineSettings.find(s => s.key === 'locker_fine_per_hour')?.value || '20')
+    const maxBookFine = parseFloat(fineSettings.find(s => s.key === 'max_book_fine')?.value || '100')
+    const maxLockerFine = parseFloat(fineSettings.find(s => s.key === 'max_locker_fine')?.value || '500')
+
+    const currentDate = new Date()
+    const round = (n: number) => Math.round(n * 100) / 100
+
+    // ── User filter helpers ─────────────────────────────────
+    const userSelect = {
+      user_id: true,
+      account_id: true,
+      full_name: true,
+      user_type: true,
+      status: true,
+      email: true,
+      department_id: true,
+      department_ref: { select: { department_id: true, name: true, code: true } },
+      program: { select: { name: true } },
+      year_level: true
+    }
+
+    // ── 1. Settlement-based fines (returned items) ─────────
+    // Query ALL settlements without status or notes filters,
+    // matching the individual student report's approach.
+    const settlementWhere: any = {}
+    if (type === 'book') settlementWhere.transaction_type = 'BOOK'
+    if (type === 'locker') settlementWhere.transaction_type = 'LOCKER'
+
+    const settlements = await prisma.overdueSettlement.findMany({
+      where: settlementWhere,
+      include: { user: { select: userSelect } }
     })
 
-    // Optional post-query user filter (department / user_type)
-    // so we can use the User relation's fields.
-    const filtered = settlements.filter((s) => {
+    // ── 2. Active overdue book transactions ────────────────
+    const activeOverdueBooks: any[] = []
+    if (type === 'book' || type === 'combined') {
+      const bookTxns = await prisma.bookTransaction.findMany({
+        where: {
+          status: { in: ['ACTIVE', 'OVERDUE'] },
+          due_date: { lt: currentDate },
+          return_date: null
+        },
+        include: {
+          user: { select: userSelect },
+          book: { select: { title: true } }
+        }
+      })
+      for (const tx of bookTxns) {
+        if (!tx.user) continue
+        const daysOverdue = Math.max(0, Math.floor(
+          (currentDate.getTime() - new Date(tx.due_date!).getTime()) / (1000 * 60 * 60 * 24)
+        ))
+        const calculatedPenalty = Math.min(
+          Math.max(Number(tx.penalty), daysOverdue * bookFinePerDay),
+          maxBookFine
+        )
+        if (calculatedPenalty <= 0) continue
+
+        // Check if a settlement already exists for this transaction
+        const hasSettlement = settlements.some(
+          s => s.transaction_type === 'BOOK' && s.transaction_id === tx.transaction_id
+        )
+        if (hasSettlement) continue
+
+        activeOverdueBooks.push({
+          user_id: tx.user_id,
+          user: tx.user,
+          transaction_type: 'BOOK',
+          transaction_id: tx.transaction_id,
+          penalty_amount: calculatedPenalty,
+          amount_paid: 0,
+          remaining_balance: calculatedPenalty,
+          status: 'PENDING',
+          created_at: tx.created_at,
+          updated_at: tx.updated_at
+        })
+      }
+    }
+
+    // ── 3. Active overdue locker transactions ──────────────
+    const activeOverdueLockers: any[] = []
+    if (type === 'locker' || type === 'combined') {
+      const lockerTxns = await prisma.lockerTransaction.findMany({
+        where: {
+          status: { in: ['ACTIVE', 'OVERDUE'] },
+          due_time: { lt: currentDate },
+          return_time: null
+        },
+        include: {
+          user: { select: userSelect }
+        }
+      })
+      for (const tx of lockerTxns) {
+        if (!tx.user) continue
+        const hoursOverdue = Math.max(0, Math.ceil(
+          (currentDate.getTime() - new Date(tx.due_time!).getTime()) / (1000 * 60 * 60)
+        ))
+        const calculatedPenalty = Math.min(
+          Math.max(Number(tx.penalty), hoursOverdue * lockerFinePerHour),
+          maxLockerFine
+        )
+        if (calculatedPenalty <= 0) continue
+
+        const hasSettlement = settlements.some(
+          s => s.transaction_type === 'LOCKER' && s.transaction_id === tx.transaction_id
+        )
+        if (hasSettlement) continue
+
+        activeOverdueLockers.push({
+          user_id: tx.user_id,
+          user: tx.user,
+          transaction_type: 'LOCKER',
+          transaction_id: tx.transaction_id,
+          penalty_amount: calculatedPenalty,
+          amount_paid: 0,
+          remaining_balance: calculatedPenalty,
+          status: 'PENDING',
+          created_at: tx.created_at,
+          updated_at: tx.updated_at
+        })
+      }
+    }
+
+    // ── Merge all fine sources ─────────────────────────────
+    const allFines = [...settlements, ...activeOverdueBooks, ...activeOverdueLockers]
+
+    // Optional post-query user filter
+    const filtered = allFines.filter((s) => {
       if (departmentId) {
         const did = s.user?.department_id
         if (did == null || String(did) !== String(departmentId)) return false
@@ -124,8 +208,7 @@ export async function GET(req: NextRequest) {
       return true
     })
 
-    // Group by user. Each user row exposes per-type totals
-    // and a settlements list.
+    // ── Group by user ──────────────────────────────────────
     interface UserRow {
       user: any
       book: { total: number; paid: number; remaining: number; count: number }
@@ -166,22 +249,18 @@ export async function GET(req: NextRequest) {
         row.locker.count += 1
       }
       row.settlements.push({
-        settlement_id: s.settlement_id,
         transaction_type: s.transaction_type,
         transaction_id: s.transaction_id,
         penalty_amount: total,
         amount_paid: paid,
         remaining_balance: remaining,
         status: s.status,
-        settled_at: s.settled_at,
-        notes: s.notes,
         created_at: s.created_at,
         updated_at: s.updated_at
       })
     }
 
-    // Round to 2 decimals so the report doesn't have FP noise.
-    const round = (n: number) => Math.round(n * 100) / 100
+    // Round to 2 decimals
     const rows = Array.from(grouped.values()).map((r) => ({
       user: r.user,
       book: {
@@ -205,15 +284,14 @@ export async function GET(req: NextRequest) {
       settlements: r.settlements
     }))
 
-    // Sort by remaining (descending) so the biggest outstanding
-    // balances float to the top of the report.
+    // Sort by remaining (descending)
     rows.sort(
       (a, b) =>
         b.combined.remaining - a.combined.remaining ||
         a.user.full_name?.localeCompare(b.user.full_name || '') || 0
     )
 
-    // Grand totals for the report header.
+    // Grand totals
     const grand = {
       total: round(rows.reduce((s, r) => s + r.combined.total, 0)),
       paid: round(rows.reduce((s, r) => s + r.combined.paid, 0)),

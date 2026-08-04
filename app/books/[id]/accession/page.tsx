@@ -263,22 +263,7 @@ export default function AccessionPage() {
         await notify.error('Error', errors[0])
       } else {
         await notify.success('Saved', `${newCopies.length > 0 ? newCopies.length + ' added, ' : ''}${existingCopies.length} updated`)
-        // Refresh
-        const [bookRes, copiesRes] = await Promise.all([
-          fetch(`/api/books/${bookId}`, { credentials: 'include' }),
-          fetch(`/api/books/${bookId}/copies`, { credentials: 'include' }),
-        ])
-        if (bookRes.ok) {
-          const bj = await bookRes.json()
-          setBook(bj.data || bj)
-        }
-        if (copiesRes.ok) {
-          const cj = await copiesRes.json()
-          const list: BookCopy[] = Array.isArray(cj) ? cj : (cj.data || [])
-          setCopies(list)
-          fillEditState(list)
-        }
-        setEditing(false)
+        router.push('/books')
       }
     } catch (err) {
       console.error('Failed to save:', err)
@@ -286,6 +271,10 @@ export default function AccessionPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleDone = () => {
+    setEditing(false)
   }
 
   const handleCancelEdit = () => {
@@ -335,6 +324,20 @@ export default function AccessionPage() {
             </nav>
           </div>
         </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => router.push(`/books/${bookId}/view`)}
+            className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors whitespace-nowrap"
+          >
+            <i className="fas fa-eye mr-1"></i>View Book
+          </button>
+          <button
+            onClick={() => router.push('/books')}
+            className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors whitespace-nowrap"
+          >
+            <i className="fas fa-arrow-left mr-1"></i>Back to Books
+          </button>
+        </div>
       </div>
 
       {/* Book summary card */}
@@ -351,12 +354,6 @@ export default function AccessionPage() {
               {copies.length} {copies.length === 1 ? 'copy' : 'copies'}
             </p>
           </div>
-          <button
-            onClick={() => router.push(`/books/${bookId}/view`)}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
-          >
-            <i className="fas fa-eye mr-1"></i>View Book
-          </button>
         </div>
       </div>
 
@@ -370,6 +367,23 @@ export default function AccessionPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleAddCopy}
+              className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+            >
+              <i className="fas fa-plus mr-1"></i>Add Copy
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50"
+            >
+              {saving ? (
+                <><i className="fas fa-spinner fa-spin mr-1"></i>Saving...</>
+              ) : (
+                <><i className="fas fa-check mr-1"></i>Save</>
+              )}
+            </button>
             {!editing ? (
               <button
                 onClick={() => setEditing(true)}
@@ -380,21 +394,16 @@ export default function AccessionPage() {
             ) : (
               <>
                 <button
+                  onClick={handleDone}
+                  className="px-3 py-1.5 text-sm font-medium text-green-600 hover:bg-green-50 rounded-md transition-colors"
+                >
+                  <i className="fas fa-check mr-1"></i>Done
+                </button>
+                <button
                   onClick={handleCancelEdit}
                   className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
                 >
                   Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50"
-                >
-                  {saving ? (
-                    <><i className="fas fa-spinner fa-spin mr-1"></i>Saving...</>
-                  ) : (
-                    <><i className="fas fa-check mr-1"></i>Save Changes</>
-                  )}
                 </button>
               </>
             )}
@@ -443,7 +452,7 @@ export default function AccessionPage() {
                     a.accession_number.localeCompare(b.accession_number)
                   )
                   const copyNum = isTemp
-                    ? copies.length + 1
+                    ? sortedStable.length + 1
                     : (sortedStable.findIndex((c) => c.copy_id === copy.copy_id) + 1) || i + 1
                   const copyCallNumber = book.call_number
                     ? (copyNum === 1 ? book.call_number : `${book.call_number} c.${copyNum}`)
@@ -534,25 +543,6 @@ export default function AccessionPage() {
           </table>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-          {editing ? (
-            <button
-              onClick={handleAddCopy}
-              className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-            >
-              <i className="fas fa-plus mr-1"></i>Add Copy
-            </button>
-          ) : (
-            <div />
-          )}
-          <button
-            onClick={() => router.push('/books')}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-          >
-            <i className="fas fa-arrow-left mr-1"></i>Back to Books
-          </button>
-        </div>
       </div>
     </div>
   )

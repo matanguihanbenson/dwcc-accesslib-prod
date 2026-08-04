@@ -69,8 +69,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const body = await req.json()
     const name = body.name ? String(body.name).trim() : undefined
     const description = body.description !== undefined ? String(body.description) : undefined
+    const is_active = body.is_active !== undefined ? Boolean(body.is_active) : undefined
 
-    const updated = await prisma.bookCategory.update({ where: { category_id: id }, data: { name, description } })
+    const updated = await prisma.bookCategory.update({ where: { category_id: id }, data: { name, description, is_active } })
     try {
       if (session?.user?.id) {
         await auditLogger.logAction(

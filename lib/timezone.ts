@@ -261,7 +261,8 @@ export type DayBucket = {
 export function getDayBucketsInTz(
   count: number,
   now: Date = new Date(),
-  tz: string = TIMEZONE
+  tz: string = TIMEZONE,
+  dateLabels: boolean = false
 ): DayBucket[] {
   const todayParts = getDatePartsInTz(now, tz)
   // Anchor at noon-UTC of "today in tz". Using noon UTC (i.e. 20:00 PH)
@@ -281,7 +282,7 @@ export function getDayBucketsInTz(
     buckets.push({
       start: startOfDayInTz(y, m, d, tz),
       end: endOfDayInTz(y, m, d, tz),
-      name: getWeekdayShortLabel(day, tz),
+      name: dateLabels ? getDateLabel(day, tz) : getWeekdayShortLabel(day, tz),
       key: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
     })
   }
@@ -303,6 +304,16 @@ const MONTH_SHORT_LABELS = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
 ]
+
+const MONTH_FULL_LABELS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+]
+
+function getDateLabel(date: Date, tz: string): string {
+  const p = getDatePartsInTz(date, tz)
+  return `${MONTH_FULL_LABELS[p.month - 1]} ${p.day}`
+}
 
 /**
  * Localised short month label (e.g. "Jan", "Feb") for the month

@@ -90,3 +90,35 @@ export async function getNextAccessionNumber(): Promise<string> {
   const nextNumber = Math.max(lastNumber, INITIAL_LAST_NUMBER) + 1
   return formatAccessionNumber(nextNumber)
 }
+
+/** Numeric-only accession numbers (zero-padded integers). */
+const NUMERIC_ACCESSION_RE = /^(\d+)$/
+
+/**
+ * Ensure the central sequence never falls behind a manually-entered
+ * accession number.  Call this from copy-create / copy-update
+ * endpoints whenever a user-supplied accession number is accepted.
+ *
+ * Only numeric (bare-integer) accession numbers advance the
+ * sequence — legacy `LIB-` prefixed numbers or other non-numeric
+ * values are ignored.
+ */
+export async function advanceSequenceIfNeeded(accessionNumber: string): Promise<void> {
+  const m = accessionNumber.match(NUMERIC_ACCESSION_RE)
+  if (!m) return
+  const num = parseInt(m[1], 10)
+
+  let sequence = await prisma.accessionNumberSequence.findFirst()
+  if (!sequence) {
+    await prisma.accessionNumberSequence.create({
+      data: { last_number: Math.max(num, INITIAL_LAST_NUMBER) },
+    })
+    return
+  }
+  if (num > sequence.last_number) {
+    await prisma.accessionNumberSequence.update({
+      where: { id: sequence.id },
+      data: { last_number: num },
+    })
+  }
+}

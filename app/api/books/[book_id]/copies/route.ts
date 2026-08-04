@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { UserRole } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
-import { formatAccessionNumber } from '@/lib/accession-number'
+import { formatAccessionNumber, advanceSequenceIfNeeded } from '@/lib/accession-number'
 
 const ACCESSION_SEQUENCE_START = 48000
 const INITIAL_LAST_NUMBER = ACCESSION_SEQUENCE_START - 1
@@ -76,6 +76,8 @@ export const POST = withAuth(
             acquisition_date: acquisition_date ? new Date(acquisition_date) : new Date()
           }
         })
+
+        await advanceSequenceIfNeeded(cleaned)
 
         await prisma.book.update({
           where: { book_id: bookId },

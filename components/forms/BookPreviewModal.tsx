@@ -2,6 +2,19 @@
 
 import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
+import { parseCallNumber, assembleCallNumber, type ParsedCallNumber } from '@/lib/call-number'
+
+type Tab = 'insert' | 'generate'
+
+interface GenerateData {
+  authorName: string
+  classificationId?: number
+  classificationCode?: string | null
+  sectionId?: number
+  sectionCode?: string | null
+  title?: string
+  year?: number | null
+}
 
 interface BookPreviewModalProps {
   isOpen: boolean
@@ -24,9 +37,14 @@ interface BookPreviewModalProps {
     [key: string]: any
   }
   suggestedCallNumber: string
+  generateData?: GenerateData
   loading?: boolean
   /** When true, hides the copies input and changes button text to "Save Book" */
   isEditing?: boolean
+}
+
+function buildParsed(cn: string): ParsedCallNumber {
+  return parseCallNumber(cn) || { section: '', classification: '', cutter: '', workmark: '', year: '' }
 }
 
 export default function BookPreviewModal({
@@ -35,16 +53,77 @@ export default function BookPreviewModal({
   onConfirm,
   bookData,
   suggestedCallNumber,
+  generateData,
   loading = false,
   isEditing = false
 }: BookPreviewModalProps) {
-  const [callNumber, setCallNumber] = useState(suggestedCallNumber)
+  const [activeTab, setActiveTab] = useState<Tab>('generate')
+  const [parsed, setParsed] = useState<ParsedCallNumber>(() => buildParsed(suggestedCallNumber))
+  const [insertInput, setInsertInput] = useState('')
+  const [generating, setGenerating] = useState(false)
   const [copiesInput, setCopiesInput] = useState('1')
   const copiesCount = Math.max(1, parseInt(copiesInput) || 0)
 
+  // Sync from parent when suggestedCallNumber changes (e.g. on open)
   useEffect(() => {
-    setCallNumber(suggestedCallNumber)
+    if (suggestedCallNumber) {
+      setParsed(buildParsed(suggestedCallNumber))
+    }
   }, [suggestedCallNumber])
+
+  // When the modal opens, pre-fill the insert input with the suggested call number
+  useEffect(() => {
+    if (isOpen && suggestedCallNumber) {
+      setInsertInput(suggestedCallNumber)
+    }
+  }, [isOpen, suggestedCallNumber])
+
+  const updateField = (field: keyof ParsedCallNumber, value: string) => {
+    setParsed((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleParse = () => {
+    const result = parseCallNumber(insertInput)
+    if (result) {
+      setParsed(result)
+    }
+  }
+
+  const handleGenerate = async () => {
+    if (!generateData) return
+    setGenerating(true)
+    try {
+      const body: any = { name: generateData.authorName }
+      if (generateData.classificationId) body.classification_id = generateData.classificationId
+      if (generateData.sectionId) body.section_id = generateData.sectionId
+      if (generateData.title) body.title = generateData.title
+
+      const res = await fetch('/api/cutter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        const result = data.data || data
+        setParsed({
+          section: generateData.sectionCode || '',
+          classification: generateData.classificationCode || '',
+          cutter: result.cutter_number || '',
+          workmark: result.workmark || '',
+          year: generateData.year ? String(generateData.year) : '',
+        })
+      }
+    } catch {
+      // silent
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const callNumber = assembleCallNumber(parsed)
 
   if (!isOpen) return null
 
@@ -114,7 +193,7 @@ export default function BookPreviewModal({
               ))}
           </div>
 
-          {/* Call Number — highlighted */}
+          {/* Call Number */}
           <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded-lg space-y-3">
             <div className="flex items-center gap-2">
               <i className="fas fa-tag text-amber-600"></i>
@@ -122,21 +201,136 @@ export default function BookPreviewModal({
                 Call Number
               </p>
             </div>
-            {!suggestedCallNumber && (
-              <p className="text-xs text-amber-700 bg-amber-100 rounded px-2 py-1">
-                <i className="fas fa-info-circle mr-1"></i>
-                No section code or classification selected — you can type the call number manually.
-              </p>
+
+            {/* Tabs */}
+            <div className="flex border-b border-amber-200">
+              <button
+                type="button"
+                onClick={() => setActiveTab('generate')}
+                className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                  activeTab === 'generate'
+                    ? 'border-amber-600 text-amber-800'
+                    : 'border-transparent text-amber-600 hover:text-amber-700'
+                }`}
+              >
+                Generate
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('insert')}
+                className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                  activeTab === 'insert'
+                    ? 'border-amber-600 text-amber-800'
+                    : 'border-transparent text-amber-600 hover:text-amber-700'
+                }`}
+              >
+                Insert Existing
+              </button>
+            </div>
+
+            {/* Tab content */}
+            {activeTab === 'insert' && (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-700">
+                  Paste an existing call number from the library and click Parse.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={insertInput}
+                    onChange={(e) => setInsertInput(e.target.value)}
+                    placeholder="e.g. CIR 020 R69h 1999"
+                    className="flex-1 px-3 py-2 border border-amber-300 rounded-md font-mono text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleParse}
+                    className="px-3 py-2 text-xs font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700"
+                  >
+                    Parse
+                  </button>
+                </div>
+              </div>
             )}
-            <input
-              type="text"
-              value={callNumber}
-              onChange={(e) => setCallNumber(e.target.value)}
-              className="w-full px-3 py-2.5 border border-amber-300 rounded-md font-mono text-base font-semibold text-amber-900 bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-              placeholder="e.g. FIL 001 C16p 1996"
-            />
+
+            {activeTab === 'generate' && (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-700">
+                  Generate a call number from the book metadata.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  disabled={generating || !generateData}
+                  className="px-3 py-2 text-xs font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {generating ? (
+                    <><span className="animate-spin inline-block mr-1">&#9696;</span> Generating...</>
+                  ) : (
+                    'Generate Call Number'
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Parsed fields */}
+            <div className="grid grid-cols-5 gap-2">
+              <div>
+                <label className="block text-xs text-amber-700 font-medium mb-0.5">Section</label>
+                <input
+                  type="text"
+                  value={parsed.section}
+                  onChange={(e) => updateField('section', e.target.value)}
+                  className="w-full px-2 py-1.5 border border-amber-300 rounded font-mono text-sm bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-amber-700 font-medium mb-0.5">DDC</label>
+                <input
+                  type="text"
+                  value={parsed.classification}
+                  onChange={(e) => updateField('classification', e.target.value)}
+                  className="w-full px-2 py-1.5 border border-amber-300 rounded font-mono text-sm bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-amber-700 font-medium mb-0.5">Cutter</label>
+                <input
+                  type="text"
+                  value={parsed.cutter}
+                  onChange={(e) => updateField('cutter', e.target.value)}
+                  className="w-full px-2 py-1.5 border border-amber-300 rounded font-mono text-sm bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-amber-700 font-medium mb-0.5">Title Mark</label>
+                <input
+                  type="text"
+                  value={parsed.workmark}
+                  onChange={(e) => updateField('workmark', e.target.value)}
+                  className="w-full px-2 py-1.5 border border-amber-300 rounded font-mono text-sm bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-amber-700 font-medium mb-0.5">Year</label>
+                <input
+                  type="text"
+                  value={parsed.year}
+                  onChange={(e) => updateField('year', e.target.value)}
+                  className="w-full px-2 py-1.5 border border-amber-300 rounded font-mono text-sm bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* Assembled call number */}
+            <div className="bg-white border border-amber-300 rounded-md px-3 py-2 font-mono text-sm font-semibold text-amber-900">
+              {callNumber || (
+                <span className="text-amber-400 font-normal italic">No call number assembled</span>
+              )}
+            </div>
+
             <p className="text-xs text-amber-600">
-              Format: <span className="font-mono">{'{Section} {DDC} {Author}{Title} {Year}'}</span>
+              Format: <span className="font-mono">{'{Section} {DDC} {Cutter}{Title Mark} {Year}'}</span>
             </p>
           </div>
 

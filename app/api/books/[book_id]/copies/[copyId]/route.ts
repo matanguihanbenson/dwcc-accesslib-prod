@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { UserRole } from '@/types'
 import { withAuth, createSuccessResponse, createErrorResponse } from '@/lib/api-utils'
 import { prisma } from '@/lib/prisma'
+import { advanceSequenceIfNeeded } from '@/lib/accession-number'
 
 // GET - Paginated borrowing history for a specific copy.
 // Used by the "View Borrowing History" action on the manage-copies
@@ -143,6 +144,7 @@ export const PATCH = withAuth(
           return createErrorResponse(`Accession number "${cleaned}" is already in use`, 400)
         }
         updateData.accession_number = cleaned
+        await advanceSequenceIfNeeded(cleaned)
       }
 
       const updatedCopy = await prisma.bookCopy.update({

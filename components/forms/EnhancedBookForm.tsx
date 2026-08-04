@@ -42,10 +42,22 @@ export type OptionKind =
   | 'lexile'
   | 'fountasPinnell'
 
+// One row pushed into the form's option lists after a quick
+// action edits / toggles a value backed by `book_catalog_value`.
+export interface CatalogValueSyncItem {
+  id: number
+  value: string
+  is_active: boolean
+}
+
 export interface BookFormHandle {
   addCategory: (item: { category_id: number; name: string }) => void
   addSection: (item: { section_id: number; name: string }) => void
   addOption: (kind: OptionKind, value: string) => void
+  // Upserts a single catalog value into the matching option
+  // list. Deactivated values are removed from the dropdown
+  // (unless the form currently has them selected).
+  syncCatalogValue: (kind: OptionKind, item: CatalogValueSyncItem) => void
   setField: (name: string, value: any) => void
 }
 
@@ -154,8 +166,15 @@ export const EnhancedBookForm = forwardRef<
     summary: '',
   })
 
-  const [categories, setCategories] = useState<{ category_id: number; name: string }[]>(propCategories || [])
-  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null }[]>(propSections || [])
+  // Mirror of `formData` so the imperative handle can read the
+  // current field value without a stale closure (used when a
+  // quick action deactivates a catalog value — the currently
+  // selected value must stay visible in the dropdown).
+  const formDataRef = useRef(formData)
+  formDataRef.current = formData
+
+  const [categories, setCategories] = useState<{ category_id: number; name: string; description?: string | null; is_active?: boolean }[]>(propCategories || [])
+  const [sections, setSections] = useState<{ section_id: number; name: string; code?: string | null; description?: string | null; is_active?: boolean }[]>(propSections || [])
 
   // Dynamic option lists for the hard-coded <select> fields.
   // We start from the same defaults the original form used
@@ -188,6 +207,7 @@ export const EnhancedBookForm = forwardRef<
     name: string
     level: string
     is_active: boolean
+    parent_id: number | null
   }
   const [classificationMainClasses, setClassificationMainClasses] = useState<ClassificationNode[]>([])
   const [classificationDivisions, setClassificationDivisions] = useState<ClassificationNode[]>([])
@@ -204,6 +224,11 @@ export const EnhancedBookForm = forwardRef<
   // When true, cascade effects skip their work so initClassification
   // can set all levels without being clobbered mid-flight.
   const classInitRef = useRef(false)
+
+  // Set once initClassification has applied the book's stored
+  // classification. The release effect below watches this and clears
+  // classInitRef AFTER the cascade effects have skipped in that render.
+  const [classificationHydrated, setClassificationHydrated] = useState(false)
 
   // Fetch children of a classification node
   const fetchClassificationChildren = useCallback(async (parentId: number): Promise<ClassificationNode[]> => {
@@ -232,31 +257,18 @@ export const EnhancedBookForm = forwardRef<
     return () => { cancelled = true }
   }, [])
 
-  // Cascade: when main class changes, load divisions
+  // Cascade: when main class changes, load divisions.
+  // Downstream selection resets live only in the handle*Change handlers.
   useEffect(() => {
     if (classInitRef.current) return
     if (!selectedMainClass) {
       setClassificationDivisions([])
-      setSelectedDivision('')
-      setClassificationSections([])
-      setSelectedSection('')
-      setClassificationDecimals([])
-      setSelectedDecimal('')
-      setClassificationDeeper([])
-      setSelectedDeeper('')
       return
     }
     let cancelled = false
     fetchClassificationChildren(parseInt(selectedMainClass)).then((items) => {
       if (cancelled) return
       setClassificationDivisions(items)
-      setSelectedDivision('')
-      setClassificationSections([])
-      setSelectedSection('')
-      setClassificationDecimals([])
-      setSelectedDecimal('')
-      setClassificationDeeper([])
-      setSelectedDeeper('')
     })
     return () => { cancelled = true }
   }, [selectedMainClass, fetchClassificationChildren])
@@ -266,22 +278,12 @@ export const EnhancedBookForm = forwardRef<
     if (classInitRef.current) return
     if (!selectedDivision) {
       setClassificationSections([])
-      setSelectedSection('')
-      setClassificationDecimals([])
-      setSelectedDecimal('')
-      setClassificationDeeper([])
-      setSelectedDeeper('')
       return
     }
     let cancelled = false
     fetchClassificationChildren(parseInt(selectedDivision)).then((items) => {
       if (cancelled) return
       setClassificationSections(items)
-      setSelectedSection('')
-      setClassificationDecimals([])
-      setSelectedDecimal('')
-      setClassificationDeeper([])
-      setSelectedDeeper('')
     })
     return () => { cancelled = true }
   }, [selectedDivision, fetchClassificationChildren])
@@ -291,18 +293,12 @@ export const EnhancedBookForm = forwardRef<
     if (classInitRef.current) return
     if (!selectedSection) {
       setClassificationDecimals([])
-      setSelectedDecimal('')
-      setClassificationDeeper([])
-      setSelectedDeeper('')
       return
     }
     let cancelled = false
     fetchClassificationChildren(parseInt(selectedSection)).then((items) => {
       if (cancelled) return
       setClassificationDecimals(items)
-      setSelectedDecimal('')
-      setClassificationDeeper([])
-      setSelectedDeeper('')
     })
     return () => { cancelled = true }
   }, [selectedSection, fetchClassificationChildren])
@@ -312,14 +308,12 @@ export const EnhancedBookForm = forwardRef<
     if (classInitRef.current) return
     if (!selectedDecimal) {
       setClassificationDeeper([])
-      setSelectedDeeper('')
       return
     }
     let cancelled = false
     fetchClassificationChildren(parseInt(selectedDecimal)).then((items) => {
       if (cancelled) return
       setClassificationDeeper(items)
-      setSelectedDeeper('')
     })
     return () => { cancelled = true }
   }, [selectedDecimal, fetchClassificationChildren])
@@ -329,7 +323,9 @@ export const EnhancedBookForm = forwardRef<
     return selectedDeeper || selectedDecimal || selectedSection || selectedDivision || selectedMainClass || null
   }, [selectedDeeper, selectedDecimal, selectedSection, selectedDivision, selectedMainClass])
 
-  // Edit-mode: initialize classification selections from initialData.classification_id
+  // Edit-mode: initialize classification selections from initialData.classification_id.
+  // The whole tree is fetched ONCE (?all=true) and the ancestor path is
+  // reconstructed client-side via parent_id links.
   useEffect(() => {
     if (!isEditing || !initialData?.classification_id) return
     let cancelled = false
@@ -338,47 +334,51 @@ export const EnhancedBookForm = forwardRef<
 
     const initClassification = async () => {
       classInitRef.current = true
+      setClassificationHydrated(false)
       try {
-        // 1. Walk up the parent chain from leaf to root
-        const path: { id: number; code: string; name: string; level: string; parent_id: number | null }[] = []
+        const res = await fetch('/api/book-classifications?all=true', { credentials: 'include', cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json()
+        const list: ClassificationNode[] = (Array.isArray(data) ? data : (data?.data ?? []))
+          .map((c: any) => ({ id: c.id, code: c.code, name: c.name, level: c.level, is_active: c.is_active, parent_id: c.parent_id }))
+        if (cancelled || list.length === 0) return
+
+        const byId = new Map<number, ClassificationNode>()
+        for (const node of list) byId.set(node.id, node)
+
+        // Walk up from the leaf to the root using parent_id links.
+        const path: ClassificationNode[] = []
         let currentId: number | null = leafId
-        while (currentId) {
-          const res = await fetch(`/api/book-classifications/${currentId}`, { credentials: 'include', cache: 'no-store' })
-          if (!res.ok) break
-          const json = await res.json()
-          const node = json.data || json
+        let guard = 0
+        while (currentId && guard++ < 10) {
+          const node = byId.get(currentId)
           if (!node) break
-          path.unshift({ id: node.id, code: node.code, name: node.name, level: node.level, parent_id: node.parent_id })
+          path.unshift(node)
           currentId = node.parent_id
         }
         if (cancelled || path.length === 0) return
 
-        // Map levels to IDs
         const byLevel: Record<string, string> = {}
-        for (const p of path) {
-          byLevel[p.level] = String(p.id)
-        }
+        for (const p of path) byLevel[p.level] = String(p.id)
 
-        // 2. Fetch all child lists in parallel (we already know every parent ID)
-        const fetchChildren = async (pid: string) => {
-          if (!pid) return [] as ClassificationNode[]
-          const res = await fetch(`/api/book-classifications?parent_id=${pid}`, { credentials: 'include', cache: 'no-store' })
-          if (!res.ok) return []
-          const data = await res.json()
-          const list = Array.isArray(data) ? data : (data?.data ?? [])
-          return list.filter((c: any) => c?.is_active)
-        }
+        // Derive the dropdown options for each level from the flat tree.
+        const activeChildren = (pid: number) =>
+          list.filter((c) => c.parent_id === pid && c.is_active)
+        const divisions = byLevel.DIVISION
+          ? activeChildren(Number(byLevel.MAIN_CLASS))
+          : []
+        const sections = byLevel.SECTION
+          ? activeChildren(Number(byLevel.DIVISION))
+          : []
+        const decimals = byLevel.DECIMAL_SUBDIVISION
+          ? activeChildren(Number(byLevel.SECTION))
+          : []
+        const deeper = byLevel.DEEPER_SUBDIVISION
+          ? activeChildren(Number(byLevel.DECIMAL_SUBDIVISION))
+          : []
 
-        const [divisions, sections, decimals, deeper] = await Promise.all([
-          byLevel.DIVISION ? fetchChildren(byLevel.MAIN_CLASS) : Promise.resolve([]),
-          byLevel.SECTION ? fetchChildren(byLevel.DIVISION) : Promise.resolve([]),
-          byLevel.DECIMAL_SUBDIVISION ? fetchChildren(byLevel.SECTION) : Promise.resolve([]),
-          byLevel.DEEPER_SUBDIVISION ? fetchChildren(byLevel.DECIMAL_SUBDIVISION) : Promise.resolve([]),
-        ])
-
-        if (cancelled) return
-
-        // 3. Set everything at once — no cascade interference
+        // Set everything at once — the cascades skip this render.
+        setClassificationMainClasses(list.filter((c) => c.parent_id === null && c.is_active))
         if (byLevel.MAIN_CLASS) setSelectedMainClass(byLevel.MAIN_CLASS)
         setClassificationDivisions(divisions)
         if (byLevel.DIVISION) setSelectedDivision(byLevel.DIVISION)
@@ -388,12 +388,54 @@ export const EnhancedBookForm = forwardRef<
         if (byLevel.DECIMAL_SUBDIVISION) setSelectedDecimal(byLevel.DECIMAL_SUBDIVISION)
         setClassificationDeeper(deeper)
         if (byLevel.DEEPER_SUBDIVISION) setSelectedDeeper(byLevel.DEEPER_SUBDIVISION)
-      } catch {}
-      classInitRef.current = false
+
+        setClassificationHydrated(true)
+      } catch {
+        classInitRef.current = false
+      }
     }
     initClassification()
     return () => { cancelled = true }
   }, [isEditing, initialData?.classification_id])
+
+  // Release the cascade guard only after the initialized render has flushed.
+  useEffect(() => {
+    if (classificationHydrated) {
+      classInitRef.current = false
+    }
+  }, [classificationHydrated])
+
+  // User-driven classification handlers.
+  const handleMainClassChange = (v: string) => {
+    classInitRef.current = false
+    setSelectedMainClass(v)
+    setSelectedDivision('')
+    setSelectedSection('')
+    setSelectedDecimal('')
+    setSelectedDeeper('')
+  }
+  const handleDivisionChange = (v: string) => {
+    classInitRef.current = false
+    setSelectedDivision(v)
+    setSelectedSection('')
+    setSelectedDecimal('')
+    setSelectedDeeper('')
+  }
+  const handleSectionChange = (v: string) => {
+    classInitRef.current = false
+    setSelectedSection(v)
+    setSelectedDecimal('')
+    setSelectedDeeper('')
+  }
+  const handleDecimalChange = (v: string) => {
+    classInitRef.current = false
+    setSelectedDecimal(v)
+    setSelectedDeeper('')
+  }
+  const handleDeeperChange = (v: string) => {
+    classInitRef.current = false
+    setSelectedDeeper(v)
+  }
 
   // Pull the live catalog values from the
   // `book_catalog_value` table so anything an admin added
@@ -491,73 +533,94 @@ export const EnhancedBookForm = forwardRef<
   // twice doesn't create duplicates.
   useImperativeHandle(
     ref,
-    () => ({
-      addCategory: (item) => {
-        setCategories((prev) => {
-          if (
-            prev.some(
-              (c) =>
-                c.category_id === item.category_id ||
-                c.name.toLowerCase() === item.name.toLowerCase()
-            )
-          )
-            return prev
-          return [...prev, item]
-        })
-        setFormData((prev) => ({ ...prev, category_id: item.category_id }))
-      },
-      addSection: (item) => {
-        setSections((prev) => {
-          if (
-            prev.some(
-              (s) =>
-                s.section_id === item.section_id ||
-                s.name.toLowerCase() === item.name.toLowerCase()
-            )
-          )
-            return prev
-          return [...prev, item]
-        })
-        setFormData((prev) => ({ ...prev, section_id: item.section_id }))
-      },
-      addOption: (kind, value) => {
-        const cleaned = (value || '').trim()
-        if (!cleaned) return
-        // Map each option kind to its current list + setter.
-        // The setter accepts a callback form so we can
-        // de-dupe against the existing values before appending.
-        const setterByKind: Record<
-          OptionKind,
-          (updater: (prev: string[]) => string[]) => void
-        > = {
-          materialType: (updater) =>
-            setMaterialTypeOptions(updater as (prev: string[]) => string[]),
-          subtype: (updater) => setSubtypeOptions(updater as (prev: string[]) => string[]),
-          interestLevel: (updater) =>
-            setInterestLevelOptions(updater as (prev: string[]) => string[]),
-          lexile: (updater) => setLexileOptions(updater as (prev: string[]) => string[]),
-          fountasPinnell: (updater) =>
-            setFountasPinnellOptions(updater as (prev: string[]) => string[])
-        }
-        setterByKind[kind]((prev: string[]) => {
-          if (prev.some((v) => v.toLowerCase() === cleaned.toLowerCase())) return prev
-          return [...prev, cleaned]
-        })
-        // Also set the form value so the field auto-switches
-        // to the freshly-added option.
-        const formFieldMap: Record<OptionKind, string> = {
-          materialType: 'materialType',
-          subtype: 'subtype',
-          interestLevel: 'interestLevel',
-          lexile: 'lexile',
-          fountasPinnell: 'fountasPinnell'
-        }
-        setFormData((prev) => ({ ...prev, [formFieldMap[kind]]: cleaned }))
-      },
-      setField: (name, value) => {
-        setFormData((prev) => ({ ...prev, [name]: value }))
+    () => {
+      // Map each option kind to its current list setter. The
+      // setter accepts a callback form so we can de-dupe
+      // against the existing values before appending.
+      const setterByKind: Record<
+        OptionKind,
+        (updater: (prev: string[]) => string[]) => void
+      > = {
+        materialType: (updater) =>
+          setMaterialTypeOptions(updater as (prev: string[]) => string[]),
+        subtype: (updater) => setSubtypeOptions(updater as (prev: string[]) => string[]),
+        interestLevel: (updater) =>
+          setInterestLevelOptions(updater as (prev: string[]) => string[]),
+        lexile: (updater) => setLexileOptions(updater as (prev: string[]) => string[]),
+        fountasPinnell: (updater) =>
+          setFountasPinnellOptions(updater as (prev: string[]) => string[])
       }
-    }),
+      const formFieldMap: Record<OptionKind, keyof typeof formData> = {
+        materialType: 'materialType',
+        subtype: 'subtype',
+        interestLevel: 'interestLevel',
+        lexile: 'lexile',
+        fountasPinnell: 'fountasPinnell'
+      }
+      return {
+        addCategory: (item) => {
+          setCategories((prev) => {
+            if (
+              prev.some(
+                (c) =>
+                  c.category_id === item.category_id ||
+                  c.name.toLowerCase() === item.name.toLowerCase()
+              )
+            )
+              return prev
+            return [...prev, item]
+          })
+          setFormData((prev) => ({ ...prev, category_id: item.category_id }))
+        },
+        addSection: (item) => {
+          setSections((prev) => {
+            if (
+              prev.some(
+                (s) =>
+                  s.section_id === item.section_id ||
+                  s.name.toLowerCase() === item.name.toLowerCase()
+              )
+            )
+              return prev
+            return [...prev, item]
+          })
+          setFormData((prev) => ({ ...prev, section_id: item.section_id }))
+        },
+        addOption: (kind, value) => {
+          const cleaned = (value || '').trim()
+          if (!cleaned) return
+          setterByKind[kind]((prev: string[]) => {
+            if (prev.some((v) => v.toLowerCase() === cleaned.toLowerCase())) return prev
+            return [...prev, cleaned]
+          })
+          // Also set the form value so the field auto-switches
+          // to the freshly-added option.
+          setFormData((prev) => ({ ...prev, [formFieldMap[kind]]: cleaned }))
+        },
+        syncCatalogValue: (kind, item) => {
+          const cleaned = (item.value || '').trim()
+          const current = String(formDataRef.current[formFieldMap[kind]] ?? '')
+          setterByKind[kind]((prev: string[]) => {
+            if (item.is_active === false) {
+              // Deactivated: drop from the dropdown unless the
+              // form currently has this exact value selected
+              // (so the select keeps showing it).
+              return prev.filter(
+                (v) =>
+                  v.toLowerCase() !== cleaned.toLowerCase() ||
+                  v.toLowerCase() === current.toLowerCase()
+              )
+            }
+            if (!cleaned) return prev
+            if (prev.some((v) => v.toLowerCase() === cleaned.toLowerCase())) return prev
+            return [...prev, cleaned]
+          })
+        },
+        setField: (name, value) => {
+          setFormData((prev) => ({ ...prev, [name]: value }))
+        }
+      }
+    },
     [
       materialTypeOptions,
       subtypeOptions,
@@ -574,6 +637,24 @@ export const EnhancedBookForm = forwardRef<
   useEffect(() => {
     if (propSections) setSections(propSections)
   }, [propSections])
+
+  // Dropdown lists only show active rows, except the one
+  // currently selected (so an existing book keeps showing its
+  // section/category even if it was later deactivated).
+  const visibleCategories = useMemo(
+    () =>
+      categories.filter(
+        (c) => c.is_active !== false || c.category_id === formData.category_id
+      ),
+    [categories, formData.category_id]
+  )
+  const visibleSections = useMemo(
+    () =>
+      sections.filter(
+        (s) => s.is_active !== false || s.section_id === formData.section_id
+      ),
+    [sections, formData.section_id]
+  )
 
   // Map incoming initialData (DB shape) to form state shape for edit mode
   useEffect(() => {
@@ -1444,7 +1525,7 @@ export const EnhancedBookForm = forwardRef<
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
                         <option value="">Select a category</option>
-                        {categories.map(c => (
+                        {visibleCategories.map(c => (
                           <option key={c.category_id} value={c.category_id}>{c.name}</option>
                         ))}
                         <option value="__add_new__" className="font-semibold text-blue-600">
@@ -1474,7 +1555,7 @@ export const EnhancedBookForm = forwardRef<
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
                         <option value="">No section</option>
-                        {sections.map(s => (
+                        {visibleSections.map(s => (
                           <option key={s.section_id} value={s.section_id}>{s.name}</option>
                         ))}
                         <option value="__add_new__" className="font-semibold text-blue-600">
@@ -1493,7 +1574,7 @@ export const EnhancedBookForm = forwardRef<
                       <label className="block text-sm font-medium text-gray-700 mb-1">Main Class</label>
                       <SearchableSelect
                         value={selectedMainClass}
-                        onChange={setSelectedMainClass}
+                        onChange={handleMainClassChange}
                         placeholder="None"
                         options={classificationMainClasses.map((c) => ({
                           value: String(c.id),
@@ -1506,7 +1587,7 @@ export const EnhancedBookForm = forwardRef<
                         <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
                         <SearchableSelect
                           value={selectedDivision}
-                          onChange={setSelectedDivision}
+                          onChange={handleDivisionChange}
                           placeholder="None"
                           options={classificationDivisions.map((c) => ({
                             value: String(c.id),
@@ -1522,7 +1603,7 @@ export const EnhancedBookForm = forwardRef<
                         <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
                         <SearchableSelect
                           value={selectedSection}
-                          onChange={setSelectedSection}
+                          onChange={handleSectionChange}
                           placeholder="None"
                           options={classificationSections.map((c) => ({
                             value: String(c.id),
@@ -1536,7 +1617,7 @@ export const EnhancedBookForm = forwardRef<
                         <label className="block text-sm font-medium text-gray-700 mb-1">Decimal Subdivision</label>
                         <SearchableSelect
                           value={selectedDecimal}
-                          onChange={setSelectedDecimal}
+                          onChange={handleDecimalChange}
                           placeholder="None"
                           options={classificationDecimals.map((c) => ({
                             value: String(c.id),
@@ -1551,7 +1632,7 @@ export const EnhancedBookForm = forwardRef<
                       <label className="block text-sm font-medium text-gray-700 mb-1">Deeper Subdivision</label>
                       <SearchableSelect
                         value={selectedDeeper}
-                        onChange={setSelectedDeeper}
+                        onChange={handleDeeperChange}
                         placeholder="None"
                         options={classificationDeeper.map((c) => ({
                           value: String(c.id),
@@ -1894,7 +1975,7 @@ export const EnhancedBookForm = forwardRef<
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
                       <option value="">Select a category</option>
-                      {categories.map(c => (
+                      {visibleCategories.map(c => (
                         <option key={c.category_id} value={c.category_id}>{c.name}</option>
                       ))}
                       <option value="__add_new__" className="font-semibold text-blue-600">
@@ -1924,7 +2005,7 @@ export const EnhancedBookForm = forwardRef<
                       className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     >
                       <option value="">No section</option>
-                      {sections.map(s => (
+                      {visibleSections.map(s => (
                         <option key={s.section_id} value={s.section_id}>{s.name}</option>
                       ))}
                       <option value="__add_new__" className="font-semibold text-blue-600">
@@ -1942,7 +2023,7 @@ export const EnhancedBookForm = forwardRef<
                         <label className="block text-sm font-medium text-gray-700 mb-1">Main Class</label>
                         <SearchableSelect
                           value={selectedMainClass}
-                          onChange={setSelectedMainClass}
+                          onChange={handleMainClassChange}
                           placeholder="None"
                           options={classificationMainClasses.map((c) => ({
                             value: String(c.id),
@@ -1955,7 +2036,7 @@ export const EnhancedBookForm = forwardRef<
                           <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
                           <SearchableSelect
                             value={selectedDivision}
-                            onChange={setSelectedDivision}
+                            onChange={handleDivisionChange}
                             placeholder="None"
                             options={classificationDivisions.map((c) => ({
                               value: String(c.id),
@@ -1971,7 +2052,7 @@ export const EnhancedBookForm = forwardRef<
                           <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
                           <SearchableSelect
                             value={selectedSection}
-                            onChange={setSelectedSection}
+                            onChange={handleSectionChange}
                             placeholder="None"
                             options={classificationSections.map((c) => ({
                               value: String(c.id),
@@ -1985,7 +2066,7 @@ export const EnhancedBookForm = forwardRef<
                           <label className="block text-sm font-medium text-gray-700 mb-1">Decimal Subdivision</label>
                           <SearchableSelect
                             value={selectedDecimal}
-                            onChange={setSelectedDecimal}
+                            onChange={handleDecimalChange}
                             placeholder="None"
                             options={classificationDecimals.map((c) => ({
                               value: String(c.id),
@@ -2000,7 +2081,7 @@ export const EnhancedBookForm = forwardRef<
                         <label className="block text-sm font-medium text-gray-700 mb-1">Deeper Subdivision</label>
                         <SearchableSelect
                           value={selectedDeeper}
-                          onChange={setSelectedDeeper}
+                          onChange={handleDeeperChange}
                           placeholder="None"
                           options={classificationDeeper.map((c) => ({
                             value: String(c.id),
@@ -2283,8 +2364,8 @@ export const EnhancedBookForm = forwardRef<
           endpoint={inlineAdd.endpoint}
           existingOptions={
             inlineAdd.kind === 'category'
-              ? categories.map((c) => ({ id: c.category_id, name: c.name }))
-              : sections.map((s) => ({ id: s.section_id, name: s.name }))
+              ? categories.map((c) => ({ id: c.category_id, name: c.name, description: c.description, is_active: c.is_active }))
+              : sections.map((s) => ({ id: s.section_id, name: s.name, description: s.description, is_active: s.is_active }))
           }
           mode="name-and-description"
           onAdded={(item) => {
@@ -2298,7 +2379,7 @@ export const EnhancedBookForm = forwardRef<
                 if (prev.some((c) => c.category_id === item.id)) return prev
                 return [
                   ...prev,
-                  { category_id: item.id as number, name: item.name }
+                  { category_id: item.id as number, name: item.name, description: item.description ?? null, is_active: item.is_active !== false }
                 ]
               })
               setFormData((prev) => ({
@@ -2310,13 +2391,39 @@ export const EnhancedBookForm = forwardRef<
                 if (prev.some((s) => s.section_id === item.id)) return prev
                 return [
                   ...prev,
-                  { section_id: item.id as number, name: item.name }
+                  { section_id: item.id as number, name: item.name, description: item.description ?? null, is_active: item.is_active !== false }
                 ]
               })
               setFormData((prev) => ({
                 ...prev,
                 [inlineAdd.fieldName]: item.id as number
               }))
+            }
+          }}
+          onUpdated={(item) => {
+            // Edit / activate / deactivate from the inline
+            // modal. Keep the form's local lists in sync so
+            // the dropdowns reflect the change right away.
+            if (inlineAdd.kind === 'category') {
+              setCategories((prev) =>
+                prev.some((c) => c.category_id === item.id)
+                  ? prev.map((c) =>
+                      c.category_id === item.id
+                        ? { ...c, name: item.name, description: item.description ?? c.description, is_active: item.is_active ?? c.is_active }
+                        : c
+                    )
+                  : prev
+              )
+            } else {
+              setSections((prev) =>
+                prev.some((s) => s.section_id === item.id)
+                  ? prev.map((s) =>
+                      s.section_id === item.id
+                        ? { ...s, name: item.name, description: item.description ?? s.description, is_active: item.is_active ?? s.is_active }
+                        : s
+                    )
+                  : prev
+              )
             }
           }}
         />

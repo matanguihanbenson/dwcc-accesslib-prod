@@ -1635,6 +1635,7 @@ export default function LibraryUsersPage() {
             setRefreshCounter((c) => c + 1)
           }}
         />
+        
       )}
 
       {/* Borrowing History Modal — opens from the per-row

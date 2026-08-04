@@ -579,12 +579,7 @@ function CategoryManager() {
       )
     } catch (err) {
       const msg = (err as Error)?.message || 'Toggle failed'
-      notify.error(
-        'Toggle failed',
-        msg.includes('is_active')
-          ? 'The is_active column is missing on book_category. Run: ALTER TABLE book_category ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;'
-          : msg
-      )
+      notify.error('Toggle failed', msg)
     }
   }
 

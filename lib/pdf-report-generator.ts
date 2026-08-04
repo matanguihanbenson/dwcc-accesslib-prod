@@ -2792,6 +2792,18 @@ export class PDFReportGenerator {
     preparedBy: string = '',
     dateRangeTitle?: string
   ): void {
+    // Switch to landscape A4 so the wide table fits
+    const landscapeFormats = {
+      short: [279.4, 215.9] as [number, number],
+      long: [330.2, 215.9] as [number, number],
+      a4: [297, 210] as [number, number]
+    }
+    this.doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    })
+
     const pageWidth = this.doc.internal.pageSize.getWidth()
     const centerX = pageWidth / 2
     const type = data.type || 'combined'
@@ -2832,11 +2844,11 @@ export class PDFReportGenerator {
     // empty columns.
     const showBook = type !== 'locker'
     const showLocker = type !== 'book'
-    const head: string[] = ['#', 'Borrower', 'ID Number', 'Type']
-    if (showBook) head.push('Book Penalty', 'Book Paid', 'Book Remaining', '# Book')
-    if (showLocker) head.push('Locker Penalty', 'Locker Paid', 'Locker Remaining', '# Locker')
+    const head: string[] = ['#', 'Borrower', 'ID Number']
+    if (showBook) head.push('Book Remaining')
+    if (showLocker) head.push('Locker Remaining')
     if (type === 'combined') {
-      head.push('Total Penalty', 'Total Paid', 'Total Remaining')
+      head.push('Total Remaining')
     }
 
     const body = data.rows.map((r, i) => {
@@ -2844,31 +2856,16 @@ export class PDFReportGenerator {
       const row: any[] = [
         i + 1,
         u.full_name || 'Unknown',
-        u.account_id || '—',
-        u.user_type || '—'
+        u.account_id || '—'
       ]
       if (showBook) {
-        row.push(
-          fmt(r.book.total),
-          fmt(r.book.paid),
-          fmt(r.book.remaining),
-          r.book.count
-        )
+        row.push(fmt(r.book.remaining))
       }
       if (showLocker) {
-        row.push(
-          fmt(r.locker.total),
-          fmt(r.locker.paid),
-          fmt(r.locker.remaining),
-          r.locker.count
-        )
+        row.push(fmt(r.locker.remaining))
       }
       if (type === 'combined') {
-        row.push(
-          fmt(r.combined.total),
-          fmt(r.combined.paid),
-          fmt(r.combined.remaining)
-        )
+        row.push(fmt(r.combined.remaining))
       }
       return row
     })
@@ -2876,26 +2873,18 @@ export class PDFReportGenerator {
     autoTable(this.doc, {
       startY: 46,
       head: [head],
-      body: body.length ? body : [['—', 'No borrowers with fines in this range', '', '', '', '', '', '', '', '', '', '', ''].slice(0, head.length)],
+      body: body.length ? body : [['—', 'No borrowers with fines in this range', '', '', '', '', ''].slice(0, head.length)],
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 1.5, halign: 'left' },
+      styles: { fontSize: 8, cellPadding: 2, halign: 'left' },
       headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center' },
       columnStyles: {
-        0: { halign: 'center', cellWidth: 8 },
+        0: { halign: 'center', cellWidth: 10 },
         1: { halign: 'left' },
-        2: { halign: 'left', cellWidth: 24 },
-        3: { halign: 'center', cellWidth: 18 }
+        2: { halign: 'left', cellWidth: 28 }
       },
       didParseCell: (data) => {
-        // Right-align the currency columns.
-        const isCurrency =
-          (showBook &&
-            [4, 5, 6].includes(data.column.index)) ||
-          (showLocker &&
-            [showBook ? 8 : 4, showBook ? 9 : 5, showBook ? 10 : 6].includes(
-              data.column.index
-            ))
-        if (isCurrency && data.section === 'body') {
+        // Right-align the remaining-balance columns (book=3, locker=4, total=5).
+        if (data.section === 'body' && data.column.index >= 3) {
           data.cell.styles.halign = 'right'
         }
       }
@@ -2915,7 +2904,7 @@ export class PDFReportGenerator {
     this.doc.text('Grand Totals', 20, finalY)
     this.doc.setFont('helvetica', 'normal')
     this.doc.text(
-      `Total Penalty: ${fmt(grand.total)}    Total Paid: ${fmt(grand.paid)}    Remaining: ${fmt(grand.remaining)}    Borrowers: ${grand.borrower_count}    Settlements: ${grand.settlement_count}`,
+      `Total Remaining: ${fmt(grand.remaining)}    Borrowers: ${grand.borrower_count}    Items: ${grand.settlement_count}`,
       20,
       finalY + 6
     )

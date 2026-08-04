@@ -206,6 +206,28 @@ export class LockerService extends BaseService {
           where: { type: 'LOCKER', is_active: true }
         })
         penalty = hoursOverdue * (Number(penaltyConfig?.penalty_per_hour) || 2)
+
+        // Create or update overdue settlement record for tracking
+        const existingSettlement = await prisma.overdueSettlement.findFirst({
+          where: {
+            transaction_type: 'LOCKER',
+            transaction_id: validatedId
+          }
+        })
+
+        if (!existingSettlement && penalty > 0) {
+          await prisma.overdueSettlement.create({
+            data: {
+              user_id: transaction.user_id,
+              transaction_type: 'LOCKER',
+              transaction_id: validatedId,
+              penalty_amount: penalty,
+              amount_paid: 0,
+              remaining_balance: penalty,
+              status: 'PENDING'
+            }
+          })
+        }
       }
 
       await this.executeTransaction(async (tx) => {
@@ -259,6 +281,28 @@ export class LockerService extends BaseService {
         where: { type: 'LOCKER', is_active: true }
       })
       const penalty = Math.max(0, hoursOverdue * (Number(penaltyConfig?.penalty_per_hour) || 2))
+
+      // Create or update overdue settlement record for tracking
+      const existingSettlement = await prisma.overdueSettlement.findFirst({
+        where: {
+          transaction_type: 'LOCKER',
+          transaction_id: validatedId
+        }
+      })
+
+      if (!existingSettlement && penalty > 0) {
+        await prisma.overdueSettlement.create({
+          data: {
+            user_id: transaction.user_id,
+            transaction_type: 'LOCKER',
+            transaction_id: validatedId,
+            penalty_amount: penalty,
+            amount_paid: 0,
+            remaining_balance: penalty,
+            status: 'PENDING'
+          }
+        })
+      }
 
       await this.executeTransaction(async (tx) => {
         await tx.lockerTransaction.update({

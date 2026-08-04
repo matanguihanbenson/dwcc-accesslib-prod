@@ -11,9 +11,9 @@
  * can have the same cutter in different classes.
  *
  * Work marks disambiguate books by the same author in the same class.
- *   base_workmark  = first letter of title (lowercase), articles stripped
- *                    titles with numbers are spelled out first
- *   final_workmark = expanded to be unique within author+class
+ *   workmark = first letter of title (lowercase), articles stripped,
+ *              expanded to be unique within author+class.
+ *              Titles with numbers are spelled out first.
  */
 
 // ─── G63 Base cutter tables ───────────────────────────────
@@ -448,6 +448,17 @@ export function interpolateShelflist(
   if (!collides) {
     // No collision — use base cutter, but still check it fits between neighbors
     if (predecessor && successor) {
+      const predInit = predecessor.cutter.charAt(0)
+      const succInit = successor.cutter.charAt(0)
+      const baseInit = baseCutter.charAt(0)
+
+      if (baseInit !== predInit || baseInit !== succInit) {
+        // Different initial blocks — alphabetical order is the arbiter
+        if (baseInit >= predInit && baseInit <= succInit) return baseCutter
+        // Shouldn't happen given the surname sort, but handle gracefully
+        return expandBetween(predecessor.cutter, successor.cutter, newSurname)
+      }
+
       const predDec = cutterToDecimal(predecessor.cutter)
       const succDec = cutterToDecimal(successor.cutter)
       if (baseDec > predDec && baseDec < succDec) {
@@ -457,11 +468,26 @@ export function interpolateShelflist(
       return expandBetween(predecessor.cutter, successor.cutter, newSurname)
     }
     if (predecessor) {
+      const predInit = predecessor.cutter.charAt(0)
+      const baseInit = baseCutter.charAt(0)
+      if (baseInit !== predInit) {
+        // Different blocks: if base initial > predecessor's, we're after;
+        // if base initial < predecessor's, we should file before but
+        // the surname sort wouldn't put us here. Return base cutter.
+        if (baseInit >= predInit) return baseCutter
+      }
       const predDec = cutterToDecimal(predecessor.cutter)
       if (baseDec > predDec) return baseCutter
       return expandAbove(predecessor.cutter, newSurname)
     }
     if (successor) {
+      const succInit = successor.cutter.charAt(0)
+      const baseInit = baseCutter.charAt(0)
+      if (baseInit !== succInit) {
+        // Different blocks: if base initial < successor's, we file
+        // before them regardless of decimal values
+        if (baseInit < succInit) return baseCutter
+      }
       const succDec = cutterToDecimal(successor.cutter)
       if (baseDec < succDec) return baseCutter
       return expandBelow(successor.cutter, newSurname)

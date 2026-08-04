@@ -43,12 +43,25 @@ export async function GET(
         condition: true,
         location: true,
         acquisition_date: true,
-        notes: true
+        notes: true,
+        book: {
+          select: {
+            section: {
+              select: { name: true }
+            }
+          }
+        }
       },
       orderBy: { accession_number: "asc" }
     })
 
-    return NextResponse.json({ success: true, data: copies })
+    const shaped = copies.map((c) => ({
+      ...c,
+      section: c.book?.section?.name ?? null,
+      book: undefined
+    }))
+
+    return NextResponse.json({ success: true, data: shaped })
   } catch (error) {
     console.error("Public book copies error:", error)
     return NextResponse.json(

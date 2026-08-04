@@ -313,10 +313,12 @@ model BookAuthor {
   base_workmark   String?  @db.VarChar(5)
   final_workmark  String?  @db.VarChar(10)
   display_order   Int      @default(1)
+  is_active       Boolean  @default(true)
   created_at      DateTime @default(now()) @db.Timestamp(0)
   book            Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
 
   @@index([book_id])
+  @@index([is_active])
   @@map("book_author")
 }
 
@@ -331,10 +333,12 @@ model BookContributor {
   base_workmark   String?  @db.VarChar(5)
   final_workmark  String?  @db.VarChar(10)
   display_order   Int      @default(1)
+  is_active       Boolean  @default(true)
   created_at      DateTime @default(now()) @db.Timestamp(0)
   book            Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
 
   @@index([book_id])
+  @@index([is_active])
   @@map("book_contributor")
 }
 

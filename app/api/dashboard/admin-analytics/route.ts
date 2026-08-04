@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     const yearStart = startOfYearInTz(now, TIMEZONE)
     // Pre-compute the three longer-range bucket lists so each
     // Promise.all arm can just await its own slice.
-    const dayBuckets30 = getDayBucketsInTz(30, now, TIMEZONE)
+    const dayBuckets30 = getDayBucketsInTz(30, now, TIMEZONE, true)
     const monthBuckets12 = getMonthBucketsInTz(12, now, TIMEZONE)
 
     // Optional entrance filter from the user-entry tab. When set

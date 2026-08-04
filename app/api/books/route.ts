@@ -42,7 +42,12 @@ function normalizeMaterialType(v?: string): MaterialType | undefined {
     'other': MaterialType.OTHER,
   }
   const key = v.toString().trim().toLowerCase()
-  return map[key] ?? undefined
+  // Values added through the quick actions land in the
+  // `book_catalog_value` table as free text. Anything that
+  // isn't one of the known enum labels falls back to OTHER
+  // so the new material type still persists on the book
+  // instead of silently reverting to the DB default.
+  return map[key] ?? MaterialType.OTHER
 }
 
 function mapCodeToStatus(code?: string) {

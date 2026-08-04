@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import Swal from 'sweetalert2'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +20,6 @@ export default function HolidaysPage() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString())
   const [showModal, setShowModal] = useState(false)
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -136,7 +136,20 @@ export default function HolidaysPage() {
     setShowModal(true)
   }
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number, name: string) => {
+    const result = await Swal.fire({
+      title: 'Delete Holiday',
+      html: `Are you sure you want to delete <strong>${name}</strong>?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: 'Yes, delete it',
+      cancelButtonText: 'Cancel'
+    })
+
+    if (!result.isConfirmed) return
+
     try {
       const response = await fetch(`/api/holidays/${id}`, {
         method: 'DELETE',
@@ -145,11 +158,10 @@ export default function HolidaysPage() {
 
       if (response.ok) {
         await notify.success('Success', 'Holiday deleted successfully')
-        setDeleteConfirm(null)
         fetchHolidays()
       } else {
-        const result = await response.json()
-        await notify.error('Error', result.error || 'Failed to delete holiday')
+        const data = await response.json()
+        await notify.error('Error', data.error || 'Failed to delete holiday')
       }
     } catch (error) {
       console.error('Error deleting holiday:', error)
@@ -159,28 +171,39 @@ export default function HolidaysPage() {
 
   const handleApplyRecurring = async () => {
     const year = parseInt(filterYear)
-    
-    if (window.confirm(`Apply all recurring holidays to year ${year}? This will create new holiday entries for each recurring holiday.`)) {
-      try {
-        const response = await fetch('/api/holidays/recurring', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ year })
-        })
 
-        const result = await response.json()
+    const result = await Swal.fire({
+      title: 'Apply Recurring Holidays',
+      html: `Apply all recurring holidays to year <strong>${year}</strong>?<br><br>This will create new holiday entries for each recurring holiday that doesn&apos;t already exist for that year.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#0d6efd',
+      cancelButtonColor: '#6c757d',
+      confirmButtonText: `Yes, apply to ${year}`,
+      cancelButtonText: 'Cancel'
+    })
 
-        if (response.ok) {
-          await notify.success('Success', result.message || 'Recurring holidays applied')
-          fetchHolidays()
-        } else {
-          await notify.error('Error', result.error || 'Failed to apply recurring holidays')
-        }
-      } catch (error) {
-        console.error('Error applying recurring holidays:', error)
-        await notify.error('Error', 'Network error occurred')
+    if (!result.isConfirmed) return
+
+    try {
+      const response = await fetch('/api/holidays/recurring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ year })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        await notify.success('Success', data.message || 'Recurring holidays applied')
+        fetchHolidays()
+      } else {
+        await notify.error('Error', data.error || 'Failed to apply recurring holidays')
       }
+    } catch (error) {
+      console.error('Error applying recurring holidays:', error)
+      await notify.error('Error', 'Network error occurred')
     }
   }
 
@@ -408,40 +431,22 @@ export default function HolidaysPage() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          {deleteConfirm === holiday.holiday_id ? (
-                            <div className="flex items-center justify-end space-x-2">
-                              <button
-                                onClick={() => handleDelete(holiday.holiday_id)}
-                                className="text-red-600 hover:text-red-900"
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                onClick={() => setDeleteConfirm(null)}
-                                className="text-gray-600 hover:text-gray-900"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-end space-x-3">
-                              <button
-                                onClick={() => handleEdit(holiday)}
-                                className="bg-primary-600 hover:bg-primary-700 text-white px-3 rounded-md py-2"
-                                title="Edit"
-                              >
-                                <i className="fas fa-edit"></i>
-                              </button>
-                              <button
-                                onClick={() => setDeleteConfirm(holiday.holiday_id)}
-                                className="border-2 rounded-md !border-red-600 px-3 hover:text-red-600 py-2"
-                                title="Delete"
-                              >
-                                <i className="fas fa-trash"></i>
-                              </button>
-                              {/*  */}
-                            </div>
-                          )}
+                          <div className="flex items-center justify-end space-x-3">
+                            <button
+                              onClick={() => handleEdit(holiday)}
+                              className="bg-primary-600 hover:bg-primary-700 text-white px-3 rounded-md py-2"
+                              title="Edit"
+                            >
+                              <i className="fas fa-edit"></i>
+                            </button>
+                            <button
+                              onClick={() => handleDelete(holiday.holiday_id, holiday.name)}
+                              className="border-2 rounded-md !border-red-600 px-3 hover:bg-red-50 py-2"
+                              title="Delete"
+                            >
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

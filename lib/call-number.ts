@@ -55,4 +55,55 @@ export function generateCallNumber(data: CallNumberInput): string {
   return parts.join(' ')
 }
 
+export interface ParsedCallNumber {
+  section: string
+  classification: string
+  cutter: string
+  workmark: string
+  year: string
+}
+
+/**
+ * Parse a call number string into its components.
+ *
+ * Format: {Section} {Classification} {Cutter}{Workmark} {Year}
+ * Example: "CIR 020 R69h 1999"
+ *   → { section: "CIR", classification: "020", cutter: "R69", workmark: "h", year: "1999" }
+ */
+export function parseCallNumber(callNumber: string): ParsedCallNumber | null {
+  if (!callNumber || !callNumber.trim()) return null
+
+  const parts = callNumber.trim().split(/\s+/)
+
+  // Minimum: section + classification + cutter
+  if (parts.length < 3) return null
+
+  const section = parts[0]
+  const classification = parts[1]
+  const cutterWorkmark = parts[2]
+  const year = parts[3] || ''
+
+  // Cutter = [A-Z] + digits, Workmark = lowercase letters
+  const match = cutterWorkmark.match(/^([A-Z]\d+)([a-z]*)$/)
+  if (match) {
+    return { section, classification, cutter: match[1], workmark: match[2] || '', year }
+  }
+
+  // Fallback: treat the whole thing as a cutter with no workmark
+  return { section, classification, cutter: cutterWorkmark, workmark: '', year }
+}
+
+/**
+ * Assemble call number from parsed components.
+ */
+export function assembleCallNumber(parsed: ParsedCallNumber): string {
+  const parts: string[] = []
+  if (parsed.section) parts.push(parsed.section)
+  if (parsed.classification) parts.push(parsed.classification)
+  const cutterWorkmark = parsed.cutter + parsed.workmark
+  if (cutterWorkmark) parts.push(cutterWorkmark)
+  if (parsed.year) parts.push(parsed.year)
+  return parts.join(' ')
+}
+
 export { cutterToDecimal }

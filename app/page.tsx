@@ -238,6 +238,7 @@ export default function HomePage() {
                   <li
                     key={suggestion.id}
                     onClick={() => handleSuggestionClick(suggestion.url)}
+                    onMouseDown={(e) => e.stopPropagation()}
                     className="px-4 py-3 hover:bg-primary-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
                   >
                     <p className="text-sm font-semibold text-gray-900 truncate">
